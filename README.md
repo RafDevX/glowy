@@ -1,42 +1,55 @@
 # Glowy
 
-Glowy is a tool written in Rust to analyze Go code in order to enforce information flow control and detect potentially insecure interference.
+Glowy is a tool written in Rust to analyze Go code in order to enforce
+information flow control and detect potentially insecure interference.
+
+This repository contains the latest version of Glowy, heavily enhanced and
+adjusted for real-world analysis, as developed by
+[Rafael Oliveira](https://github.com/RafDevX) within the scope of his
+[Master's Degree Project](https://github.com/RafDevX/master-thesis) at KTH Royal
+Institute of Technology. However, Glowy's initial conceptualization and
+[first prototype](https://github.com/ist199211-ist19311/glowy-langsec) is the
+work of both [Rafael Oliveira](https://github.com/RafDevX) and
+[Diogo Correia](https://github.com/diogotcorreia) as part of a joint project for
+KTH course DD2525 Language-Based Security. A significant portion of the code has
+been completely rewritten; see
+[diff](https://github.com/RafDevX/glowy/compare/langsec-project-submission...master).
 
 ## Usage Instructions
 
 In order to analyze a Go source file using the Glowy binary, one need only:
 
--   Obtain the tool's source code from the present repository:
+- Obtain the tool's source code from the present repository:
 
-    `$ git clone git@github.com:ist199211-ist199311/glowy`
+  `$ git clone git@github.com:ist199211-ist199311/glowy`
 
--   Compile Glowy:
+- Compile Glowy:
 
-    `$ cargo build --release`
+  `$ cargo build --release`
 
--   Optionally create a convenience link to the binary in the root directory or
-    somewhere on the `$PATH`:
+- Optionally create a convenience link to the binary in the root directory or
+  somewhere on the `$PATH`:
 
-    `$ ln -s target/release/glowy ./glowy`
+  `$ ln -s target/release/glowy ./glowy`
 
--   Annotate the target `.go` files with line comments specifying what source and
-    sink label constraints should be enforced, e.g.:
+- Annotate the target `.go` files with line comments specifying what source and
+  sink label constraints should be enforced, e.g.:
 
-    ```go
-    // (...)
+  ```go
+  // (...)
 
-    // glowy::label::{high}
-    const secret = "hunter12"
+  // glowy::label::{high}
+  const secret = "hunter12"
 
-    // (...)
+  // (...)
 
-    // glowy::sink::{}
-    fmt.Println(result)
-    ```
+  // glowy::sink::{}
+  fmt.Println(result)
+  ```
 
--   Analyze the annotated source file:
+- Analyze the annotated source file:
 
-    `$ ./glowy path/to/file.go`
+  `$ ./glowy path/to/file.go`
 
 Alternatively, Glowy can be compiled and run directly using `$ cargo run --release path/to/file.go`.
 
