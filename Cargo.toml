@@ -6,6 +6,7 @@ edition.workspace = true
 authors.workspace = true
 repository.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [workspace]
 members = [".", "parser"]
@@ -19,6 +20,7 @@ edition = "2021"
 authors = ["Rafael Oliveira", "Diogo Correia"]
 repository = "https://github.com/ist199211-ist199311/glowy-langsec"
 license = "MIT"
+rust-version = "1.82"
 
 [dependencies]
 codespan-reporting.workspace = true
