@@ -7,6 +7,7 @@ pkgs.mkShellNoCC {
     rustc
     cargo
     rustfmt
+    gcc # need cc linker
 
     rust-analyzer
     clippy
