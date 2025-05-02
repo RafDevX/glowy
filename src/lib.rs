@@ -27,4 +27,5 @@ pub use analyzer::Analyzer;
 pub use files::SourceFile;
 
 mod analyzer;
+mod context;
 mod files;

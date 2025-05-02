@@ -4,7 +4,10 @@ use std::{
     path,
 };
 
-use crate::SourceFile;
+use crate::{
+    context::{AnalysisContext, AnalysisStage},
+    SourceFile,
+};
 
 /// Primary orchestrator and conductor of the analysis process.
 ///
@@ -184,6 +187,32 @@ impl Analyzer {
     }
 
     pub fn analyze(&self) {
-        todo!()
+        // Stage #1: RecordDeclarations (default for AnalysisContext)
+        //     An initial pass through all files to find top-level declarations
+        //     and record what symbols exist, since they can be referenced from
+        //     anywhere in any order (even textually before their definition).
+        //     This is also used to scaffold sub-module hierarchies and package
+        //     scopes.
+
+        let mut context = AnalysisContext::new();
+
+        // ----- TODO -----
+
+        // Stage #2: StabilizeLabels
+        //     Repeatedly visit symbols and assign them labels (per taint
+        //     propagation) until all labels stabilize. This must be repeated
+        //     to support, for example, mutually recursive functions.
+
+        context.set_stage(AnalysisStage::StabilizeLabels);
+
+        // ----- TODO -----
+
+        // Stage #3: EnforceSecurityPolicies
+        //     A final pass through all files to find and report data flow
+        //     violations, now that labels are final.
+
+        context.set_stage(AnalysisStage::EnforceSecurityPolicies);
+
+        // ----- TODO -----
     }
 }
