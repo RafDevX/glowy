@@ -25,7 +25,7 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-type FullPackagePath = String; // e.g. example.com/org/something/auth
+use crate::FullPackagePath;
 
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers

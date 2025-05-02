@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     context::{AnalysisContext, AnalysisStage},
-    SourceFile,
+    FullPackagePath, SourceFile,
 };
 
 /// Primary orchestrator and conductor of the analysis process.
@@ -25,7 +25,10 @@ use crate::{
 /// let result = analyzer.analyze();
 /// ```
 pub struct Analyzer {
-    module_base: String,
+    /// Go module path base, such as `example.com/company-name/proj`
+    module_base: FullPackagePath,
+    /// Files to analyze, always ordered by (virtual) file path
+    /// (Ordering reduces the need for switching context between packages)
     files: Vec<SourceFile>,
 }
 
@@ -183,7 +186,12 @@ impl Analyzer {
     /// analyzer.add_file(file);
     /// ```
     pub fn add_file(&mut self, file: SourceFile) {
-        self.files.push(file);
+        // find the right spot for the file to not break sorting order
+        let index = self
+            .files
+            .partition_point(|x| x.virtual_path() <= file.virtual_path());
+
+        self.files.insert(index, file);
     }
 
     pub fn analyze(&self) {

@@ -94,4 +94,23 @@ impl SourceFile {
 
         Ok(Self::new(virtual_path.into(), contents))
     }
+
+    /// Returns the source file's virtual path.
+    ///
+    /// This virtual path is always rooted and bound to the Go module base.
+    /// For example, `/auth/oidc.go` or `/main.go` correspond to specific Go
+    /// files within the module hierarchy, but do not (necessarily) match the
+    /// files' real paths on disk.
+    pub fn virtual_path(&self) -> &Path {
+        &self.virtual_path
+    }
+
+    /// Returns the file's contents (Go source code).
+    ///
+    /// Note that each file is only read from the filesystem at most one time
+    /// (if ever), so any changes to some underlying real file on disk will not
+    /// be reflected here.
+    pub fn contents(&self) -> &str {
+        &self.contents
+    }
 }

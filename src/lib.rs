@@ -30,3 +30,5 @@ mod analyzer;
 mod context;
 mod files;
 mod symbols;
+
+type FullPackagePath = String; // e.g. example.com/org/something/auth
