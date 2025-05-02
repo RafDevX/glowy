@@ -15,10 +15,7 @@
 //! ## Example Usage
 //!
 //! ```
-//! let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
-//!
-//! let file = glowy::SourceFile::read_from_disk("/main.go", "./proj/main.go")?;
-//! analyzer.add_file(file);
+//! let mut analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
 //!
 //! let result = analyzer.analyze();
 //! ```
@@ -47,10 +44,7 @@ mod files;
 /// # Example Usage
 ///
 /// ```
-/// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
-///
-/// let file = glowy::SourceFile::read_from_disk("/main.go", "./proj/main.go")?;
-/// analyzer.add_file(file);
+/// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
 ///
 /// let result = analyzer.analyze();
 /// ```
@@ -76,13 +70,52 @@ impl Analyzer {
     ///
     /// # See Also
     ///
-    /// It's often more convenient to use the [`Analyzer::from_go_mod`] utility
-    /// instead, which is a helpful wrapper around this method.
+    /// It's often more convenient to instead use the
+    /// [`Analyzer::from_directory`] utility or [`Analyzer::from_go_mod`], which
+    /// are helpful wrappers around this method.
     pub fn new(module_base: &str) -> Self {
         Self {
             module_base: module_base.to_owned(),
             files: Vec::new(),
         }
+    }
+
+    /// Constructs a new instance of [`Analyzer`] from a Go module directory.
+    ///
+    /// This is the recommended constructor for most situations, where all
+    /// Go source code files should be read from a unified directory on disk,
+    /// the root of which contains a `go.mod` file that specifies the base
+    /// module path (via a `module` directive).
+    ///
+    /// Internally, this method uses [`Analyzer::from_go_mod`] and
+    /// [`SourceFile::read_from_disk`], so their respective conditions apply.
+    /// In particular, this method returns `Ok(None)` if no valid `module`
+    /// directive was found in the `go.mod` file.
+    ///
+    /// # Errors
+    ///
+    /// An [`std::io::Error`] is returned if any filesystem operation fails,
+    /// including (but not limited to):
+    ///     - if the specified path does not correspond to an (accessible)
+    ///       directory;
+    ///     - if no `go.mod` file exists or could be opened;
+    ///     - if a file with `.go` extension could not be read or contains
+    ///       invalid UTF-8 sequences.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+    /// ```
+    pub fn from_directory<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
+        let mut analyzer = match Self::from_go_mod(path.as_ref().join("go.mod"))? {
+            Some(analyzer) => analyzer,
+            None => return Ok(None),
+        };
+
+        analyzer.add_directory_recurs(path::Component::RootDir, path)?;
+
+        Ok(Some(analyzer))
     }
 
     /// Constructs a new instance of [`Analyzer`] based on a `go.mod` file.
@@ -127,6 +160,40 @@ impl Analyzer {
         }
 
         Ok(None)
+    }
+
+    fn add_directory_recurs<V: AsRef<path::Path>, R: AsRef<path::Path>>(
+        &mut self,
+        virtual_path: V,
+        real_path: R,
+    ) -> io::Result<()> {
+        for entry in fs::read_dir(real_path)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+
+            if file_type.is_dir() {
+                self.add_directory_recurs(
+                    virtual_path.as_ref().join(entry.file_name()),
+                    entry.path(),
+                )?;
+            } else if file_type.is_file() {
+                let real_path = entry.path();
+
+                if real_path.extension().filter(|e| *e == "go").is_none() {
+                    continue;
+                }
+
+                let file = SourceFile::read_from_disk(
+                    virtual_path.as_ref().join(entry.file_name()),
+                    real_path,
+                )?;
+
+                self.add_file(file);
+            }
+            // else: file is a symlink; ignore (unsupported)
+        }
+
+        Ok(())
     }
 
     /// Adds a new file to be analyzed.
