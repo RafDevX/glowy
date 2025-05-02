@@ -1,11 +1,17 @@
-pub struct AnalysisContext {
+use crate::symbols::SymbolTable;
+
+pub struct AnalysisContext<'a> {
+    /// Current step of the analysis
     stage: AnalysisStage,
+    /// Global symbol manager, including all scope logic
+    symbol_table: SymbolTable<'a>,
 }
 
-impl AnalysisContext {
+impl AnalysisContext<'_> {
     pub fn new() -> Self {
         AnalysisContext {
             stage: AnalysisStage::default(),
+            symbol_table: SymbolTable::new(),
         }
     }
 

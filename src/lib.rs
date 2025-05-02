@@ -29,3 +29,4 @@ pub use files::SourceFile;
 mod analyzer;
 mod context;
 mod files;
+mod symbols;
