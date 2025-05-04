@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     io::{self, BufRead},
     path,
@@ -6,7 +7,7 @@ use std::{
 
 use crate::{
     context::{AnalysisContext, AnalysisStage},
-    errors::AnalysisError,
+    errors::{AnalysisError, AnalysisErrorKind},
     FullPackagePath, SourceFile,
 };
 
@@ -186,6 +187,12 @@ impl Analyzer {
     /// let file = glowy::SourceFile::read_from_disk("/main.go", "./proj/main.go")?;
     /// analyzer.add_file(file);
     /// ```
+    ///
+    /// # See Also
+    ///
+    /// When applicable, prefer using [`Analyzer::from_directory`] rather than
+    /// manually re-implementing its logic with direct invocations of this
+    /// method.
     pub fn add_file(&mut self, file: SourceFile) {
         // find the right spot for the file to not break sorting order
         let index = self
@@ -195,7 +202,60 @@ impl Analyzer {
         self.files.insert(index, file);
     }
 
+    /// Inspects the registered files for security policy violations.
+    ///
+    /// This encapsulates all principal logic in Glowy. All Go source code files
+    /// registered via [`Analyzer::add_file`] (or [`Analyzer::from_directory`])
+    /// are parsed and then analyzed for potential security vulnerabilities,
+    /// according to this [`Analyzer`]'s configuration.
+    ///
+    /// A return value of `Ok(())` merely indicates that no problems were
+    /// detected, but should not be misconstrued as an assurance that the
+    /// program is categorically secure.
+    ///
+    /// # Errors
+    ///
+    /// If any parsing errors are reported, analysis is aborted and the
+    /// corresponding [`AnalysisError`]s are returned immediately. Otherwise,
+    /// Glowy proceeds with the analysis as intended, ultimately returning
+    /// its conclusions.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+    ///
+    /// if let Err(errors) = analyzer.analyze() {
+    ///     for error in errors {
+    ///         // interpret results
+    ///     }
+    /// }
+    /// ```
     pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
+        let mut parsed = BTreeMap::new();
+        let mut parse_errors = vec![];
+
+        for file in &self.files {
+            match parser::parse(file.contents()) {
+                Ok(ast) => {
+                    if parsed.insert(file.virtual_path(), ast).is_some() {
+                        parse_errors.push(AnalysisError {
+                            file: file.virtual_path(),
+                            kind: AnalysisErrorKind::DuplicateVirtualFilePath,
+                        })
+                    }
+                }
+                Err(e) => parse_errors.push(AnalysisError {
+                    file: file.virtual_path(),
+                    kind: e.into(),
+                }),
+            }
+        }
+
+        if !parse_errors.is_empty() {
+            return Err(parse_errors);
+        }
+
         // Stage #1: RecordDeclarations (default for AnalysisContext)
         //     An initial pass through all files to find top-level declarations
         //     and record what symbols exist, since they can be referenced from
