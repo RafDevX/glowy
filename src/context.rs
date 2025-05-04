@@ -43,6 +43,12 @@ impl<'a> AnalysisContext<'a> {
     }
 }
 
+impl Default for AnalysisContext<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> From<AnalysisContext<'a>> for Result<(), Vec<AnalysisError<'a>>> {
     fn from(ctx: AnalysisContext<'a>) -> Self {
         if ctx.errors.is_empty() {
