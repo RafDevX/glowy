@@ -6,6 +6,7 @@ use std::{
 
 use crate::{
     context::{AnalysisContext, AnalysisStage},
+    errors::AnalysisError,
     FullPackagePath, SourceFile,
 };
 
@@ -194,7 +195,7 @@ impl Analyzer {
         self.files.insert(index, file);
     }
 
-    pub fn analyze(&self) {
+    pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
         // Stage #1: RecordDeclarations (default for AnalysisContext)
         //     An initial pass through all files to find top-level declarations
         //     and record what symbols exist, since they can be referenced from
@@ -222,5 +223,7 @@ impl Analyzer {
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
         // ----- TODO -----
+
+        Result::from(context)
     }
 }

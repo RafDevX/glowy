@@ -28,6 +28,7 @@ pub use files::SourceFile;
 
 mod analyzer;
 mod context;
+pub mod errors;
 mod files;
 mod symbols;
 
