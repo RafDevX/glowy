@@ -84,16 +84,18 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn select_first_child_scope(&mut self) {
-        let child = if let Some(child) = self.current_scope.clone().borrow().children.first() {
-            child.clone()
-        } else {
-            let new_scope = Scope::new_ref(self.current_scope.clone());
-            self.current_scope
-                .borrow_mut()
-                .children
-                .push(new_scope.clone());
+        let child = {
+            let mut scope = self.current_scope.borrow_mut();
 
-            new_scope
+            match scope.children.first().cloned() {
+                Some(existing) => existing,
+                None => {
+                    let new_scope = Scope::new_ref(self.current_scope.clone());
+                    scope.children.push(new_scope.clone());
+
+                    new_scope
+                }
+            }
         };
 
         self.current_scope = child;
@@ -115,13 +117,17 @@ impl<'a> SymbolTable<'a> {
     pub fn select_next_sibling_scope(&mut self) {
         if let Some(parent) = self.get_parent_scope() {
             if let Some(index) = self.current_cursor.last_mut() {
-                let sibling = if let Some(sibling) = parent.borrow().children.get(*index + 1) {
-                    sibling.clone()
-                } else {
-                    let new_scope = Scope::new_ref(parent.clone());
-                    parent.borrow_mut().children.push(new_scope.clone());
+                let sibling = {
+                    let mut parent_borrowed = parent.borrow_mut();
 
-                    new_scope
+                    if let Some(sibling) = parent_borrowed.children.get(*index + 1).cloned() {
+                        sibling
+                    } else {
+                        let new_scope = Scope::new_ref(parent.clone());
+                        parent_borrowed.children.push(new_scope.clone());
+
+                        new_scope
+                    }
                 };
 
                 self.current_scope = sibling;
