@@ -161,6 +161,12 @@ impl<'a> SymbolTable<'a> {
     }
 }
 
+impl Default for SymbolTable<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 struct PackageScopeEnvelope<'a> {
     /// Package name (!= package path's last component)
     package_name: ScopedSpan<'a>,
