@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     context::{AnalysisContext, AnalysisStage},
+    decls,
     errors::{AnalysisError, AnalysisErrorKind},
     FullPackagePath, SourceFile,
 };
@@ -265,6 +266,14 @@ impl Analyzer {
 
         let mut context = AnalysisContext::new();
 
+        for (path, ast) in &parsed {
+            context.set_current_file(path);
+
+            let package_path = compute_package_path(&self.module_base, path);
+
+            decls::visit_source_file(&mut context, ast, package_path);
+        }
+
         // ----- TODO -----
 
         // Stage #2: StabilizeLabels
@@ -297,4 +306,13 @@ fn valid_module_path(candidate: &str) -> bool {
         && candidate
             .split('/')
             .all(|el| !el.is_empty() && !el.starts_with('.') && !el.ends_with('.'));
+}
+
+fn compute_package_path(module_base: &str, virtual_file_path: &path::Path) -> FullPackagePath {
+    let dir_path = match virtual_file_path.parent() {
+        Some(path) => path.to_string_lossy(),
+        None => unreachable!("Malformed virtual file path = {virtual_file_path:?}"),
+    };
+
+    module_base.to_owned() + dir_path.trim_end_matches('/') // trim for root e.g. /main.go
 }

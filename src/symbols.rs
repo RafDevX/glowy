@@ -1,18 +1,27 @@
 // We support analyzing a single Go module, which contains one
-// root package (with name = last segment of module path) and
+// root package (with name = last segment of module path *) and
 // possibly several more sub-packages. For example:
 //
 //     project-root-directory/
 //         go.mod (<-- contains "module example.com/org/something")
-//         puppies.go (<-- contains "package something")
+//         puppies.go (<-- contains "package something" *)
 //         auth/
-//             login.go (<-- contains "package auth")
+//             login.go (<-- contains "package auth" *)
 //
 // In the example above, `puppies.go` can import `auth` with:
 // `import "example.com/org/something/auth"` and access public
 // symbols exported in `login.go` (i.e., Capitalized).
 //
 // reference: https://go.dev/doc/modules/layout#multiple-packages
+//
+// (*) Actually: despite convention, Go does not really require the
+// package name to correspond to the last segment of the package
+// path (which is what is used in imports). A file in `utils/ui.go`
+// can state `package weird` instead of `package utils`, which then
+// becomes the package name (and must be the same for all files in
+// `utils/`). When another package imports "example.com/.../utils",
+// the package comes into scope as `weird` and not `utils` (unless
+// an alias is defined when importing).
 
 // Note: when `import p "path"`, `p` can ONLY be used in qualified
 // identifiers (`p.Func`) -- `k := p` and `fmt.Println(p)` fail.
@@ -25,13 +34,13 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::FullPackagePath;
+use crate::{FullPackagePath, ScopedSpan};
 
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers
     universe_scope: Scope<'a>,
     /// Root scopes associated with each package
-    package_scopes: HashMap<FullPackagePath, ScopeRef<'a>>,
+    package_scopes: HashMap<FullPackagePath, PackageScopeEnvelope<'a>>,
 
     /// Currently selected (package or sub-package) scope
     current_scope: ScopeRef<'a>,
@@ -55,15 +64,23 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
-    pub fn enter_package(&mut self, path: FullPackagePath) {
-        let package_scope = self
+    pub fn enter_package(
+        &mut self,
+        name: ScopedSpan<'a>,
+        path: FullPackagePath,
+    ) -> &ScopedSpan<'a> {
+        // note that name cannot be derived from path!
+        // (must be taken from package clause, may differ from dirname)
+
+        let envelope = self
             .package_scopes
             .entry(path)
-            .or_insert_with(Scope::new_root_ref)
-            .clone();
+            .or_insert_with(|| PackageScopeEnvelope::new(name));
 
-        self.current_scope = package_scope;
+        self.current_scope = envelope.scope.clone();
         self.current_cursor = Vec::new();
+
+        &envelope.package_name
     }
 
     pub fn select_first_child_scope(&mut self) {
@@ -131,6 +148,24 @@ impl<'a> SymbolTable<'a> {
         }
 
         self.universe_scope.get_local_symbol(name)
+    }
+}
+
+struct PackageScopeEnvelope<'a> {
+    /// Package name (!= package path's last component)
+    package_name: ScopedSpan<'a>,
+    /// The package's root scope
+    scope: ScopeRef<'a>,
+}
+
+impl<'a> PackageScopeEnvelope<'a> {
+    fn new(package_name: ScopedSpan<'a>) -> Self {
+        let scope = Scope::new_root_ref();
+
+        Self {
+            package_name,
+            scope,
+        }
     }
 }
 

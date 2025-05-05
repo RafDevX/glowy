@@ -19,7 +19,9 @@
 
 use std::path::Path;
 
-use parser::ParsingError;
+use parser::{ParsingError, Span};
+
+use crate::ScopedSpan;
 
 /// Represents an issue arising from Glowy analysis.
 ///
@@ -61,13 +63,27 @@ pub enum AnalysisErrorKind<'a> {
     /// The file in question was registered multiple times with the Glowy
     /// analyzer, potentially with distinct content.
     DuplicateVirtualFilePath,
+
+    /// Declared package name different from expectation.
+    ///
+    /// A Go file's package clause defines a package name different from
+    /// what was already declared by another file within the same package.
+    /// This file is thus skipped from further analysis.
+    DistinctPackageName {
+        /// The previously declared package name.
+        previous: ScopedSpan<'a>,
+        /// The disparate package clause identifier.
+        found: Span<'a>,
+    },
 }
 
 impl<'a> AnalysisErrorKind<'a> {
     /// Returns a general category to which the error kind belongs.
     pub fn category(&self) -> AnalysisErrorCategory {
         match self {
-            Self::Parsing(..) => AnalysisErrorCategory::InvalidGo,
+            Self::Parsing(..) | Self::DistinctPackageName { .. } => {
+                AnalysisErrorCategory::InvalidGo
+            }
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
     }

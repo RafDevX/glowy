@@ -1,8 +1,11 @@
 use std::path::Path;
 
+use parser::Span;
+
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
     symbols::SymbolTable,
+    ScopedSpan,
 };
 
 pub struct AnalysisContext<'a> {
@@ -26,6 +29,14 @@ impl<'a> AnalysisContext<'a> {
         }
     }
 
+    pub fn symtab(&self) -> &SymbolTable<'a> {
+        &self.symbol_table
+    }
+
+    pub fn symtab_mut(&mut self) -> &mut SymbolTable<'a> {
+        &mut self.symbol_table
+    }
+
     pub fn set_stage(&mut self, stage: AnalysisStage) {
         self.stage = stage;
     }
@@ -40,6 +51,15 @@ impl<'a> AnalysisContext<'a> {
                 self.errors.push(AnalysisError { file, kind });
             }
         }
+    }
+
+    pub fn scope_span(&self, span: &Span<'a>) -> ScopedSpan<'a> {
+        let file = self
+            .current_file
+            .expect("some file should be under analysis")
+            .to_owned();
+
+        ScopedSpan::new(file, span.clone())
     }
 }
 
