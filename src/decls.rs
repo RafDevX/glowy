@@ -75,6 +75,13 @@ fn visit_binding_decl_spec<'a>(
 }
 
 fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
+    if node.name.content() == "init" {
+        // init functions are not actually declared (and there may be multiple
+        // defined, even in the same file). note that this only applies for
+        // top-level declarations (i.e., package scope), not anywhere else
+        return;
+    }
+
     declare_new_symbol(ctx, &node.name, false);
 }
 
