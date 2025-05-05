@@ -75,15 +75,26 @@ pub enum AnalysisErrorKind<'a> {
         /// The disparate package clause identifier.
         found: Span<'a>,
     },
+    /// Invalid declaration of existing symbol in the same scope.
+    ///
+    /// Go only permits redeclarations under very specific circumstances of
+    /// multi-variable short-form declarations. Glowy will proceed as if the
+    /// declaration was valid, but the resulting analysis may be incorrect.
+    IllegalRedeclaration {
+        /// The site of the previous declaration with the same name.
+        previous: ScopedSpan<'a>,
+        /// The matching identifier causing an illegal attempt at redeclaration.
+        found: Span<'a>,
+    },
 }
 
 impl<'a> AnalysisErrorKind<'a> {
     /// Returns a general category to which the error kind belongs.
     pub fn category(&self) -> AnalysisErrorCategory {
         match self {
-            Self::Parsing(..) | Self::DistinctPackageName { .. } => {
-                AnalysisErrorCategory::InvalidGo
-            }
+            Self::Parsing(..)
+            | Self::DistinctPackageName { .. }
+            | Self::IllegalRedeclaration { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
     }

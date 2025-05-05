@@ -4,7 +4,7 @@ use parser::Span;
 
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
-    symbols::SymbolTable,
+    symbols::{SymbolRef, SymbolTable},
     ScopedSpan,
 };
 
@@ -60,6 +60,21 @@ impl<'a> AnalysisContext<'a> {
             .to_owned();
 
         ScopedSpan::new(file, span.clone())
+    }
+
+    /// Shorthand to declare a new symbol in the [`SymbolTable`] and report
+    /// an error if the current scope already had it defined.
+    ///
+    /// This method should not be used if redeclarations are allowed (i.e., in
+    /// some multi-variable short declarations, under some circumstances, as
+    /// defined in the Go spec).
+    pub fn declare_new_symbol(&mut self, name: &Span<'a>, symbol: SymbolRef<'a>) {
+        if let Some(existing) = self.symbol_table.declare_new_symbol(name.content(), symbol) {
+            self.report_error(AnalysisErrorKind::IllegalRedeclaration {
+                previous: existing.borrow().declared_name().clone(),
+                found: name.clone(),
+            });
+        }
     }
 }
 

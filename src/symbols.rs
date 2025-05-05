@@ -130,7 +130,7 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
-    pub fn get_symbol(&self, name: &str) -> Option<SymbolRef> {
+    pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
         let mut checking = Some(self.current_scope.clone());
 
         while let Some(scope) = checking {
@@ -148,6 +148,16 @@ impl<'a> SymbolTable<'a> {
         }
 
         self.universe_scope.get_local_symbol(name)
+    }
+
+    pub fn declare_new_symbol(
+        &mut self,
+        name: &'a str,
+        symbol: SymbolRef<'a>,
+    ) -> Option<SymbolRef<'a>> {
+        self.current_scope
+            .borrow_mut()
+            .set_local_symbol(name, symbol)
     }
 }
 
@@ -178,7 +188,7 @@ type ScopeRef<'a> = Rc<RefCell<Scope<'a>>>;
 // concerns), hence this separate Scope struct.
 struct Scope<'a> {
     /// Mapping between name (identifier) and its corresponding symbol
-    symbols: HashMap<&'a str, SymbolRef>,
+    symbols: HashMap<&'a str, SymbolRef<'a>>,
 
     /// Parent scope, unless this is the root scope (package block, & universe)
     parent: Option<ScopeRef<'a>>,
@@ -205,18 +215,42 @@ impl<'a> Scope<'a> {
         Rc::new(RefCell::new(Self::new(None)))
     }
 
-    fn get_local_symbol(&self, name: &str) -> Option<SymbolRef> {
+    fn get_local_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
         self.symbols.get(name).cloned()
+    }
+
+    fn set_local_symbol(&mut self, name: &'a str, symbol: SymbolRef<'a>) -> Option<SymbolRef<'a>> {
+        self.symbols.insert(name, symbol)
     }
 }
 
 // Scopes cannot own Symbols directly because multiple scopes may need to refer
 // to the same symbol (e.g., a closure can refer to variables in the outer scope
 // and both functions, inner and outer, share a reference to the same symbol)
-pub type SymbolRef = Rc<RefCell<Symbol>>;
+pub type SymbolRef<'a> = Rc<RefCell<Symbol<'a>>>;
 
-pub struct Symbol {
+#[derive(Debug)]
+pub struct Symbol<'a> {
+    /// Original symbol name within symbol declaration
+    declared_name: ScopedSpan<'a>,
     /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`)
     mutable: bool,
     // ... label_backtrace
+}
+
+impl<'a> Symbol<'a> {
+    fn new(declared_name: ScopedSpan<'a>, mutable: bool) -> Self {
+        Self {
+            declared_name,
+            mutable,
+        }
+    }
+
+    pub fn new_ref(declared_name: ScopedSpan<'a>, mutable: bool) -> SymbolRef<'a> {
+        Rc::new(RefCell::new(Self::new(declared_name, mutable)))
+    }
+
+    pub fn declared_name(&self) -> &ScopedSpan<'a> {
+        &self.declared_name
+    }
 }

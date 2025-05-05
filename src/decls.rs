@@ -1,9 +1,14 @@
 //! Used exclusively for Stage 1: RecordDeclarations
 //! (visit top-level declarations)
 
-use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
+use parser::{
+    ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode},
+    Span,
+};
 
-use crate::{context::AnalysisContext, errors::AnalysisErrorKind, FullPackagePath};
+use crate::{
+    context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol, FullPackagePath,
+};
 
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
@@ -64,9 +69,17 @@ fn visit_binding_decl_spec<'a>(
     node: &BindingDeclSpecNode<'a>,
     mutable: bool,
 ) {
-    todo!()
+    for (name, _) in &node.mapping {
+        declare_new_symbol(ctx, name, mutable);
+    }
 }
 
 fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
-    todo!()
+    declare_new_symbol(ctx, &node.name, false);
+}
+
+fn declare_new_symbol<'a>(ctx: &mut AnalysisContext<'a>, name: &Span<'a>, mutable: bool) {
+    let symbol = Symbol::new_ref(ctx.scope_span(name), mutable);
+
+    ctx.declare_new_symbol(name, symbol);
 }
