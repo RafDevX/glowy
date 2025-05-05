@@ -134,7 +134,7 @@ impl Analyzer {
                 // TODO: support alternative syntax per spec
                 // "(" newline ModulePath newline ")"
 
-                if !base.is_empty() {
+                if valid_module_path(base) {
                     return Ok(Some(Self::new(base)));
                 }
             }
@@ -286,4 +286,15 @@ impl Analyzer {
 
         Result::from(context)
     }
+}
+
+// https://go.dev/ref/mod#go-mod-file-ident (not an exhaustive check)
+fn valid_module_path(candidate: &str) -> bool {
+    return !candidate.is_empty()
+        && candidate.is_ascii()
+        && !candidate.starts_with('/')
+        && !candidate.ends_with('/')
+        && candidate
+            .split('/')
+            .all(|el| !el.is_empty() && !el.starts_with('.') && !el.ends_with('.'));
 }
