@@ -9,7 +9,7 @@ use crate::{
     context::{AnalysisContext, AnalysisStage},
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
-    FullPackagePath, SourceFile,
+    taint, FullPackagePath, SourceFile,
 };
 
 /// Primary orchestrator and conductor of the analysis process.
@@ -274,8 +274,6 @@ impl Analyzer {
             decls::visit_source_file(&mut context, ast, package_path);
         }
 
-        // ----- TODO -----
-
         // Stage #2: StabilizeLabels
         //     Repeatedly visit symbols and assign them labels (per taint
         //     propagation) until all labels stabilize. This must be repeated
@@ -283,7 +281,15 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::StabilizeLabels);
 
-        // ----- TODO -----
+        // TODO: while ...
+
+        for (path, ast) in &parsed {
+            context.set_current_file(path);
+
+            let package_path = compute_package_path(&self.module_base, path);
+
+            taint::visit_source_file(&mut context, ast, package_path);
+        }
 
         // Stage #3: EnforceSecurityPolicies
         //     A final pass through all files to find and report data flow

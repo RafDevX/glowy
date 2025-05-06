@@ -35,6 +35,7 @@ mod decls;
 pub mod errors;
 mod files;
 mod symbols;
+mod taint;
 
 type FullPackagePath = String; // e.g. example.com/org/something/auth
                                // ^ note that auth is not necessarily the package name!
