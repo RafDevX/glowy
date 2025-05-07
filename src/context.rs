@@ -72,6 +72,13 @@ impl<'a> AnalysisContext<'a> {
         let name = symbol.borrow().declared_name().clone();
 
         if let Some(existing) = self.symbol_table.declare_new_symbol(name.content(), symbol) {
+            if *existing.borrow().declared_name() == name {
+                // we do multiple passes over the source code, so it's not an
+                // error if a previous declaration is at the same location as
+                // this "new" one (i.e., if they're actually the same)
+                return;
+            }
+
             self.report_error(AnalysisErrorKind::IllegalRedeclaration {
                 previous: existing.borrow().declared_name().clone(),
                 found: name.span().clone(),
