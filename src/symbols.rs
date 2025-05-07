@@ -46,6 +46,9 @@ pub struct SymbolTable<'a> {
     current_scope: ScopeRef<'a>,
     /// Index in parent scope's children array, for each level (last = current)
     current_cursor: Vec<usize>,
+
+    /// Whether some operations will first trigger entering a child scope
+    primed: bool,
 }
 
 impl<'a> SymbolTable<'a> {
@@ -61,6 +64,8 @@ impl<'a> SymbolTable<'a> {
             // This dead end will then be automatically deleted (by Rc).
             current_scope: Scope::new_root_ref(),
             current_cursor: Vec::new(),
+
+            primed: false,
         }
     }
 
@@ -79,11 +84,14 @@ impl<'a> SymbolTable<'a> {
 
         self.current_scope = envelope.scope.clone();
         self.current_cursor = Vec::new();
+        self.primed = false;
 
         &envelope.package_name
     }
 
     pub fn select_first_child_scope(&mut self) {
+        self.trigger_if_primed();
+
         let child = {
             let mut scope = self.current_scope.borrow_mut();
 
@@ -102,12 +110,44 @@ impl<'a> SymbolTable<'a> {
         self.current_cursor.push(0);
     }
 
+    /// Prepare for potential children scopes.
+    ///
+    /// This is essentially a lazy version of `select_first_child_scope`, since
+    /// it instead defers selecting a child scope until when/if it is actually
+    /// needed, for example immediately before `select_next_sibling_scope`.
+    /// This prevents creating unnecessary scopes, e.g. when traversing package
+    /// top-level declarations where `const`s don't need a separate child scope
+    /// but functions do.
+    pub fn prime_for_children(&mut self) {
+        // if was already primed, then this counts as a triggering operation
+        self.trigger_if_primed();
+
+        self.primed = true;
+    }
+
+    pub fn deprime(&mut self) {
+        self.primed = false;
+    }
+
+    fn trigger_if_primed(&mut self) {
+        if self.primed {
+            self.primed = false;
+            self.select_first_child_scope();
+        }
+    }
+
     fn get_parent_scope(&self) -> Option<ScopeRef<'a>> {
         // None if already at the root (package scope)
         self.current_scope.borrow().parent.clone()
     }
 
     pub fn select_parent_scope(&mut self) {
+        if self.primed {
+            // this is equivalent
+            self.primed = false;
+            return;
+        }
+
         if let Some(parent) = self.get_parent_scope() {
             self.current_scope = parent;
             self.current_cursor.pop();
@@ -115,6 +155,8 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn select_next_sibling_scope(&mut self) {
+        self.trigger_if_primed();
+
         if let Some(parent) = self.get_parent_scope() {
             if let Some(index) = self.current_cursor.last_mut() {
                 let sibling = {
@@ -161,6 +203,8 @@ impl<'a> SymbolTable<'a> {
         name: &'a str,
         symbol: SymbolRef<'a>,
     ) -> Option<SymbolRef<'a>> {
+        self.trigger_if_primed();
+
         self.current_scope
             .borrow_mut()
             .set_local_symbol(name, symbol)

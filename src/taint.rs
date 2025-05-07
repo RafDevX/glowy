@@ -37,9 +37,13 @@ pub fn visit_source_file<'a>(
         return; // skip the file
     }
 
-    select_scope_iter!(ctx, decl in node.top_level_decls => {
+    ctx.symtab_mut().prime_for_children();
+
+    for decl in &node.top_level_decls {
         visit_decl(ctx, decl);
-    });
+    }
+
+    ctx.symtab_mut().deprime();
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
@@ -48,6 +52,10 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
     match node {
         DeclNode::Const { specs, .. } => {}
         DeclNode::Var { specs, .. } => {}
-        DeclNode::Function(func_node) => {}
+        DeclNode::Function(func_node) => {
+            ctx.symtab_mut().select_next_sibling_scope();
+
+            // TODO: ...
+        }
     }
 }
