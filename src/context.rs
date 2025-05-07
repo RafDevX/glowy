@@ -53,13 +53,13 @@ impl<'a> AnalysisContext<'a> {
         }
     }
 
-    pub fn scope_span(&self, span: &Span<'a>) -> ScopedSpan<'a> {
+    pub fn scope_span(&self, span: Span<'a>) -> ScopedSpan<'a> {
         let file = self
             .current_file
             .expect("some file should be under analysis")
             .to_owned();
 
-        ScopedSpan::new(file, span.clone())
+        ScopedSpan::new(file, span)
     }
 
     /// Shorthand to declare a new symbol in the [`SymbolTable`] and report
@@ -68,11 +68,13 @@ impl<'a> AnalysisContext<'a> {
     /// This method should not be used if redeclarations are allowed (i.e., in
     /// some multi-variable short declarations, under some circumstances, as
     /// defined in the Go spec).
-    pub fn declare_new_symbol(&mut self, name: &Span<'a>, symbol: SymbolRef<'a>) {
+    pub fn declare_new_symbol(&mut self, symbol: SymbolRef<'a>) {
+        let name = symbol.borrow().declared_name().clone();
+
         if let Some(existing) = self.symbol_table.declare_new_symbol(name.content(), symbol) {
             self.report_error(AnalysisErrorKind::IllegalRedeclaration {
                 previous: existing.borrow().declared_name().clone(),
-                found: name.clone(),
+                found: name.span().clone(),
             });
         }
     }

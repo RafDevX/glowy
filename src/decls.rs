@@ -1,10 +1,7 @@
 //! Used exclusively for Stage 1: RecordDeclarations
 //! (visit top-level declarations)
 
-use parser::{
-    ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode},
-    Span,
-};
+use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
 
 use crate::{
     context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol, FullPackagePath,
@@ -20,7 +17,7 @@ pub fn visit_source_file<'a>(
     // the first file's package clause (and enforce for all other files to use
     // the same name)
 
-    let package_name = ctx.scope_span(&node.package_clause.id);
+    let package_name = ctx.scope_span(node.package_clause.id.clone());
 
     let original_name = ctx.symtab_mut().enter_package(package_name, package_path);
 
@@ -70,7 +67,9 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
 ) {
     for (name, _) in &node.mapping {
-        declare_new_symbol(ctx, name, mutable);
+        let symbol = Symbol::new_ref(ctx.scope_span(name.clone()), mutable);
+
+        ctx.declare_new_symbol(symbol);
     }
 }
 
@@ -82,11 +81,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         return;
     }
 
-    declare_new_symbol(ctx, &node.name, false);
-}
+    let symbol = Symbol::new_ref(ctx.scope_span(node.name.clone()), false);
 
-fn declare_new_symbol<'a>(ctx: &mut AnalysisContext<'a>, name: &Span<'a>, mutable: bool) {
-    let symbol = Symbol::new_ref(ctx.scope_span(name), mutable);
-
-    ctx.declare_new_symbol(name, symbol);
+    ctx.declare_new_symbol(symbol);
 }
