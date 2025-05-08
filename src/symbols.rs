@@ -33,10 +33,9 @@
 // analysis of a 2nd file doesn't overwrite/reuse children scopes created in a
 // 1st file, so therefore we use [`PackageScopeEnvelope::saved_index`] to keep
 // track of the last child index when switching from one file to the next within
-// the same package. This also means a new `skip_to_child` control, which cannot
-// be the same as priming (i.e., changing `primed` from `bool` to
-// `Option<usize>`) since when entering a package `skip_to_child` must be set
-// but the [`SymbolTable`] should not become primed.
+// the same package. This also means that priming must support keeping track of
+// which child to select (with `Option<usize>`) rather than a simple `bool`
+// (where true would mean 0th).
 
 // We can't use temporary scopes and push/pop them away, because
 // analysis requires multiple iterations to stabilize, meaning we
@@ -57,10 +56,8 @@ pub struct SymbolTable<'a> {
     /// Index in parent scope's children array, for each level (last = current)
     current_cursor: Vec<usize>,
 
-    /// Whether some operations will first trigger entering a child scope
-    primed: bool,
-    /// Whether the next first child selection will actually select the nth
-    skip_to_child: Option<usize>,
+    /// Whether some operations will first trigger entering the nth child scope
+    primed: Option<usize>,
 }
 
 impl<'a> SymbolTable<'a> {
@@ -77,11 +74,11 @@ impl<'a> SymbolTable<'a> {
             current_scope: Scope::new_root_ref(),
             current_cursor: Vec::new(),
 
-            primed: false,
-            skip_to_child: None,
+            primed: None,
         }
     }
 
+    /// Note that this automatically primes the symtab too!
     pub fn enter_package(
         &mut self,
         name: ScopedSpan<'a>,
@@ -97,8 +94,7 @@ impl<'a> SymbolTable<'a> {
 
         self.current_scope = envelope.scope.clone();
         self.current_cursor = Vec::new();
-        self.primed = false;
-        self.skip_to_child = Some(envelope.next_child_index);
+        self.primed = Some(envelope.next_child_index);
 
         &envelope.package_name
     }
@@ -119,11 +115,6 @@ impl<'a> SymbolTable<'a> {
 
     pub fn select_first_child_scope(&mut self) {
         self.trigger_if_primed();
-
-        if let Some(n) = self.skip_to_child {
-            self.skip_to_child = None;
-            return self.select_nth_child_scope(n);
-        }
 
         let child = {
             let mut scope = self.current_scope.borrow_mut();
@@ -163,17 +154,17 @@ impl<'a> SymbolTable<'a> {
         // if was already primed, then this counts as a triggering operation
         self.trigger_if_primed();
 
-        self.primed = true;
+        self.primed = Some(0);
     }
 
     pub fn deprime(&mut self) {
-        self.primed = false;
+        self.primed = None;
     }
 
     fn trigger_if_primed(&mut self) {
-        if self.primed {
-            self.primed = false;
-            self.select_first_child_scope();
+        if let Some(n) = self.primed {
+            self.primed = None;
+            self.select_nth_child_scope(n);
         }
     }
 
@@ -183,13 +174,13 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn select_parent_scope(&mut self) {
-        if self.primed {
-            // this is equivalent
-            self.primed = false;
-            return;
-        }
-
         if let Some(parent) = self.get_parent_scope() {
+            if self.primed.is_some() {
+                // this is equivalent, when we know parent != None
+                self.primed = None;
+                return;
+            }
+
             self.current_scope = parent;
             self.current_cursor.pop();
         }

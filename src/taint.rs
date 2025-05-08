@@ -32,6 +32,7 @@ pub fn visit_source_file<'a>(
     let original_name = ctx
         .symtab_mut()
         .enter_package(package_name, package_path.clone());
+    // ^ automatically primes symtab for children
 
     if original_name.content() != node.package_clause.id.content() {
         // error was already reported in Stage 1 -- [`decls::visit_source_file`]
@@ -39,13 +40,9 @@ pub fn visit_source_file<'a>(
         return; // skip the file
     }
 
-    ctx.symtab_mut().prime_for_children();
-
     for decl in &node.top_level_decls {
         visit_decl(ctx, decl);
     }
-
-    ctx.symtab_mut().deprime();
 
     ctx.symtab_mut().save_package_progress(&package_path);
 }
