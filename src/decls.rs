@@ -19,7 +19,9 @@ pub fn visit_source_file<'a>(
 
     let package_name = ctx.scope_span(node.package_clause.id.clone());
 
-    let original_name = ctx.symtab_mut().enter_package(package_name, package_path);
+    let original_name = ctx
+        .symtab_mut()
+        .enter_package(package_name, package_path.clone());
 
     if original_name.content() != node.package_clause.id.content() {
         // the scope already had a different native identifier, meaning that
@@ -41,6 +43,9 @@ pub fn visit_source_file<'a>(
     for decl in &node.top_level_decls {
         visit_decl(ctx, decl);
     }
+
+    // there should be no package progress to save in the symtab, since
+    // we didn't create any sub-package scopes
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {

@@ -28,6 +28,16 @@
 // This means we don't need to keep track of `p` as a symbol, but
 // can just resolve each qualified identifier individually.
 
+// File scopes are not used because they would just complicate sharing symbols
+// between different packages, but this means we need special handling to ensure
+// analysis of a 2nd file doesn't overwrite/reuse children scopes created in a
+// 1st file, so therefore we use [`PackageScopeEnvelope::saved_index`] to keep
+// track of the last child index when switching from one file to the next within
+// the same package. This also means a new `skip_to_child` control, which cannot
+// be the same as priming (i.e., changing `primed` from `bool` to
+// `Option<usize>`) since when entering a package `skip_to_child` must be set
+// but the [`SymbolTable`] should not become primed.
+
 // We can't use temporary scopes and push/pop them away, because
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
@@ -49,6 +59,8 @@ pub struct SymbolTable<'a> {
 
     /// Whether some operations will first trigger entering a child scope
     primed: bool,
+    /// Whether the next first child selection will actually select the nth
+    skip_to_child: Option<usize>,
 }
 
 impl<'a> SymbolTable<'a> {
@@ -66,6 +78,7 @@ impl<'a> SymbolTable<'a> {
             current_cursor: Vec::new(),
 
             primed: false,
+            skip_to_child: None,
         }
     }
 
@@ -85,12 +98,32 @@ impl<'a> SymbolTable<'a> {
         self.current_scope = envelope.scope.clone();
         self.current_cursor = Vec::new();
         self.primed = false;
+        self.skip_to_child = Some(envelope.next_child_index);
 
         &envelope.package_name
     }
 
+    pub fn save_package_progress(&mut self, path: &FullPackagePath) {
+        if let Some(current) = self.current_cursor.first() {
+            if let Some(envelope) = self.package_scopes.get_mut(path) {
+                envelope.next_child_index = current + 1;
+            }
+        }
+    }
+
+    pub fn clear_all_package_progress(&mut self) {
+        for envelope in self.package_scopes.values_mut() {
+            envelope.next_child_index = 0;
+        }
+    }
+
     pub fn select_first_child_scope(&mut self) {
         self.trigger_if_primed();
+
+        if let Some(n) = self.skip_to_child {
+            self.skip_to_child = None;
+            return self.select_nth_child_scope(n);
+        }
 
         let child = {
             let mut scope = self.current_scope.borrow_mut();
@@ -108,6 +141,14 @@ impl<'a> SymbolTable<'a> {
 
         self.current_scope = child;
         self.current_cursor.push(0);
+    }
+
+    fn select_nth_child_scope(&mut self, index: usize) {
+        self.select_first_child_scope();
+
+        for _ in 0..index {
+            self.select_next_sibling_scope();
+        }
     }
 
     /// Prepare for potential children scopes.
@@ -222,6 +263,8 @@ struct PackageScopeEnvelope<'a> {
     package_name: ScopedSpan<'a>,
     /// The package's root scope
     scope: ScopeRef<'a>,
+    /// Next child to be selected, for cross-file synergy (allow resuming count)
+    next_child_index: usize,
 }
 
 impl<'a> PackageScopeEnvelope<'a> {
@@ -231,6 +274,7 @@ impl<'a> PackageScopeEnvelope<'a> {
         Self {
             package_name,
             scope,
+            next_child_index: 0,
         }
     }
 }

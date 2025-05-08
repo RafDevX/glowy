@@ -29,7 +29,9 @@ pub fn visit_source_file<'a>(
 ) {
     let package_name = ctx.scope_span(node.package_clause.id.clone());
 
-    let original_name = ctx.symtab_mut().enter_package(package_name, package_path);
+    let original_name = ctx
+        .symtab_mut()
+        .enter_package(package_name, package_path.clone());
 
     if original_name.content() != node.package_clause.id.content() {
         // error was already reported in Stage 1 -- [`decls::visit_source_file`]
@@ -44,6 +46,8 @@ pub fn visit_source_file<'a>(
     }
 
     ctx.symtab_mut().deprime();
+
+    ctx.symtab_mut().save_package_progress(&package_path);
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {

@@ -283,6 +283,8 @@ impl Analyzer {
 
         // TODO: while ...
 
+        context.symtab_mut().clear_all_package_progress();
+
         for (path, ast) in &parsed {
             context.set_current_file(path);
 
