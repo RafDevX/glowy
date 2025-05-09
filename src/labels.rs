@@ -15,7 +15,7 @@
 
 use std::{cmp, collections::BTreeSet, fmt};
 
-use parser::Span;
+use parser::Location;
 
 use crate::Pinned;
 
@@ -186,8 +186,8 @@ pub struct LabelBacktrace<'a> {
     label: Label<'a>,
     /// Name of symbol with this label, if any/applicable.
     symbol: Option<&'a str>,
-    /// Location where this operation took place.
-    place: Pinned<Span<'a>>,
+    /// Where this operation took place.
+    location: Pinned<Location>,
     /// Other backtraces through which this label is derived via propagation.
     children: Vec<LabelBacktrace<'a>>,
 }
@@ -197,13 +197,13 @@ impl<'a> LabelBacktrace<'a> {
     pub(crate) fn new_explicit_annotation(
         label: Label<'a>,
         symbol: &'a str,
-        place: Pinned<Span<'a>>,
+        location: Pinned<Location>,
     ) -> Self {
         Self {
             kind: LabelBacktraceKind::ExplicitAnnotation,
             label,
             symbol: Some(symbol),
-            place,
+            location,
             children: vec![],
         }
     }
@@ -213,7 +213,7 @@ impl<'a> LabelBacktrace<'a> {
         kind: LabelBacktraceKind,
         label: Label<'a>,
         symbol: Option<&'a str>,
-        place: Pinned<Span<'a>>,
+        location: Pinned<Location>,
         children: &[&Self],
     ) -> Option<Self> {
         if label == Label::Bottom {
@@ -234,7 +234,7 @@ impl<'a> LabelBacktrace<'a> {
             kind,
             label,
             symbol,
-            place,
+            location,
             children,
         })
     }
@@ -252,7 +252,7 @@ impl<'a> LabelBacktrace<'a> {
             kind: self.kind,
             label: new_label,
             symbol: self.symbol,
-            place: self.place.clone(),
+            location: self.location.clone(),
             children: self
                 .children
                 .iter()
@@ -277,8 +277,8 @@ impl<'a> LabelBacktrace<'a> {
     }
 
     /// Returns the location where the operation took place.
-    pub fn place(&self) -> &Pinned<Span<'a>> {
-        &self.place
+    pub fn location(&self) -> &Pinned<Location> {
+        &self.location
     }
 
     /// Returns the backtraces that compound to yield and justify this one.
