@@ -72,7 +72,7 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
 ) {
     for (name, _) in &node.mapping {
-        let symbol = Symbol::new_ref(ctx.scope_span(name.clone()), mutable);
+        let symbol = Symbol::new_ref(ctx.scope_span(name.clone()), mutable, None);
 
         ctx.declare_new_symbol(symbol);
     }
@@ -86,7 +86,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         return;
     }
 
-    let symbol = Symbol::new_ref(ctx.scope_span(node.name.clone()), false);
+    let symbol = Symbol::new_ref(ctx.scope_span(node.name.clone()), false, None);
 
     ctx.declare_new_symbol(symbol);
 }

@@ -43,7 +43,7 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{FullPackagePath, ScopedSpan};
+use crate::{labels::LabelBacktrace, FullPackagePath, ScopedSpan};
 
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers
@@ -326,22 +326,40 @@ pub struct Symbol<'a> {
     declared_name: ScopedSpan<'a>,
     /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`)
     mutable: bool,
-    // ... label_backtrace
+    /// The accumulated label for this symbol, with tracked history.
+    label_backtrace: Option<LabelBacktrace<'a>>,
 }
 
 impl<'a> Symbol<'a> {
-    fn new(declared_name: ScopedSpan<'a>, mutable: bool) -> Self {
+    fn new(
+        declared_name: ScopedSpan<'a>,
+        mutable: bool,
+        label_backtrace: Option<LabelBacktrace<'a>>,
+    ) -> Self {
         Self {
             declared_name,
             mutable,
+            label_backtrace,
         }
     }
 
-    pub fn new_ref(declared_name: ScopedSpan<'a>, mutable: bool) -> SymbolRef<'a> {
-        Rc::new(RefCell::new(Self::new(declared_name, mutable)))
+    pub fn new_ref(
+        declared_name: ScopedSpan<'a>,
+        mutable: bool,
+        label_backtrace: Option<LabelBacktrace<'a>>,
+    ) -> SymbolRef<'a> {
+        Rc::new(RefCell::new(Self::new(
+            declared_name,
+            mutable,
+            label_backtrace,
+        )))
     }
 
     pub fn declared_name(&self) -> &ScopedSpan<'a> {
         &self.declared_name
+    }
+
+    pub fn label_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
+        self.label_backtrace.as_ref()
     }
 }
