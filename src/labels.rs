@@ -15,7 +15,9 @@
 
 use std::{cmp, collections::BTreeSet, fmt};
 
-use crate::ScopedSpan;
+use parser::Span;
+
+use crate::Pinned;
 
 /// Represents an individual tag within a label.
 ///
@@ -185,7 +187,7 @@ pub struct LabelBacktrace<'a> {
     /// Name of symbol with this label, if any/applicable.
     symbol: Option<&'a str>,
     /// Location where this operation took place.
-    place: ScopedSpan<'a>,
+    place: Pinned<Span<'a>>,
     /// Other backtraces through which this label is derived via propagation.
     children: Vec<LabelBacktrace<'a>>,
 }
@@ -195,7 +197,7 @@ impl<'a> LabelBacktrace<'a> {
     pub(crate) fn new_explicit_annotation(
         label: Label<'a>,
         symbol: &'a str,
-        place: ScopedSpan<'a>,
+        place: Pinned<Span<'a>>,
     ) -> Self {
         Self {
             kind: LabelBacktraceKind::ExplicitAnnotation,
@@ -211,7 +213,7 @@ impl<'a> LabelBacktrace<'a> {
         kind: LabelBacktraceKind,
         label: Label<'a>,
         symbol: Option<&'a str>,
-        place: ScopedSpan<'a>,
+        place: Pinned<Span<'a>>,
         children: &[&Self],
     ) -> Option<Self> {
         if label == Label::Bottom {
@@ -275,7 +277,7 @@ impl<'a> LabelBacktrace<'a> {
     }
 
     /// Returns the location where the operation took place.
-    pub fn place(&self) -> &ScopedSpan<'a> {
+    pub fn place(&self) -> &Pinned<Span<'a>> {
         &self.place
     }
 

@@ -1,11 +1,9 @@
-use std::path::Path;
-
-use parser::Span;
+use std::{fmt, path::Path};
 
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
     symbols::{SymbolRef, SymbolTable},
-    ScopedSpan,
+    Pinned,
 };
 
 pub struct AnalysisContext<'a> {
@@ -53,13 +51,13 @@ impl<'a> AnalysisContext<'a> {
         }
     }
 
-    pub fn scope_span(&self, span: Span<'a>) -> ScopedSpan<'a> {
+    pub fn pin<T: Clone + fmt::Debug + PartialEq>(&self, inner: T) -> Pinned<T> {
         let file = self
             .current_file
             .expect("some file should be under analysis")
             .to_owned();
 
-        ScopedSpan::new(file, span)
+        Pinned::new(file, inner)
     }
 
     /// Shorthand to declare a new symbol in the [`SymbolTable`] and report
@@ -81,7 +79,7 @@ impl<'a> AnalysisContext<'a> {
 
             self.report_error(AnalysisErrorKind::IllegalRedeclaration {
                 previous: existing.borrow().declared_name().clone(),
-                found: name.span().clone(),
+                found: name.inner().clone(),
             });
         }
     }

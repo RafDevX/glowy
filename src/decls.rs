@@ -17,7 +17,7 @@ pub fn visit_source_file<'a>(
     // the first file's package clause (and enforce for all other files to use
     // the same name)
 
-    let package_name = ctx.scope_span(node.package_clause.id.clone());
+    let package_name = ctx.pin(node.package_clause.id.clone());
 
     let original_name = ctx
         .symtab_mut()
@@ -72,7 +72,7 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
 ) {
     for (name, _) in &node.mapping {
-        let symbol = Symbol::new_ref(ctx.scope_span(name.clone()), mutable, None);
+        let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, None);
 
         ctx.declare_new_symbol(symbol);
     }
@@ -86,7 +86,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         return;
     }
 
-    let symbol = Symbol::new_ref(ctx.scope_span(node.name.clone()), false, None);
+    let symbol = Symbol::new_ref(ctx.pin(node.name.clone()), false, None);
 
     ctx.declare_new_symbol(symbol);
 }

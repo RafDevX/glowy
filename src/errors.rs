@@ -21,7 +21,7 @@ use std::path::Path;
 
 use parser::{ParsingError, Span};
 
-use crate::ScopedSpan;
+use crate::Pinned;
 
 /// Represents an issue arising from Glowy analysis.
 ///
@@ -71,7 +71,7 @@ pub enum AnalysisErrorKind<'a> {
     /// This file is thus skipped from further analysis.
     DistinctPackageName {
         /// The previously declared package name.
-        previous: ScopedSpan<'a>,
+        previous: Pinned<Span<'a>>,
         /// The disparate package clause identifier.
         found: Span<'a>,
     },
@@ -82,7 +82,7 @@ pub enum AnalysisErrorKind<'a> {
     /// declaration was valid, but the resulting analysis may be incorrect.
     IllegalRedeclaration {
         /// The site of the previous declaration with the same name.
-        previous: ScopedSpan<'a>,
+        previous: Pinned<Span<'a>>,
         /// The matching identifier causing an illegal attempt at redeclaration.
         found: Span<'a>,
     },

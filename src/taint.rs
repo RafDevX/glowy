@@ -27,7 +27,7 @@ pub fn visit_source_file<'a>(
     node: &SourceFileNode<'a>,
     package_path: FullPackagePath,
 ) {
-    let package_name = ctx.scope_span(node.package_clause.id.clone());
+    let package_name = ctx.pin(node.package_clause.id.clone());
 
     let original_name = ctx
         .symtab_mut()

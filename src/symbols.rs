@@ -43,7 +43,9 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{labels::LabelBacktrace, FullPackagePath, ScopedSpan};
+use parser::Span;
+
+use crate::{labels::LabelBacktrace, FullPackagePath, Pinned};
 
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers
@@ -81,9 +83,9 @@ impl<'a> SymbolTable<'a> {
     /// Note that this automatically primes the symtab too!
     pub fn enter_package(
         &mut self,
-        name: ScopedSpan<'a>,
+        name: Pinned<Span<'a>>,
         path: FullPackagePath,
-    ) -> &ScopedSpan<'a> {
+    ) -> &Pinned<Span<'a>> {
         // note that name cannot be derived from path!
         // (must be taken from package clause, may differ from dirname)
 
@@ -251,7 +253,7 @@ impl Default for SymbolTable<'_> {
 
 struct PackageScopeEnvelope<'a> {
     /// Package name (!= package path's last component)
-    package_name: ScopedSpan<'a>,
+    package_name: Pinned<Span<'a>>,
     /// The package's root scope
     scope: ScopeRef<'a>,
     /// Next child to be selected, for cross-file synergy (allow resuming count)
@@ -259,7 +261,7 @@ struct PackageScopeEnvelope<'a> {
 }
 
 impl<'a> PackageScopeEnvelope<'a> {
-    fn new(package_name: ScopedSpan<'a>) -> Self {
+    fn new(package_name: Pinned<Span<'a>>) -> Self {
         let scope = Scope::new_root_ref();
 
         Self {
@@ -323,7 +325,7 @@ pub type SymbolRef<'a> = Rc<RefCell<Symbol<'a>>>;
 #[derive(Debug)]
 pub struct Symbol<'a> {
     /// Original symbol name within symbol declaration
-    declared_name: ScopedSpan<'a>,
+    declared_name: Pinned<Span<'a>>,
     /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`)
     mutable: bool,
     /// The accumulated label for this symbol, with tracked history.
@@ -332,7 +334,7 @@ pub struct Symbol<'a> {
 
 impl<'a> Symbol<'a> {
     fn new(
-        declared_name: ScopedSpan<'a>,
+        declared_name: Pinned<Span<'a>>,
         mutable: bool,
         label_backtrace: Option<LabelBacktrace<'a>>,
     ) -> Self {
@@ -344,7 +346,7 @@ impl<'a> Symbol<'a> {
     }
 
     pub fn new_ref(
-        declared_name: ScopedSpan<'a>,
+        declared_name: Pinned<Span<'a>>,
         mutable: bool,
         label_backtrace: Option<LabelBacktrace<'a>>,
     ) -> SymbolRef<'a> {
@@ -355,7 +357,7 @@ impl<'a> Symbol<'a> {
         )))
     }
 
-    pub fn declared_name(&self) -> &ScopedSpan<'a> {
+    pub fn declared_name(&self) -> &Pinned<Span<'a>> {
         &self.declared_name
     }
 

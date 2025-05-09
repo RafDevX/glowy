@@ -23,11 +23,14 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 
-use std::path::{Path, PathBuf};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 pub use analyzer::Analyzer;
 pub use files::SourceFile;
-use parser::Span;
+use parser::{Location, Span};
 
 mod analyzer;
 mod context;
@@ -44,22 +47,25 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 
 /// Source file content snippet bound to a specific location.
 ///
-/// This is a wrapper over [`Span`] that records contextual information
-/// regarding which file the content was found in. [`Span`] already has
-/// information on where within a file some content is located, and this
-/// struct complements it by further scoping the [`Span`] to a specific
-/// file (by virtual path, rooted in the module base).
+/// This is a wrapper over an inner type `T` that records contextual information
+/// regarding which file the underlying content was found in. Usually, within
+/// Glowy, this is used with an inner type of either [`Span`] or [`Location`].
+///
+/// Both [`Span`] and [`Location`] already have information on where within a
+/// file some content is located, and this struct complements it by further
+/// scoping its inner instance to a specific file (by virtual path, rooted in
+/// the module base).
 #[derive(Clone, Debug, PartialEq)]
-pub struct ScopedSpan<'a> {
+pub struct Pinned<T: Clone + fmt::Debug + PartialEq> {
     virtual_file_path: PathBuf,
-    span: Span<'a>,
+    inner: T,
 }
 
-impl<'a> ScopedSpan<'a> {
-    fn new(virtual_file_path: PathBuf, span: Span<'a>) -> Self {
+impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
+    fn new(virtual_file_path: PathBuf, span: T) -> Self {
         Self {
             virtual_file_path,
-            span,
+            inner: span,
         }
     }
 
@@ -72,18 +78,33 @@ impl<'a> ScopedSpan<'a> {
 
     /// Returns the underlying intra-file information.
     ///
-    /// The returned [`Span`] is sufficient to locate the content within the
-    /// specific file, and additionally includes the snippet itself, accessible
-    /// via [`Span::content`].
-    pub fn span(&self) -> &Span<'a> {
-        &self.span
+    /// The returned instance is often sufficient to locate the content within
+    /// the specific file, and in the case of [`Span`] additionally includes the
+    /// snippet itself, accessible via [`Span::content`] (see also the
+    /// short-hand [`Pinned::content`]).
+    pub fn inner(&self) -> &T {
+        &self.inner
     }
+}
 
+impl<'a> Pinned<Span<'a>> {
     /// Returns the underlying source code snippet.
     ///
     /// This method is simply a convenient short-hand for invoking
-    /// [`Span::content`] on the result of [`ScopedSpan::span`].
+    /// [`Span::content`] on the result of [`Pinned::inner`] when the inner type
+    /// is [`Span`].
     pub fn content(&self) -> &'a str {
-        self.span.content()
+        self.inner().content()
+    }
+
+    /// Returns a new instance qualifying the underlying [`Span`]'s location.
+    ///
+    /// This method uses [`Span::location`] to construct a new [`Pinned`] with
+    /// inner type [`Location`]. The same virtual file path is used (cloned).
+    pub fn pinned_location(&self) -> Pinned<Location> {
+        Pinned {
+            virtual_file_path: self.virtual_file_path.clone(),
+            inner: self.inner().location(),
+        }
     }
 }
