@@ -34,6 +34,7 @@ mod context;
 mod decls;
 pub mod errors;
 mod files;
+pub mod labels;
 mod symbols;
 mod taint;
 
