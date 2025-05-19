@@ -80,6 +80,17 @@ impl<'a> Label<'a> {
         }
     }
 
+    /// Returns the union of `self` and `other` as a new [`Label`].
+    ///
+    /// For example, `{a, b, c}` intersected with `{b, d}` yields
+    /// `{a, b, c, d}`.
+    pub fn union(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::Bottom, l) | (l, Self::Bottom) => l.clone(),
+            (Self::Tags(left), Self::Tags(right)) => Self::Tags(left | right),
+        }
+    }
+
     /// Returns the intersection of `self` and `other` as a new [`Label`].
     ///
     /// For example, `{a, b, c}` intersected with `{b, d, e}` yields `{b}`.
@@ -214,7 +225,7 @@ impl<'a> LabelBacktrace<'a> {
         label: Label<'a>,
         symbol: Option<&'a str>,
         location: Pinned<Location>,
-        children: &[&Self],
+        children: &[Self],
     ) -> Option<Self> {
         if label == Label::Bottom {
             return None;

@@ -2,6 +2,9 @@ use parser::ast::{DeclNode, SourceFileNode};
 
 use crate::{context::AnalysisContext, FullPackagePath};
 
+mod explicit;
+mod exprs;
+
 macro_rules! select_scope_iter {
     ($ctx:expr, $item:ident in $items:expr => $body:block) => {
         let mut iter = $items.iter().peekable();
@@ -48,11 +51,21 @@ pub fn visit_source_file<'a>(
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
-    dbg!(&node);
-
     match node {
-        DeclNode::Const { specs, .. } => {}
-        DeclNode::Var { specs, .. } => {}
+        DeclNode::Const {
+            specs,
+            location,
+            annotation,
+        } => {
+            explicit::visit_binding_decl(ctx, specs, false, location, annotation);
+        }
+        DeclNode::Var {
+            specs,
+            location,
+            annotation,
+        } => {
+            explicit::visit_binding_decl(ctx, specs, true, location, annotation);
+        }
         DeclNode::Function(func_node) => {
             ctx.symtab_mut().select_next_sibling_scope();
 
