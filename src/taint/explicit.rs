@@ -31,7 +31,22 @@ fn visit_binding_decl_spec<'a>(
         let mut label = Label::Bottom;
         let mut children_backtraces = vec![]; // order matters
 
-        // TODO: add explicit annotation, if any
+        if let Some(annotation) = annotation {
+            if annotation.scope == "label" {
+                let annotation_label = Label::from_tags(&annotation.tags);
+                label = label.union(&annotation_label);
+
+                let explicit = LabelBacktrace::new_explicit_annotation(
+                    annotation_label,
+                    name.content(),
+                    ctx.pin(location.clone()),
+                );
+
+                children_backtraces.push(explicit);
+            }
+
+            // TODO: `match` other scopes
+        };
 
         if let Some(expr_backtrace) = exprs::visit_expr(ctx, expr) {
             label = label.union(expr_backtrace.label());
