@@ -86,6 +86,12 @@ pub enum AnalysisErrorKind<'a> {
         /// The matching identifier causing an illegal attempt at redeclaration.
         found: Span<'a>,
     },
+    /// Invalid access of unknown symbol not declared in the current scope.
+    ///
+    /// This often stems from incorrect operand name expressions referencing
+    /// items that do not exist in the scope (or items that do not exist in the
+    /// given namespace, in the case of qualified identifiers).
+    UnknownSymbol { name: Span<'a> },
 }
 
 impl<'a> AnalysisErrorKind<'a> {
@@ -94,7 +100,8 @@ impl<'a> AnalysisErrorKind<'a> {
         match self {
             Self::Parsing(..)
             | Self::DistinctPackageName { .. }
-            | Self::IllegalRedeclaration { .. } => AnalysisErrorCategory::InvalidGo,
+            | Self::IllegalRedeclaration { .. }
+            | Self::UnknownSymbol { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
     }

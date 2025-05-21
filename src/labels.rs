@@ -220,20 +220,23 @@ impl<'a> LabelBacktrace<'a> {
     }
 
     /// Returns [`None`] iff `label` is [`Label::Bottom`].
-    pub(crate) fn new(
+    pub(crate) fn new<'b>(
         kind: LabelBacktraceKind,
         label: Label<'a>,
         symbol: Option<&'a str>,
         location: Pinned<Location>,
-        children: &[Self],
-    ) -> Option<Self> {
+        children: impl IntoIterator<Item = &'b Self>,
+    ) -> Option<Self>
+    where
+        'a: 'b,
+    {
         if label == Label::Bottom {
             return None;
         }
 
         let mut remaining_label = label.clone();
         let children: Vec<_> = children
-            .iter()
+            .into_iter()
             .filter_map(|child| {
                 child
                     .restrict_to_label(&remaining_label)
@@ -248,6 +251,24 @@ impl<'a> LabelBacktrace<'a> {
             location,
             children,
         })
+    }
+
+    /// Returns a new instance (with symbol = None) representing a step above
+    /// in the hierarchy between two instances (self and other).
+    pub(crate) fn union(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Pinned<Location>,
+    ) -> Self {
+        Self::new(
+            with_kind,
+            self.label.union(&other.label),
+            None,
+            at_location,
+            [self, other],
+        )
+        .unwrap() // safe because if self exists, label is not Bottom
     }
 
     /// Returns a new instance whose label only contains tags in a given
