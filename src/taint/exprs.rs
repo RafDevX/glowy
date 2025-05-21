@@ -1,4 +1,4 @@
-use parser::ast::{ExprNode, OperandNameNode, UnaryOpKind};
+use parser::ast::{ExprNode, IndexingNode, OperandNameNode, UnaryOpKind};
 
 use crate::{
     context::AnalysisContext,
@@ -14,7 +14,7 @@ pub fn visit_expr<'a>(
         ExprNode::Name(name) => visit_operand_name(ctx, name),
         ExprNode::Literal(_) => None,
         ExprNode::Call(call) => todo!(),
-        ExprNode::Indexing(indexing) => todo!(),
+        ExprNode::Indexing(indexing) => visit_indexing(ctx, indexing),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
@@ -67,5 +67,24 @@ pub fn visit_operand_name<'a>(
         });
 
         None
+    }
+}
+
+pub fn visit_indexing<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &IndexingNode<'a>,
+) -> Option<LabelBacktrace<'a>> {
+    let expr = visit_expr(ctx, &node.expr);
+    let index = visit_expr(ctx, &node.index);
+
+    match (&expr, &index) {
+        (None, None) => None,
+        (Some(_), None) => expr,
+        (None, Some(_)) => index,
+        (Some(e), Some(i)) => Some(e.union(
+            i,
+            LabelBacktraceKind::Expression,
+            ctx.pin(node.location.clone()),
+        )),
     }
 }
