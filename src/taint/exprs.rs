@@ -6,6 +6,8 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
 
+use super::channels;
+
 pub fn visit_expr<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &ExprNode<'a>,
@@ -19,7 +21,7 @@ pub fn visit_expr<'a>(
             kind: UnaryOpKind::Receive,
             operand,
             location,
-        } => todo!(),
+        } => channels::visit_receive(ctx, operand, location),
         ExprNode::UnaryOp { operand, .. } => visit_expr(ctx, operand),
         ExprNode::BinaryOp {
             left,

@@ -328,4 +328,6 @@ pub enum LabelBacktraceKind {
     Assignment,
     /// Compounded label derived from the parts of a composite expression.
     Expression,
+    /// Aggregate label for values received from a given channel.
+    Receive,
 }

@@ -2,6 +2,7 @@ use parser::ast::{DeclNode, SourceFileNode};
 
 use crate::{context::AnalysisContext, FullPackagePath};
 
+mod channels;
 mod explicit;
 mod exprs;
 
