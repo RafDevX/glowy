@@ -18,7 +18,7 @@ codespan-reporting = "0.11.1"
 version = "0.1.0"
 edition = "2021"
 authors = ["Rafael Oliveira", "Diogo Correia"]
-repository = "https://github.com/ist199211-ist199311/glowy-langsec"
+repository = "https://github.com/RafDevX/glowy"
 license = "MIT"
 rust-version = "1.82"
 
