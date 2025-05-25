@@ -21,6 +21,7 @@ pub struct ImportNode<'a> {
 pub struct ImportSpecNode<'a> {
     pub identifier: Option<Span<'a>>,
     pub path: String,
+    pub location: Location,
 }
 
 #[derive(Clone, Debug, PartialEq)]

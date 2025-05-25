@@ -9,15 +9,22 @@ fn parse_spec<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ImportSpecNode<'a>> {
     let identifier = match s.peek() {
         Some(Ok(of_kind!(TokenKind::Ident))) | Some(Ok(of_kind!(TokenKind::Period))) => {
             let token = s.next().unwrap()?; // advance
-            Some(token.span)
+            Some(token)
         }
         _ => None,
     };
 
     match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::String(path))) => {
-            s.next(); // advance
-            Ok(ImportSpecNode { identifier, path })
+            let token = s.next().unwrap()?; // advance
+
+            let location = s.location_since(identifier.as_ref().unwrap_or(&token));
+
+            Ok(ImportSpecNode {
+                identifier: identifier.map(|t| t.span),
+                path,
+                location,
+            })
         }
         found => Err(ParsingError::UnexpectedConstruct {
             expected: "an import specification",
