@@ -48,9 +48,24 @@ pub fn visit_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &OperandNameNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    // TODO: support fully-qualified names
+    let symbol = if let Some(qualifier) = &node.package {
+        if let Some(symbol) = ctx
+            .symtab()
+            .get_qualified_symbol(qualifier.content(), node.id.content())
+        {
+            symbol
+        } else {
+            ctx.report_error(AnalysisErrorKind::UnknownQualifier {
+                found: qualifier.clone(),
+            });
 
-    if let Some(symbol) = ctx.symtab().get_symbol(node.id.content()) {
+            return None;
+        }
+    } else {
+        ctx.symtab().get_symbol(node.id.content())
+    };
+
+    if let Some(symbol) = symbol {
         symbol
             .borrow()
             .label_backtrace()
@@ -65,7 +80,7 @@ pub fn visit_operand_name<'a>(
             })
     } else {
         ctx.report_error(AnalysisErrorKind::UnknownSymbol {
-            name: node.id.clone(),
+            found: node.id.clone(),
         });
 
         None

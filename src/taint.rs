@@ -1,6 +1,9 @@
-use parser::ast::{DeclNode, SourceFileNode};
+use parser::{
+    ast::{DeclNode, ImportSpecNode, SourceFileNode},
+    Span,
+};
 
-use crate::{context::AnalysisContext, FullPackagePath};
+use crate::{context::AnalysisContext, errors::AnalysisErrorKind, FullPackagePath};
 
 mod channels;
 mod explicit;
@@ -44,11 +47,35 @@ pub fn visit_source_file<'a>(
         return; // skip the file
     }
 
+    for import in &node.imports {
+        for spec in &import.specs {
+            visit_import_spec(ctx, spec);
+        }
+    }
+
     for decl in &node.top_level_decls {
         visit_decl(ctx, decl);
     }
 
     ctx.symtab_mut().save_package_progress(&package_path);
+}
+
+fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a>) {
+    match ctx.symtab_mut().register_import_spec(
+        node.identifier
+            .as_ref()
+            .map(Span::content)
+            .map(str::to_owned),
+        node.path.clone(),
+    ) {
+        None => ctx.report_error(AnalysisErrorKind::UnresolvableUnqualifiedImport {
+            location: node.location.clone(),
+        }),
+        Some(true) => ctx.report_error(AnalysisErrorKind::DuplicateImportQualifier {
+            location: node.location.clone(),
+        }),
+        Some(false) => {} // all good
+    }
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {

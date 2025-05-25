@@ -19,7 +19,7 @@
 
 use std::path::Path;
 
-use parser::{ParsingError, Span};
+use parser::{Location, ParsingError, Span};
 
 use crate::Pinned;
 
@@ -75,6 +75,26 @@ pub enum AnalysisErrorKind<'a> {
         /// The disparate package clause identifier.
         found: Span<'a>,
     },
+    /// Import without specified qualifier of unknown package.
+    ///
+    /// Another package has been imported via a spec in the form `import "path"`
+    /// (without an explicit qualifier being defined), but an implicit qualifier
+    /// could not be inferred since the package's native declared package name
+    /// could not be ascertained from its package clause, since it has not been
+    /// analyzed.
+    UnresolvableUnqualifiedImport {
+        /// The offending import declaration spec's location.
+        location: Location,
+    },
+    /// Illegal reuse of qualifier in import declaration spec.
+    ///
+    /// The import declaration conflicts with a previous import declaration
+    /// within the same file, now overshadowing it, which is not permitted in
+    /// Go in any scenario.
+    DuplicateImportQualifier {
+        /// The offending import declaration spec's location.
+        location: Location,
+    },
     /// Invalid declaration of existing symbol in the same scope.
     ///
     /// Go only permits redeclarations under very specific circumstances of
@@ -91,7 +111,19 @@ pub enum AnalysisErrorKind<'a> {
     /// This often stems from incorrect operand name expressions referencing
     /// items that do not exist in the scope (or items that do not exist in the
     /// given namespace, in the case of qualified identifiers).
-    UnknownSymbol { name: Span<'a> },
+    UnknownSymbol {
+        /// The provided identifier that could not be resolved.
+        found: Span<'a>,
+    },
+    /// Invalid reference to unknown qualifier not imported in the current file.
+    ///
+    /// This means that a symbol is being accessed with the syntax `qual.name`,
+    /// but `qual` could not be resolved since the identifier was never
+    /// registered via an import declaration spec such as `import qual "path"`.
+    UnknownQualifier {
+        /// The provided qualifier that could not be resolved.
+        found: Span<'a>,
+    },
 }
 
 impl<'a> AnalysisErrorKind<'a> {
@@ -100,8 +132,11 @@ impl<'a> AnalysisErrorKind<'a> {
         match self {
             Self::Parsing(..)
             | Self::DistinctPackageName { .. }
+            | Self::UnresolvableUnqualifiedImport { .. }
+            | Self::DuplicateImportQualifier { .. }
             | Self::IllegalRedeclaration { .. }
-            | Self::UnknownSymbol { .. } => AnalysisErrorCategory::InvalidGo,
+            | Self::UnknownSymbol { .. }
+            | Self::UnknownQualifier { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
     }

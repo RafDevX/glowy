@@ -38,8 +38,6 @@ pub fn visit_source_file<'a>(
         return; // skip the file
     }
 
-    // TODO: node.imports
-
     for decl in &node.top_level_decls {
         visit_decl(ctx, decl);
     }

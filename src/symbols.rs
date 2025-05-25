@@ -53,6 +53,11 @@ pub struct SymbolTable<'a> {
     /// Root scopes associated with each package
     package_scopes: HashMap<FullPackagePath, PackageScopeEnvelope<'a>>,
 
+    /// Other packages imported by the current file, with an assigned qualifier
+    current_file_named_imports: HashMap<String, FullPackagePath>,
+    /// Other packages imported by the current file, via `import . "path"`
+    current_file_wildcard_imports: Vec<FullPackagePath>,
+
     /// Currently selected (package or sub-package) scope
     current_scope: ScopeRef<'a>,
     /// Index in parent scope's children array, for each level (last = current)
@@ -68,6 +73,9 @@ impl<'a> SymbolTable<'a> {
             universe_scope: Scope::new(None), // TODO: populate universe
             package_scopes: HashMap::new(),
 
+            current_file_named_imports: HashMap::new(),
+            current_file_wildcard_imports: Vec::new(),
+
             // For simplicity in the rest of the code, we don't use Option for
             // current_scope, but instead initialize it at a dead end not
             // actually corresponding to any package; this means SymbolTable is
@@ -80,19 +88,23 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
+    /// This function should be called upon starting analysis of each file.
     /// Note that this automatically primes the symtab too!
     pub fn enter_package(
         &mut self,
         name: Pinned<Span<'a>>,
         path: FullPackagePath,
     ) -> &Pinned<Span<'a>> {
-        // note that name cannot be derived from path!
+        // note that we cannot automatically derive the name from the path!
         // (must be taken from package clause, may differ from dirname)
 
         let envelope = self
             .package_scopes
             .entry(path)
             .or_insert_with(|| PackageScopeEnvelope::new(name));
+
+        self.current_file_named_imports = HashMap::new();
+        self.current_file_wildcard_imports = Vec::new();
 
         self.current_scope = envelope.scope.clone();
         self.current_cursor = Vec::new();
@@ -226,10 +238,41 @@ impl<'a> SymbolTable<'a> {
         }
 
         if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
-            todo!()
+            for path in &self.current_file_wildcard_imports {
+                if let Some(envelope) = self.package_scopes.get(path) {
+                    if let Some(symbol) = envelope.scope.borrow().get_local_symbol(name) {
+                        return Some(symbol);
+                    }
+                }
+            }
         }
 
         self.universe_scope.get_local_symbol(name)
+    }
+
+    /// Returns None if qualifier cannot be resolved, Some(None) if name is not
+    /// exported by the referenced package, or Some(Some(symbol)) otherwise.
+    pub fn get_qualified_symbol(
+        &self,
+        qualifier: &str,
+        name: &str,
+    ) -> Option<Option<SymbolRef<'a>>> {
+        if let Some(path) = self.current_file_named_imports.get(qualifier) {
+            if let Some(envelope) = self.package_scopes.get(path) {
+                if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
+                    Some(envelope.scope.borrow().get_local_symbol(name))
+                } else {
+                    Some(None)
+                }
+            } else {
+                // we haven't visited the package yet so we must assume the
+                // symbol doesn't exist there (but it'd be wrong to say that
+                // the qualifier is wrong - it was recognized)
+                Some(None)
+            }
+        } else {
+            None
+        }
     }
 
     pub fn declare_new_symbol(
@@ -239,9 +282,43 @@ impl<'a> SymbolTable<'a> {
     ) -> Option<SymbolRef<'a>> {
         self.trigger_if_primed();
 
+        // technically shouldn't allow declaring symbols at the package level
+        // which are already declared in other packages imported via `import .`,
+        // but we'll leave that kind of extensive checks for the actual Go
+        // compiler to enforce
+
         self.current_scope
             .borrow_mut()
             .set_local_symbol(name, symbol)
+    }
+
+    /// Returns None if no qualifier was specified but the package has not yet
+    /// been analyzed, so its native name is not yet known. Otherwise, the
+    /// return indicates whether the new spec conflicts with a previous spec
+    /// (i.e., `Some(true)` means the same qualifier has been registered before
+    /// and was now overwritten).
+    pub fn register_import_spec(
+        &mut self,
+        qualifier: Option<String>,
+        path: FullPackagePath,
+    ) -> Option<bool> {
+        let qualifier = qualifier.or_else(|| {
+            self.package_scopes
+                .get(&path)
+                .map(|envelope| envelope.package_name.content().to_owned())
+        })?;
+
+        let conflicted = if qualifier == "." {
+            self.current_file_wildcard_imports.push(path);
+
+            false
+        } else {
+            self.current_file_named_imports
+                .insert(qualifier, path)
+                .is_some()
+        };
+
+        Some(conflicted)
     }
 }
 
