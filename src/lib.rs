@@ -24,7 +24,7 @@
 #![deny(rustdoc::unescaped_backticks)]
 
 use std::{
-    fmt,
+    cmp, fmt,
     path::{Path, PathBuf},
 };
 
@@ -108,3 +108,20 @@ impl<'a> Pinned<Span<'a>> {
         }
     }
 }
+
+impl<'a> Ord for Pinned<Span<'a>> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.virtual_file_path
+            .cmp(&other.virtual_file_path)
+            .then(self.inner().location().cmp(other.inner().location()))
+            .then(self.content().cmp(other.content()))
+    }
+}
+
+impl PartialOrd for Pinned<Span<'_>> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for Pinned<Span<'_>> {}

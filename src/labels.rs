@@ -15,7 +15,7 @@
 
 use std::{cmp, collections::BTreeSet, fmt};
 
-use parser::Location;
+use parser::{Location, Span};
 
 use crate::Pinned;
 
@@ -29,17 +29,119 @@ use crate::Pinned;
 /// [`LabelTag`] derives [`Ord`], which means that when ordered tags are always
 /// first discriminated by kind (the first variant comes first, and so on), and
 /// then lexicographically by its internal value/identifier.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum LabelTag<'a> {
     /// A concrete user-facing tag, like `blue` or `violet`.
     Concrete(&'a str),
+    /// An artificial tag conceptually representing a function argument's label.
+    Synthetic {
+        /// A reference to the associated function.
+        func: FunctionRef<'a>,
+        /// The parameter's index within the function's signature.
+        index: usize,
+        /// The parameter's assigned identifier, if any.
+        ///
+        /// Note that this is redundant with [`LabelTag::Synthetic::index`], but
+        /// allows for a more human-friendly representation when present.
+        identifier: Option<Span<'a>>,
+    },
 }
 
 impl<'a> fmt::Display for LabelTag<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Concrete(tag) => write!(f, "{tag}"),
-            // ...
+            Self::Synthetic {
+                func,
+                index,
+                identifier,
+            } => {
+                if let Some(id) = identifier {
+                    write!(f, "<{func}#{index}:{}>", id.content())
+                } else {
+                    write!(f, "<{func}#{index}>")
+                }
+            }
+        }
+    }
+}
+
+impl Ord for LabelTag<'_> {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match (self, other) {
+            (Self::Concrete(_), Self::Synthetic { .. }) => cmp::Ordering::Less,
+            (Self::Synthetic { .. }, Self::Concrete(_)) => cmp::Ordering::Greater,
+            (Self::Concrete(left), Self::Concrete(right)) => left.cmp(right),
+            (
+                Self::Synthetic {
+                    func: left_func,
+                    index: left_index,
+                    ..
+                },
+                Self::Synthetic {
+                    func: right_func,
+                    index: right_index,
+                    ..
+                },
+            ) => left_func.cmp(right_func).then(left_index.cmp(right_index)),
+        }
+    }
+}
+
+impl PartialOrd for LabelTag<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for LabelTag<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Concrete(left), Self::Concrete(right)) => left == right,
+            (
+                Self::Synthetic {
+                    func: left_func,
+                    index: left_index,
+                    ..
+                },
+                Self::Synthetic {
+                    func: right_func,
+                    index: right_index,
+                    ..
+                },
+            ) => left_func == right_func && left_index == right_index,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for LabelTag<'_> {}
+
+/// Represents an unambiguous reference to a function declaration.
+///
+/// This is useful to guarantee uniqueness of a [`LabelTag::Synthetic`] when
+/// paired with a function parameter index.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FunctionRef<'a> {
+    /// A normal function with a native declared name.
+    ///
+    /// This is a unique identifier because of the embedded location information
+    /// offered by [`Pinned`] and [`Span`].
+    Named(Pinned<Span<'a>>),
+    /// An anonymous function literal.
+    ///
+    /// As an internal identifier, a pointer to the AST node is used to
+    /// guarantee uniqueness. This is evidently not deterministic across
+    /// different program executions, but in general synthetic tags are not
+    /// exposed anyway, so they should not be relied on for observability.
+    Anonymous(*const bool), // FIXME: Anonymous(*const FunctionLiteralNode),
+}
+
+impl<'a> fmt::Display for FunctionRef<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Named(name) => name.content().fmt(f),
+            Self::Anonymous(ptr) => write!(f, "lit@{:x}", (*ptr as usize) & 0xffff),
         }
     }
 }
@@ -76,8 +178,19 @@ impl<'a> Label<'a> {
         } else {
             let set = BTreeSet::from_iter(tags.iter().map(|tag| LabelTag::Concrete(tag)));
 
-            Label::Tags(set)
+            Self::Tags(set)
         }
+    }
+
+    /// Constructs a new instance from a single [`LabelTag`].
+    ///
+    /// This is a convenience method particularly useful for dealing with a
+    /// [`LabelTag::Synthetic`]. For other uses, prefer [`Label::from_tags`].
+    pub fn from_single(tag: LabelTag<'a>) -> Self {
+        let mut set = BTreeSet::new();
+        set.insert(tag);
+
+        Self::Tags(set)
     }
 
     /// Returns the union of `self` and `other` as a new [`Label`].
