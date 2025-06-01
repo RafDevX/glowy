@@ -104,5 +104,29 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
 }
 
 fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) {
-    todo!()
+    match node {
+        StatementNode::Empty => {}
+        StatementNode::Expr(expr) => {
+            exprs::visit_expr(ctx, expr);
+        }
+        StatementNode::Send(send) => todo!(),
+        StatementNode::Inc { operand, location } | StatementNode::Dec { operand, location } => {
+            todo!()
+        }
+        StatementNode::Assignment(assignment) => todo!(),
+        StatementNode::ShortVarDecl(decl) => todo!(),
+        StatementNode::Decl(decl) => todo!(),
+        StatementNode::If(r#if) => todo!(),
+        StatementNode::Block(statements) => {
+            ctx.symtab_mut().select_first_child_scope(); // push
+
+            for statement in statements {
+                visit_statement(ctx, statement);
+            }
+
+            ctx.symtab_mut().select_parent_scope(); // pop
+        }
+        StatementNode::Return { exprs, location } => todo!(),
+        StatementNode::Go(expr) => todo!(),
+    }
 }
