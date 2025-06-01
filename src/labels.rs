@@ -317,14 +317,18 @@ pub struct LabelBacktrace<'a> {
 }
 
 impl<'a> LabelBacktrace<'a> {
-    /// Base case; no children
-    pub(crate) fn new_explicit_annotation(
+    /// Base case; no children.
+    ///
+    /// Useful, in particular, for [`LabelBacktraceKind::ExplicitAnnotation`]
+    /// and [`LabelBacktraceKind::FunctionParameter`].
+    pub(crate) fn new_root(
+        kind: LabelBacktraceKind,
         label: Label<'a>,
         symbol: &'a str,
         location: Pinned<Location>,
     ) -> Self {
         Self {
-            kind: LabelBacktraceKind::ExplicitAnnotation,
+            kind,
             label,
             symbol: Some(symbol),
             location,
@@ -443,4 +447,6 @@ pub enum LabelBacktraceKind {
     Expression,
     /// Aggregate label for values received from a given channel.
     Receive,
+    /// Synthetic label assigned to a declared parameter for taint analysis.
+    FunctionParameter,
 }

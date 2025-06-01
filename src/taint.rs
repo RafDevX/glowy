@@ -1,5 +1,5 @@
 use parser::{
-    ast::{DeclNode, ImportSpecNode, SourceFileNode},
+    ast::{DeclNode, ImportSpecNode, SourceFileNode, StatementNode},
     Span,
 };
 
@@ -8,6 +8,7 @@ use crate::{context::AnalysisContext, errors::AnalysisErrorKind, FullPackagePath
 mod channels;
 mod explicit;
 mod exprs;
+mod funcs;
 
 macro_rules! select_scope_iter {
     ($ctx:expr, $item:ident in $items:expr => $body:block) => {
@@ -97,7 +98,11 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
         DeclNode::Function(func_node) => {
             ctx.symtab_mut().select_next_sibling_scope();
 
-            // TODO: ...
+            funcs::visit_function_decl(ctx, func_node);
         }
     }
+}
+
+fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) {
+    todo!()
 }

@@ -6,7 +6,7 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
 
-use super::channels;
+use super::{channels, funcs};
 
 pub fn visit_expr<'a>(
     ctx: &mut AnalysisContext<'a>,
@@ -15,7 +15,7 @@ pub fn visit_expr<'a>(
     match node {
         ExprNode::Name(name) => visit_operand_name(ctx, name),
         ExprNode::Literal(_) => None,
-        ExprNode::Call(call) => todo!(),
+        ExprNode::Call(call) => funcs::visit_call(ctx, call),
         ExprNode::Indexing(indexing) => visit_indexing(ctx, indexing),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,

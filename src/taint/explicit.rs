@@ -36,7 +36,8 @@ fn visit_binding_decl_spec<'a>(
                 let annotation_label = Label::from_tags(&annotation.tags);
                 label = label.union(&annotation_label);
 
-                let explicit = LabelBacktrace::new_explicit_annotation(
+                let explicit = LabelBacktrace::new_root(
+                    LabelBacktraceKind::ExplicitAnnotation,
                     annotation_label,
                     name.content(),
                     ctx.pin(location.clone()),
