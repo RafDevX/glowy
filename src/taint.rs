@@ -103,6 +103,21 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
     }
 }
 
+fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
+    for statement in statements {
+        if ctx.returning() && *statement != StatementNode::Empty {
+            // FIXME: don't have any location information at this point (from
+            // parser) to pass to ErrorKind::Unreachable, which makes it pretty
+            // opaque and thus very broad error messages (file-granularity)
+            ctx.report_error(AnalysisErrorKind::Unreachable);
+
+            break;
+        }
+
+        visit_statement(ctx, statement);
+    }
+}
+
 fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) {
     match node {
         StatementNode::Empty => {}
@@ -120,9 +135,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Block(statements) => {
             ctx.symtab_mut().select_first_child_scope(); // push
 
-            for statement in statements {
-                visit_statement(ctx, statement);
-            }
+            visit_statements(ctx, statements);
 
             ctx.symtab_mut().select_parent_scope(); // pop
         }

@@ -124,6 +124,16 @@ pub enum AnalysisErrorKind<'a> {
         /// The provided qualifier that could not be resolved.
         found: Span<'a>,
     },
+    /// Invalid function with declared result but no return statement in body.
+    ///
+    /// If a function result type is specified, a return statement must be
+    /// present since otherwise the returned type would be void.
+    MissingReturn {
+        /// The name of the function with a declared result but no return
+        func: Span<'a>, // TODO: won't work for anonymous literals
+    },
+    /// Illegal statement present after a return statement.
+    Unreachable,
 }
 
 impl<'a> AnalysisErrorKind<'a> {
@@ -136,7 +146,9 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::DuplicateImportQualifier { .. }
             | Self::IllegalRedeclaration { .. }
             | Self::UnknownSymbol { .. }
-            | Self::UnknownQualifier { .. } => AnalysisErrorCategory::InvalidGo,
+            | Self::UnknownQualifier { .. }
+            | Self::MissingReturn { .. }
+            | Self::Unreachable => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
     }

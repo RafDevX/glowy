@@ -2,8 +2,9 @@ use parser::ast::{CallNode, FunctionDeclNode};
 
 use crate::{
     context::AnalysisContext,
+    errors::AnalysisErrorKind,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
-    symbols::Symbol,
+    symbols::{FunctionMetadata, Symbol},
 };
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
@@ -59,15 +60,19 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         }
     }
 
-    // TODO: do something with `node.signature.result`
-    // TODO: push to function contexts or whatever
+    let func = FunctionMetadata::new_ref(&node.signature, None);
+    ctx.push_function(func);
 
-    for statement in &node.body {
-        super::visit_statement(ctx, statement);
+    super::visit_statements(ctx, &node.body);
+
+    if node.signature.result.is_some() && !ctx.returning() {
+        ctx.report_error(AnalysisErrorKind::MissingReturn {
+            func: node.name.clone(),
+        });
     }
 
-    // TODO: pop from function contexts or whatever
-    // TODO: compare with `node.signature.result`
+    ctx.set_returning(false);
+    ctx.pop_function();
 
     ctx.symtab_mut().select_parent_scope(); // pop
 }

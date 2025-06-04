@@ -2,7 +2,7 @@ use std::{fmt, path::Path};
 
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
-    symbols::{SymbolRef, SymbolTable},
+    symbols::{FunctionMetadataRef, SymbolRef, SymbolTable},
     Pinned,
 };
 
@@ -15,6 +15,18 @@ pub struct AnalysisContext<'a> {
     current_file: Option<&'a Path>,
     /// Errors emitted during analysis
     errors: Vec<AnalysisError<'a>>,
+
+    /// Current stack of functions being declared.
+    funcs: Vec<FunctionMetadataRef<'a>>,
+    /// Whether the current function is returning.
+    ///
+    /// This means that a return statement was found, and so any subsequent
+    /// statements found are unreachable and should be reported as errors
+    /// instead of analyzed. This is necessary context information because it
+    /// might be necessary to interrupt multiple levels of iteration, e.g. if
+    /// returning inside nested loops the outer loop should not continue
+    /// accepting statements.
+    returning: bool,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -24,6 +36,8 @@ impl<'a> AnalysisContext<'a> {
             symbol_table: SymbolTable::new(),
             current_file: None,
             errors: Vec::new(),
+            funcs: Vec::new(),
+            returning: false,
         }
     }
 
@@ -41,6 +55,26 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn set_current_file(&mut self, virtual_path: &'a Path) {
         self.current_file = Some(virtual_path);
+    }
+
+    pub fn current_function(&self) -> Option<&FunctionMetadataRef<'a>> {
+        self.funcs.last()
+    }
+
+    pub fn push_function(&mut self, func: FunctionMetadataRef<'a>) {
+        self.funcs.push(func);
+    }
+
+    pub fn pop_function(&mut self) {
+        self.funcs.pop();
+    }
+
+    pub fn returning(&self) -> bool {
+        self.returning
+    }
+
+    pub fn set_returning(&mut self, returning: bool) {
+        self.returning = returning;
     }
 
     pub fn report_error(&mut self, kind: AnalysisErrorKind<'a>) {

@@ -43,7 +43,7 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use parser::Span;
+use parser::{ast::FunctionSignatureNode, Span};
 
 use crate::{labels::LabelBacktrace, FullPackagePath, Pinned};
 
@@ -405,8 +405,10 @@ pub struct Symbol<'a> {
     declared_name: Pinned<Span<'a>>,
     /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`)
     mutable: bool,
-    /// The accumulated label for this symbol, with tracked history.
+    /// The accumulated label for this symbol, with tracked history
     label_backtrace: Option<LabelBacktrace<'a>>,
+    /// If this symbol points to a function, its details relevant to analysis
+    func: Option<FunctionMetadataRef<'a>>,
 }
 
 impl<'a> Symbol<'a> {
@@ -419,6 +421,7 @@ impl<'a> Symbol<'a> {
             declared_name,
             mutable,
             label_backtrace,
+            func: None,
         }
     }
 
@@ -440,5 +443,32 @@ impl<'a> Symbol<'a> {
 
     pub fn label_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.label_backtrace.as_ref()
+    }
+}
+
+// AnalysisContext's stack of current function definitions needs to temporarily
+// reference metadata, and multiple symbols can point to the same metadata
+// (e.g., `f = <lit>; g = f`)
+pub type FunctionMetadataRef<'a> = Rc<RefCell<FunctionMetadata<'a>>>;
+
+#[derive(Debug)]
+pub struct FunctionMetadata<'a> {
+    signature: FunctionSignatureNode<'a>,
+    outcome: Option<LabelBacktrace<'a>>,
+}
+
+impl<'a> FunctionMetadata<'a> {
+    pub fn new(signature: &FunctionSignatureNode<'a>, outcome: Option<LabelBacktrace<'a>>) -> Self {
+        Self {
+            signature: signature.clone(),
+            outcome,
+        }
+    }
+
+    pub fn new_ref(
+        signature: &FunctionSignatureNode<'a>,
+        outcome: Option<LabelBacktrace<'a>>,
+    ) -> FunctionMetadataRef<'a> {
+        Rc::new(RefCell::new(Self::new(signature, outcome)))
     }
 }
