@@ -57,8 +57,8 @@ impl<'a> AnalysisContext<'a> {
         self.current_file = Some(virtual_path);
     }
 
-    pub fn current_function(&self) -> Option<&FunctionMetadataRef<'a>> {
-        self.funcs.last()
+    pub fn current_function(&self) -> Option<FunctionMetadataRef<'a>> {
+        self.funcs.last().cloned() // cloning is cheap
     }
 
     pub fn push_function(&mut self, func: FunctionMetadataRef<'a>) {

@@ -454,21 +454,22 @@ pub type FunctionMetadataRef<'a> = Rc<RefCell<FunctionMetadata<'a>>>;
 #[derive(Debug)]
 pub struct FunctionMetadata<'a> {
     signature: FunctionSignatureNode<'a>,
-    outcome: Option<LabelBacktrace<'a>>,
+    outcome: Vec<Option<LabelBacktrace<'a>>>,
 }
 
 impl<'a> FunctionMetadata<'a> {
-    pub fn new(signature: &FunctionSignatureNode<'a>, outcome: Option<LabelBacktrace<'a>>) -> Self {
+    pub fn new(signature: &FunctionSignatureNode<'a>) -> Self {
         Self {
             signature: signature.clone(),
-            outcome,
+            outcome: Vec::new(),
         }
     }
 
-    pub fn new_ref(
-        signature: &FunctionSignatureNode<'a>,
-        outcome: Option<LabelBacktrace<'a>>,
-    ) -> FunctionMetadataRef<'a> {
-        Rc::new(RefCell::new(Self::new(signature, outcome)))
+    pub fn new_ref(signature: &FunctionSignatureNode<'a>) -> FunctionMetadataRef<'a> {
+        Rc::new(RefCell::new(Self::new(signature)))
+    }
+
+    pub fn set_outcome(&mut self, outcome: Vec<Option<LabelBacktrace<'a>>>) {
+        self.outcome = outcome;
     }
 }

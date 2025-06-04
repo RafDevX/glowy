@@ -449,4 +449,6 @@ pub enum LabelBacktraceKind {
     Receive,
     /// Synthetic label assigned to a declared parameter for taint analysis.
     FunctionParameter,
+    /// Individual label for one particular expression in a return statement.
+    Return,
 }

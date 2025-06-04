@@ -1,10 +1,14 @@
-use parser::ast::{CallNode, FunctionDeclNode};
+use parser::{
+    ast::{CallNode, ExprNode, FunctionDeclNode},
+    Location,
+};
 
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
     symbols::{FunctionMetadata, Symbol},
+    taint::exprs,
 };
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
@@ -60,7 +64,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         }
     }
 
-    let func = FunctionMetadata::new_ref(&node.signature, None);
+    let func = FunctionMetadata::new_ref(&node.signature);
     ctx.push_function(func);
 
     super::visit_statements(ctx, &node.body);
@@ -75,6 +79,48 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
     ctx.pop_function();
 
     ctx.symtab_mut().select_parent_scope(); // pop
+}
+
+pub fn visit_return<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    exprs: &[ExprNode<'a>],
+    location: &Location,
+) {
+    let func = if let Some(func) = ctx.current_function() {
+        func
+    } else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
+            location: location.clone(),
+        });
+
+        return;
+    };
+
+    // TODO: branch backtrace
+
+    let mut outcome = vec![];
+
+    for expr in exprs {
+        let child = exprs::visit_expr(ctx, expr);
+
+        let backtrace = LabelBacktrace::new(
+            LabelBacktraceKind::Return,
+            child
+                .as_ref()
+                .map(|bt| bt.label().clone())
+                .unwrap_or(Label::Bottom),
+            // .union(branch_backtrace.unwrap_or(Label::Bottom))
+            None,
+            ctx.pin(location.clone()),
+            child.iter(), //.chain(branch_backtrace)
+        );
+
+        outcome.push(backtrace);
+    }
+
+    func.borrow_mut().set_outcome(outcome);
+
+    ctx.set_returning(true);
 }
 
 pub fn visit_call<'a>(

@@ -139,7 +139,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
 
             ctx.symtab_mut().select_parent_scope(); // pop
         }
-        StatementNode::Return { exprs, location } => todo!(),
+        StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Go(expr) => todo!(),
     }
 }

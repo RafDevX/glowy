@@ -132,6 +132,8 @@ pub enum AnalysisErrorKind<'a> {
         /// The name of the function with a declared result but no return
         func: Span<'a>, // TODO: won't work for anonymous literals
     },
+    /// Illegal return statement outside of a function declaration.
+    UnexpectedReturn { location: Location },
     /// Illegal statement present after a return statement.
     Unreachable,
 }
@@ -148,6 +150,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::UnknownSymbol { .. }
             | Self::UnknownQualifier { .. }
             | Self::MissingReturn { .. }
+            | Self::UnexpectedReturn { .. }
             | Self::Unreachable => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
