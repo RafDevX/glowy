@@ -116,7 +116,7 @@ pub fn visit_return<'a>(
     };
 
     for expr in &exprs {
-        let child = exprs::visit_expr(ctx, expr);
+        let child = exprs::visit_single_expr(ctx, expr);
 
         let backtrace = LabelBacktrace::new(
             LabelBacktraceKind::Return,
@@ -141,7 +141,7 @@ pub fn visit_return<'a>(
 pub fn visit_call<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &CallNode<'a>,
-) -> Option<LabelBacktrace<'a>> {
+) -> Vec<Option<LabelBacktrace<'a>>> {
     todo!()
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with

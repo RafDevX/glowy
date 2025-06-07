@@ -27,6 +27,9 @@ fn visit_binding_decl_spec<'a>(
     location: &Location,
     annotation: &Option<Box<Annotation<'a>>>,
 ) {
+    // TODO: handle case where `var x, y = f()`;
+    // i.e., use visit_expr instead of visit_single_expr
+
     for (name, expr) in &node.mapping {
         let mut label = Label::Bottom;
         let mut children_backtraces = vec![]; // order matters
@@ -49,7 +52,7 @@ fn visit_binding_decl_spec<'a>(
             // TODO: `match` other scopes
         };
 
-        if let Some(expr_backtrace) = exprs::visit_expr(ctx, expr) {
+        if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, expr) {
             label = label.union(expr_backtrace.label());
             children_backtraces.push(expr_backtrace);
         }

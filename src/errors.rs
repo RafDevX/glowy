@@ -136,6 +136,11 @@ pub enum AnalysisErrorKind<'a> {
     UnexpectedReturn { location: Location },
     /// Illegal statement present after a return statement.
     Unreachable,
+    /// Usage of a multi-value expression when a single-value was expected.
+    UnexpectedMultiValueExpression {
+        /// Where the expression was found.
+        location: Location,
+    },
 }
 
 impl<'a> AnalysisErrorKind<'a> {
@@ -151,7 +156,8 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::UnknownQualifier { .. }
             | Self::MissingReturn { .. }
             | Self::UnexpectedReturn { .. }
-            | Self::Unreachable => AnalysisErrorCategory::InvalidGo,
+            | Self::Unreachable
+            | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
     }

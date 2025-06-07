@@ -12,7 +12,7 @@ pub fn visit_receive<'a>(
     operand: &ExprNode<'a>,
     location: &Location,
 ) -> Option<LabelBacktrace<'a>> {
-    exprs::visit_expr(ctx, operand).and_then(|child| {
+    exprs::visit_single_expr(ctx, operand).and_then(|child| {
         LabelBacktrace::new(
             LabelBacktraceKind::Receive,
             child.label().clone(),

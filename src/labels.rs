@@ -370,6 +370,20 @@ impl<'a> LabelBacktrace<'a> {
         })
     }
 
+    /// Constructs a new instance equal to the union of all its children.
+    pub(crate) fn fold(
+        children: &[Self],
+        with_kind: LabelBacktraceKind,
+        at_location: Pinned<Location>,
+    ) -> Option<Self> {
+        let label = children
+            .iter()
+            .fold(Label::Bottom, |acc, bt| acc.union(bt.label()));
+
+        Self::new(with_kind, label, None, at_location, children)
+        // ^ None iff children are empty
+    }
+
     /// Returns a new instance (with symbol = None) representing a step above
     /// in the hierarchy between two instances (self and other).
     pub(crate) fn union(
