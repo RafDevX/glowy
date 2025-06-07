@@ -1,5 +1,5 @@
 use parser::{
-    ast::{CallNode, ExprNode, FunctionDeclNode},
+    ast::{CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, OperandNameNode},
     Location,
 };
 
@@ -86,9 +86,7 @@ pub fn visit_return<'a>(
     exprs: &[ExprNode<'a>],
     location: &Location,
 ) {
-    let func = if let Some(func) = ctx.current_function() {
-        func
-    } else {
+    let Some(func) = ctx.current_function() else {
         ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
             location: location.clone(),
         });
@@ -100,7 +98,24 @@ pub fn visit_return<'a>(
 
     let mut outcome = vec![];
 
-    for expr in exprs {
+    let exprs = if exprs.is_empty() {
+        if let Some(FunctionResultNode::Params(result)) = &func.borrow().signature().result {
+            // naked returns
+
+            result
+                .iter()
+                .flat_map(|p| p.ids.clone())
+                .map(|id| OperandNameNode { package: None, id })
+                .map(ExprNode::Name)
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        Vec::from(exprs)
+    };
+
+    for expr in &exprs {
         let child = exprs::visit_expr(ctx, expr);
 
         let backtrace = LabelBacktrace::new(
