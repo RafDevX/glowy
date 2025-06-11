@@ -1,5 +1,8 @@
 use parser::{
-    ast::{CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, OperandNameNode},
+    ast::{
+        CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
+        OperandNameNode,
+    },
     Location,
 };
 
@@ -94,12 +97,32 @@ pub fn visit_return<'a>(
         return;
     };
 
+    let outcome = calculate_outcome(ctx, func.borrow().signature(), exprs, location);
+
+    func.borrow_mut().set_outcome(outcome);
+
+    ctx.set_returning(true);
+}
+
+fn calculate_outcome<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    signature: &FunctionSignatureNode<'a>,
+    exprs: &[ExprNode<'a>],
+    location: &Location,
+) -> Vec<Option<LabelBacktrace<'a>>> {
     // TODO: branch backtrace
+
+    // if there's a single expression with a single function call, then nothing
+    // below applies and that function call's outcome is the final outcome
+    // (case 2 from https://go.dev/ref/spec#Return_statements)
+    if let [ExprNode::Call(call)] = exprs {
+        return visit_call(ctx, call);
+    }
 
     let mut outcome = vec![];
 
     let exprs = if exprs.is_empty() {
-        if let Some(FunctionResultNode::Params(result)) = &func.borrow().signature().result {
+        if let Some(FunctionResultNode::Params(result)) = &signature.result {
             // naked returns
 
             result
@@ -133,9 +156,7 @@ pub fn visit_return<'a>(
         outcome.push(backtrace);
     }
 
-    func.borrow_mut().set_outcome(outcome);
-
-    ctx.set_returning(true);
+    outcome
 }
 
 pub fn visit_call<'a>(

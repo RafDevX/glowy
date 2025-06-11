@@ -469,6 +469,10 @@ impl<'a> FunctionMetadata<'a> {
         Rc::new(RefCell::new(Self::new(signature)))
     }
 
+    pub fn signature(&self) -> &FunctionSignatureNode<'a> {
+        &self.signature
+    }
+
     pub fn set_outcome(&mut self, outcome: Vec<Option<LabelBacktrace<'a>>>) {
         self.outcome = outcome;
     }
