@@ -45,7 +45,10 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use parser::{ast::FunctionSignatureNode, Span};
 
-use crate::{labels::LabelBacktrace, FullPackagePath, Pinned};
+use crate::{
+    labels::{FunctionRef, LabelBacktrace},
+    FullPackagePath, Pinned,
+};
 
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers
@@ -408,7 +411,7 @@ pub struct Symbol<'a> {
     /// The accumulated label for this symbol, with tracked history
     label_backtrace: Option<LabelBacktrace<'a>>,
     /// If this symbol points to a function, its details relevant to analysis
-    func: Option<FunctionMetadataRef<'a>>,
+    func_metadata: Option<FunctionMetadataRef<'a>>,
 }
 
 impl<'a> Symbol<'a> {
@@ -421,7 +424,7 @@ impl<'a> Symbol<'a> {
             declared_name,
             mutable,
             label_backtrace,
-            func: None,
+            func_metadata: None,
         }
     }
 
@@ -444,6 +447,10 @@ impl<'a> Symbol<'a> {
     pub fn label_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.label_backtrace.as_ref()
     }
+
+    pub fn func_metadata(&self) -> Option<FunctionMetadataRef<'a>> {
+        self.func_metadata.clone() // cheap to clone ref
+    }
 }
 
 // AnalysisContext's stack of current function definitions needs to temporarily
@@ -453,24 +460,37 @@ pub type FunctionMetadataRef<'a> = Rc<RefCell<FunctionMetadata<'a>>>;
 
 #[derive(Debug)]
 pub struct FunctionMetadata<'a> {
+    func_ref: FunctionRef<'a>, // for realization subst to work, must know decl
     signature: FunctionSignatureNode<'a>,
     outcome: Vec<Option<LabelBacktrace<'a>>>,
 }
 
 impl<'a> FunctionMetadata<'a> {
-    pub fn new(signature: &FunctionSignatureNode<'a>) -> Self {
+    pub fn new(func_ref: FunctionRef<'a>, signature: &FunctionSignatureNode<'a>) -> Self {
         Self {
+            func_ref,
             signature: signature.clone(),
             outcome: Vec::new(),
         }
     }
 
-    pub fn new_ref(signature: &FunctionSignatureNode<'a>) -> FunctionMetadataRef<'a> {
-        Rc::new(RefCell::new(Self::new(signature)))
+    pub fn new_ref(
+        func_ref: FunctionRef<'a>,
+        signature: &FunctionSignatureNode<'a>,
+    ) -> FunctionMetadataRef<'a> {
+        Rc::new(RefCell::new(Self::new(func_ref, signature)))
+    }
+
+    pub fn func_ref(&self) -> &FunctionRef<'a> {
+        &self.func_ref
     }
 
     pub fn signature(&self) -> &FunctionSignatureNode<'a> {
         &self.signature
+    }
+
+    pub fn outcome(&self) -> &Vec<Option<LabelBacktrace<'a>>> {
+        &self.outcome
     }
 
     pub fn set_outcome(&mut self, outcome: Vec<Option<LabelBacktrace<'a>>>) {

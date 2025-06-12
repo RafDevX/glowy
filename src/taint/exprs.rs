@@ -4,6 +4,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
+    symbols::SymbolRef,
     Pinned,
 };
 
@@ -97,7 +98,12 @@ pub fn visit_single_expr<'a>(
                 location: location.clone(),
             });
 
-            LabelBacktrace::fold(&children, LabelBacktraceKind::Expression, ctx.pin(location))
+            LabelBacktrace::fold(
+                &children,
+                LabelBacktraceKind::Expression,
+                None,
+                ctx.pin(location),
+            )
         } else {
             // only happens if children are empty, where `fold` would return None anyway
             None
@@ -109,6 +115,31 @@ pub fn visit_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &OperandNameNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
+    let symbol = resolve_operand_name(ctx, node);
+
+    if let Some(symbol) = symbol {
+        symbol
+            .borrow()
+            .label_backtrace()
+            .and_then(|symbol_backtrace| {
+                LabelBacktrace::new(
+                    LabelBacktraceKind::Expression,
+                    symbol_backtrace.label().clone(),
+                    Some(node.id.content()),
+                    ctx.pin(node.id.location()),
+                    [symbol_backtrace],
+                )
+            })
+    } else {
+        None
+    }
+}
+
+/// Reports error for unknown qualifier and unknown symbol, if applicable
+pub fn resolve_operand_name<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &OperandNameNode<'a>,
+) -> Option<SymbolRef<'a>> {
     let symbol = if let Some(qualifier) = &node.package {
         if let Some(symbol) = ctx
             .symtab()
@@ -126,26 +157,13 @@ pub fn visit_operand_name<'a>(
         ctx.symtab().get_symbol(node.id.content())
     };
 
-    if let Some(symbol) = symbol {
-        symbol
-            .borrow()
-            .label_backtrace()
-            .and_then(|symbol_backtrace| {
-                LabelBacktrace::new(
-                    LabelBacktraceKind::Expression,
-                    symbol_backtrace.label().clone(),
-                    Some(node.id.content()),
-                    ctx.pin(node.id.location()),
-                    [symbol_backtrace],
-                )
-            })
-    } else {
+    if symbol.is_none() {
         ctx.report_error(AnalysisErrorKind::UnknownSymbol {
             found: node.id.clone(),
         });
-
-        None
     }
+
+    symbol
 }
 
 pub fn visit_indexing<'a>(

@@ -133,9 +133,26 @@ pub enum AnalysisErrorKind<'a> {
         func: Span<'a>, // TODO: won't work for anonymous literals
     },
     /// Illegal return statement outside of a function declaration.
-    UnexpectedReturn { location: Location },
+    UnexpectedReturn {
+        /// Where the extraneous return statement was found.
+        location: Location,
+    },
     /// Illegal statement present after a return statement.
     Unreachable,
+    /// Invalid call of an expression that could not be resolved to a function.
+    IllegalCallExpression {
+        /// Where the unsupported call expression was found.
+        location: Location,
+    },
+    /// Differing number of arguments in function call wrt function arity.
+    IncorrectCallCardinality {
+        /// The number of parameters declared in the function signature.
+        expected: usize,
+        /// The (incorrect) number of arguments passed in the function call.
+        found: usize,
+        /// Where the function call took place.
+        location: Location,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -157,6 +174,8 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::MissingReturn { .. }
             | Self::UnexpectedReturn { .. }
             | Self::Unreachable
+            | Self::IllegalCallExpression { .. }
+            | Self::IncorrectCallCardinality { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }

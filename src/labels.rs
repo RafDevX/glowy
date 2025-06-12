@@ -242,6 +242,26 @@ impl<'a> Label<'a> {
             }
         }
     }
+
+    pub(crate) fn is_synthetic_func_param_decl(
+        &self,
+        param_func: &FunctionRef<'a>,
+        param_index: usize,
+    ) -> bool {
+        let Self::Tags(tags) = self else {
+            return false;
+        };
+
+        if tags.len() != 1 {
+            return false;
+        }
+
+        let Some(LabelTag::Synthetic { func, index, .. }) = tags.first() else {
+            return false;
+        };
+
+        func == param_func && *index == param_index
+    }
 }
 
 impl<'a> PartialOrd for Label<'a> {
@@ -374,13 +394,14 @@ impl<'a> LabelBacktrace<'a> {
     pub(crate) fn fold(
         children: &[Self],
         with_kind: LabelBacktraceKind,
+        with_symbol: Option<&'a str>,
         at_location: Pinned<Location>,
     ) -> Option<Self> {
         let label = children
             .iter()
             .fold(Label::Bottom, |acc, bt| acc.union(bt.label()));
 
-        Self::new(with_kind, label, None, at_location, children)
+        Self::new(with_kind, label, with_symbol, at_location, children)
         // ^ None iff children are empty
     }
 
@@ -400,6 +421,43 @@ impl<'a> LabelBacktrace<'a> {
             [self, other],
         )
         .unwrap() // safe because if self exists, label is not Bottom
+    }
+
+    /// Realizes synthetic placeholders in the hierarchy to concrete backtraces.
+    pub(crate) fn realize(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_index: usize,
+        concrete: Option<&Self>,
+    ) -> Option<Self> {
+        if self.kind == LabelBacktraceKind::FunctionParameter {
+            let label = concrete.map(Self::label).unwrap_or(&Label::Bottom);
+
+            if label.is_synthetic_func_param_decl(from_func, from_index) {
+                Self::new(
+                    LabelBacktraceKind::FunctionArgument,
+                    label.clone(),
+                    self.symbol(),
+                    self.location().clone(),
+                    concrete,
+                )
+            } else {
+                Some(self.clone())
+            }
+        } else {
+            let children: Vec<_> = self
+                .children()
+                .iter()
+                .flat_map(|child| child.realize(from_func, from_index, concrete))
+                .collect();
+
+            Self::fold(
+                &children,
+                *self.kind(),
+                self.symbol(),
+                self.location().clone(),
+            )
+        }
     }
 
     /// Returns a new instance whose label only contains tags in a given
@@ -463,6 +521,10 @@ pub enum LabelBacktraceKind {
     Receive,
     /// Synthetic label assigned to a declared parameter for taint analysis.
     FunctionParameter,
+    /// Concrete label associated to argument binding at function invocation.
+    FunctionArgument,
+    /// Aggregate label for all arguments passed to a variadic parameter.
+    FunctionVariadicAggregation,
     /// Individual label for one particular expression in a return statement.
     Return,
 }

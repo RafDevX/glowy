@@ -3,14 +3,14 @@ use parser::{
         CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
         OperandNameNode,
     },
-    Location,
+    Location, Span,
 };
 
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
-    symbols::{FunctionMetadata, Symbol},
+    symbols::{FunctionMetadata, FunctionMetadataRef, Symbol},
     taint::exprs,
 };
 
@@ -23,6 +23,8 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
 
     ctx.symtab_mut().select_first_child_scope(); // push
 
+    let func_ref = FunctionRef::Named(func_name.clone());
+
     let mut param_index = 0;
 
     for param in &node.signature.params {
@@ -34,7 +36,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
             }
 
             let synthetic = LabelTag::Synthetic {
-                func: FunctionRef::Named(func_name.clone()),
+                func: func_ref.clone(),
                 index: param_index,
                 identifier: Some(id.clone()),
             };
@@ -67,7 +69,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         }
     }
 
-    let func = FunctionMetadata::new_ref(&node.signature);
+    let func = FunctionMetadata::new_ref(func_ref, &node.signature);
     ctx.push_function(func);
 
     super::visit_statements(ctx, &node.body);
@@ -163,8 +165,107 @@ pub fn visit_call<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &CallNode<'a>,
 ) -> Vec<Option<LabelBacktrace<'a>>> {
-    todo!()
+    let Some(metadata) = func_metadata_from_call_expr(ctx, &node.func) else {
+        return vec![]; // error already reported
+    };
+    let borrowed = metadata.borrow();
+    let params = &borrowed.signature().params;
+
+    if node.args.len() != params.len() {
+        let variadic = params.last().map(|p| p.variadic).unwrap_or(false);
+
+        if !(variadic && node.args.len() > params.len()) {
+            ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+                expected: params.len(),
+                found: node.args.len(),
+                location: node.location.clone(),
+            });
+
+            return vec![];
+        }
+    }
+
+    let mut result = vec![];
+
+    'components: for component in borrowed.outcome() {
+        let mut realized = None;
+
+        // vvv cannot actually do this because if/else would have diff types,
+        // vvv so we must create it manually instead...
+        //
+        // let iter = params
+        //     .iter()
+        //     .flat_map(|param| {
+        //         if param.ids.is_empty() {
+        //             iter::once((param.variadic, None))
+        //         } else {
+        //             param.ids.iter().map(|id| (param.variadic, Some(id)))
+        //         }
+        //     })
+        //     .enumerate();
+
+        let mut ids = Vec::new();
+        for param in params {
+            if param.ids.is_empty() {
+                ids.push((None, param.variadic));
+            } else {
+                ids.extend(param.ids.iter().map(|id| (Some(id), param.variadic)));
+            }
+        }
+
+        for (index, (id, variadic)) in ids.into_iter().enumerate() {
+            let Some(backtrace) = realized.as_ref().unwrap_or(component) else {
+                result.push(None);
+
+                continue 'components;
+            };
+
+            let concrete = if variadic {
+                let children: Vec<_> = node.args[index..]
+                    .iter()
+                    .filter_map(|arg| exprs::visit_single_expr(ctx, arg))
+                    .collect();
+
+                LabelBacktrace::fold(
+                    &children,
+                    LabelBacktraceKind::FunctionVariadicAggregation,
+                    id.map(Span::content),
+                    ctx.pin(node.location.clone()),
+                )
+            } else {
+                let arg = node.args.get(index).expect("already checked arg count");
+
+                exprs::visit_single_expr(ctx, arg)
+            };
+
+            realized = Some(backtrace.realize(borrowed.func_ref(), index, concrete.as_ref()));
+        }
+
+        result.push(realized.unwrap_or_else(|| component.clone()));
+    }
+
+    result
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
+}
+
+/// Already reports error if [`None`] is returned.
+fn func_metadata_from_call_expr<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &ExprNode<'a>,
+) -> Option<FunctionMetadataRef<'a>> {
+    match node {
+        ExprNode::Name(operand) => {
+            if let Some(symbol) = exprs::resolve_operand_name(ctx, operand) {
+                symbol.borrow().func_metadata()
+            } else {
+                None
+            }
+        }
+        ExprNode::Literal(lit) => todo!(),
+        ExprNode::Call(call) => todo!(),
+        ExprNode::Indexing(indexing) => todo!(),
+        ExprNode::UnaryOp { .. } | ExprNode::BinaryOp { .. } => None,
+    }
 }
