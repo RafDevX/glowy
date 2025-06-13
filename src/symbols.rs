@@ -63,11 +63,12 @@ pub struct SymbolTable<'a> {
 
     /// Currently selected (package or sub-package) scope
     current_scope: ScopeRef<'a>,
-    /// Index in parent scope's children array, for each level (last = current)
+    /// Count of traversed children, for each level (last value = current level)
+    ///
+    /// For example, a cursor of:
+    ///   - `[0]` means that nothing has been declared yet in the package scope;
+    ///   - `[2, 3]` means that we have seen 3 children in the 2nd package func.
     current_cursor: Vec<usize>,
-
-    /// Whether some operations will first trigger entering the nth child scope
-    primed: Option<usize>,
 }
 
 impl<'a> SymbolTable<'a> {
@@ -86,13 +87,10 @@ impl<'a> SymbolTable<'a> {
             // This dead end will then be automatically deleted (by Rc).
             current_scope: Scope::new_root_ref(),
             current_cursor: Vec::new(),
-
-            primed: None,
         }
     }
 
     /// This function should be called upon starting analysis of each file.
-    /// Note that this automatically primes the symtab too!
     pub fn enter_package(
         &mut self,
         name: Pinned<Span<'a>>,
@@ -106,20 +104,19 @@ impl<'a> SymbolTable<'a> {
             .entry(path)
             .or_insert_with(|| PackageScopeEnvelope::new(name));
 
-        self.current_file_named_imports = HashMap::new();
-        self.current_file_wildcard_imports = Vec::new();
+        self.current_file_named_imports.clear();
+        self.current_file_wildcard_imports.clear();
 
         self.current_scope = envelope.scope.clone();
-        self.current_cursor = Vec::new();
-        self.primed = Some(envelope.next_child_index);
+        self.current_cursor = vec![envelope.next_child_index];
 
         &envelope.package_name
     }
 
     pub fn save_package_progress(&mut self, path: &FullPackagePath) {
-        if let Some(current) = self.current_cursor.first() {
+        if let Some(&index) = self.current_cursor.first() {
             if let Some(envelope) = self.package_scopes.get_mut(path) {
-                envelope.next_child_index = current + 1;
+                envelope.next_child_index = index;
             }
         }
     }
@@ -130,13 +127,20 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
-    pub fn select_first_child_scope(&mut self) {
-        self.trigger_if_primed();
+    pub fn select_next_child_scope(&mut self) {
+        let Some(cursor) = self.current_cursor.last_mut() else {
+            // the cursor vector is empty, which can only happen if
+            // `enter_package` was never called, so we just ignore this call
+            return;
+        };
+
+        let index = *cursor;
+        *cursor += 1;
 
         let child = {
             let mut scope = self.current_scope.borrow_mut();
 
-            match scope.children.first().cloned() {
+            match scope.children.get(index).cloned() {
                 Some(existing) => existing,
                 None => {
                     let new_scope = Scope::new_ref(self.current_scope.clone());
@@ -151,80 +155,16 @@ impl<'a> SymbolTable<'a> {
         self.current_cursor.push(0);
     }
 
-    fn select_nth_child_scope(&mut self, index: usize) {
-        self.select_first_child_scope();
-
-        for _ in 0..index {
-            self.select_next_sibling_scope();
-        }
-    }
-
-    /// Prepare for potential children scopes.
-    ///
-    /// This is essentially a lazy version of `select_first_child_scope`, since
-    /// it instead defers selecting a child scope until when/if it is actually
-    /// needed, for example immediately before `select_next_sibling_scope`.
-    /// This prevents creating unnecessary scopes, e.g. when traversing package
-    /// top-level declarations where `const`s don't need a separate child scope
-    /// but functions do.
-    pub fn prime_for_children(&mut self) {
-        // if was already primed, then this counts as a triggering operation
-        self.trigger_if_primed();
-
-        self.primed = Some(0);
-    }
-
-    pub fn deprime(&mut self) {
-        self.primed = None;
-    }
-
-    fn trigger_if_primed(&mut self) {
-        if let Some(n) = self.primed {
-            self.primed = None;
-            self.select_nth_child_scope(n);
+    pub fn select_parent_scope(&mut self) {
+        if let Some(parent) = self.get_parent_scope() {
+            self.current_scope = parent;
+            self.current_cursor.pop();
         }
     }
 
     fn get_parent_scope(&self) -> Option<ScopeRef<'a>> {
         // None if already at the root (package scope)
         self.current_scope.borrow().parent.clone()
-    }
-
-    pub fn select_parent_scope(&mut self) {
-        if let Some(parent) = self.get_parent_scope() {
-            if self.primed.is_some() {
-                // this is equivalent, when we know parent != None
-                self.primed = None;
-                return;
-            }
-
-            self.current_scope = parent;
-            self.current_cursor.pop();
-        }
-    }
-
-    pub fn select_next_sibling_scope(&mut self) {
-        self.trigger_if_primed();
-
-        if let Some(parent) = self.get_parent_scope() {
-            if let Some(index) = self.current_cursor.last_mut() {
-                let sibling = {
-                    let mut parent_borrowed = parent.borrow_mut();
-
-                    if let Some(sibling) = parent_borrowed.children.get(*index + 1).cloned() {
-                        sibling
-                    } else {
-                        let new_scope = Scope::new_ref(parent.clone());
-                        parent_borrowed.children.push(new_scope.clone());
-
-                        new_scope
-                    }
-                };
-
-                self.current_scope = sibling;
-                *index += 1;
-            }
-        }
     }
 
     pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
@@ -283,8 +223,6 @@ impl<'a> SymbolTable<'a> {
         name: &'a str,
         symbol: SymbolRef<'a>,
     ) -> Option<SymbolRef<'a>> {
-        self.trigger_if_primed();
-
         // technically shouldn't allow declaring symbols at the package level
         // which are already declared in other packages imported via `import .`,
         // but we'll leave that kind of extensive checks for the actual Go

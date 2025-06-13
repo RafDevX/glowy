@@ -21,7 +21,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
 
     ctx.declare_new_symbol(symbol);
 
-    ctx.symtab_mut().select_first_child_scope(); // push
+    ctx.symtab_mut().select_next_child_scope(); // push
 
     let func_ref = FunctionRef::Named(func_name.clone());
 

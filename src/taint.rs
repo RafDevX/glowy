@@ -95,11 +95,7 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
         } => {
             explicit::visit_binding_decl(ctx, specs, true, location, annotation);
         }
-        DeclNode::Function(func_node) => {
-            ctx.symtab_mut().select_next_sibling_scope();
-
-            funcs::visit_function_decl(ctx, func_node);
-        }
+        DeclNode::Function(func_node) => funcs::visit_function_decl(ctx, func_node),
     }
 }
 
@@ -133,7 +129,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Decl(decl) => todo!(),
         StatementNode::If(r#if) => todo!(),
         StatementNode::Block(statements) => {
-            ctx.symtab_mut().select_first_child_scope(); // push
+            ctx.symtab_mut().select_next_child_scope(); // push
 
             visit_statements(ctx, statements);
 
