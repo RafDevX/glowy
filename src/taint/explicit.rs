@@ -31,6 +31,15 @@ fn visit_binding_decl_spec<'a>(
     // i.e., use visit_expr instead of visit_single_expr
 
     for (name, expr) in &node.mapping {
+        if name.content() == "_" {
+            // blank identifier, so we don't really need to do anything else
+            // except visiting the expression to process e.g. function calls
+            // (needed to detect insecure flows wrt integrity, for example).
+            exprs::visit_single_expr(ctx, expr);
+
+            continue;
+        }
+
         let mut label = Label::Bottom;
         let mut children_backtraces = vec![]; // order matters
 
