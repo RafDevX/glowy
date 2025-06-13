@@ -381,6 +381,20 @@ impl<'a> LabelBacktrace<'a> {
             })
             .collect();
 
+        // if there is only one child
+        if let [child] = children.as_slice() {
+            if child.label == label && child.location == location && child.symbol == symbol {
+                // avoid unnecessary repeated backtraces that just make everything more complex;
+                // for example, in the example below:
+                // ```go
+                // // glowy::label::{high}
+                // var a = 3
+                // ```
+                // we just want ExplicitAnnotation and not also Assignment another level up
+                return Some(child.clone());
+            }
+        }
+
         Some(Self {
             kind,
             label,
