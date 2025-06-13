@@ -431,12 +431,13 @@ impl<'a> LabelBacktrace<'a> {
         concrete: Option<&Self>,
     ) -> Option<Self> {
         if self.kind == LabelBacktraceKind::FunctionParameter {
-            let label = concrete.map(Self::label).unwrap_or(&Label::Bottom);
-
-            if label.is_synthetic_func_param_decl(from_func, from_index) {
+            if self
+                .label()
+                .is_synthetic_func_param_decl(from_func, from_index)
+            {
                 Self::new(
                     LabelBacktraceKind::FunctionArgument,
-                    label.clone(),
+                    concrete.map(Self::label).unwrap_or(&Label::Bottom).clone(),
                     self.symbol(),
                     self.location().clone(),
                     concrete,
