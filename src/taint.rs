@@ -10,26 +10,6 @@ mod explicit;
 mod exprs;
 mod funcs;
 
-macro_rules! select_scope_iter {
-    ($ctx:expr, $item:ident in $items:expr => $body:block) => {
-        let mut iter = $items.iter().peekable();
-
-        if iter.peek().is_some() {
-            $ctx.symtab_mut().select_first_child_scope();
-
-            while let Some($item) = iter.next() {
-                $body
-
-                if iter.peek().is_some() {
-                    $ctx.symtab_mut().select_next_sibling_scope();
-                }
-            }
-
-            $ctx.symtab_mut().select_parent_scope();
-        }
-    };
-}
-
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SourceFileNode<'a>,
