@@ -153,6 +153,15 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the function call took place.
         location: Location,
     },
+    /// Incorrect short variable declaration with mismatching mappings.
+    UnevenShortVarDecl {
+        /// Where the short variable declaration was found.
+        location: Location,
+        /// The number of identifiers found.
+        left: usize,
+        /// The number of expressions found.
+        right: usize,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -176,6 +185,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::Unreachable
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }
+            | Self::UnevenShortVarDecl { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }

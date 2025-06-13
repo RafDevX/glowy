@@ -111,6 +111,12 @@ impl<'a> AnalysisContext<'a> {
                 return;
             }
 
+            if existing.borrow().declared_name().pinned_location() > name.pinned_location() {
+                // the "existing" is actually a redeclaration of this
+                // declaration, so we shouldn't report an error either
+                return;
+            }
+
             self.report_error(AnalysisErrorKind::IllegalRedeclaration {
                 previous: existing.borrow().declared_name().clone(),
                 found: name.inner().clone(),

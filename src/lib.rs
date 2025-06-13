@@ -125,3 +125,37 @@ impl PartialOrd for Pinned<Span<'_>> {
 }
 
 impl Eq for Pinned<Span<'_>> {}
+
+impl PartialOrd for Pinned<Location> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        if self.virtual_file_path != other.virtual_file_path {
+            // not comparable on different files
+            return None;
+        }
+
+        if self.inner == other.inner {
+            return Some(cmp::Ordering::Equal);
+        }
+
+        // we return an ordering only if the start is clearly distinct
+        // and one location is not contained in the other
+
+        match self.inner.start.cmp(&other.inner.start) {
+            cmp::Ordering::Less => {
+                if self.inner.end < other.inner.end {
+                    Some(cmp::Ordering::Less)
+                } else {
+                    None
+                }
+            }
+            cmp::Ordering::Greater => {
+                if self.inner.end > other.inner.end {
+                    Some(cmp::Ordering::Greater)
+                } else {
+                    None
+                }
+            }
+            cmp::Ordering::Equal => None,
+        }
+    }
+}
