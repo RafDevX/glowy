@@ -445,6 +445,11 @@ impl<'a> LabelBacktrace<'a> {
             } else {
                 Some(self.clone())
             }
+        } else if self.children.is_empty() {
+            // should only happen for e.g. ExplicitAnnotation with an unrelated
+            // and concrete label, at least in theory
+
+            Some(self.clone())
         } else {
             let children: Vec<_> = self
                 .children()
