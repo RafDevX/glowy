@@ -389,6 +389,10 @@ impl<'a> Symbol<'a> {
     pub fn func_metadata(&self) -> Option<FunctionMetadataRef<'a>> {
         self.func_metadata.clone() // cheap to clone ref
     }
+
+    pub fn set_func_metadata(&mut self, func_metadata: FunctionMetadataRef<'a>) {
+        self.func_metadata = Some(func_metadata);
+    }
 }
 
 // AnalysisContext's stack of current function definitions needs to temporarily

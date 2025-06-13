@@ -19,7 +19,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
 
     let symbol = Symbol::new_ref(func_name.clone(), false, None);
 
-    ctx.declare_new_symbol(symbol);
+    ctx.declare_new_symbol(symbol.clone());
 
     ctx.symtab_mut().select_next_child_scope(); // push
 
@@ -69,8 +69,10 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         }
     }
 
-    let func = FunctionMetadata::new_ref(func_ref, &node.signature);
-    ctx.push_function(func);
+    let metadata = FunctionMetadata::new_ref(func_ref, &node.signature);
+    symbol.borrow_mut().set_func_metadata(metadata.clone());
+
+    ctx.push_function(metadata);
 
     super::visit_statements(ctx, &node.body);
 
