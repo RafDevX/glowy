@@ -126,7 +126,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         }
         StatementNode::Assignment(assignment) => todo!(),
         StatementNode::ShortVarDecl(decl) => todo!(),
-        StatementNode::Decl(decl) => todo!(),
+        StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => todo!(),
         StatementNode::Block(statements) => {
             ctx.symtab_mut().select_next_child_scope(); // push
