@@ -100,7 +100,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Expr(expr) => {
             exprs::visit_expr(ctx, expr);
         }
-        StatementNode::Send(send) => todo!(),
+        StatementNode::Send(send) => channels::visit_send(ctx, send),
         StatementNode::Inc { operand, location } | StatementNode::Dec { operand, location } => {
             explicit::visit_incdec(ctx, operand, location);
         }

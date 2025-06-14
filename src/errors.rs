@@ -188,6 +188,11 @@ pub enum AnalysisErrorKind<'a> {
         /// The immutable symbol.
         symbol: Span<'a>,
     },
+    /// Invalid or unsupported expression used as channel in a send statement.
+    IllegalChannelExpression {
+        /// Where the illegal expression was found.
+        location: Location,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -216,6 +221,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::MultiComplexAssignment { .. }
             | Self::InvalidLeftValue { .. }
             | Self::ImmutableLeftValue { .. }
+            | Self::IllegalChannelExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }

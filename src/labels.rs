@@ -537,6 +537,8 @@ pub enum LabelBacktraceKind {
     Assignment,
     /// Compounded label derived from the parts of a composite expression.
     Expression,
+    /// Label originating from a value sent into a given channel.
+    Send,
     /// Aggregate label for values received from a given channel.
     Receive,
     /// Synthetic label assigned to a declared parameter for taint analysis.
