@@ -104,7 +104,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Inc { operand, location } | StatementNode::Dec { operand, location } => {
             todo!()
         }
-        StatementNode::Assignment(assignment) => todo!(),
+        StatementNode::Assignment(assignment) => explicit::visit_assignment(ctx, assignment),
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => todo!(),

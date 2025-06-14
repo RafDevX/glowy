@@ -162,6 +162,32 @@ pub enum AnalysisErrorKind<'a> {
         /// The number of expressions found.
         right: usize,
     },
+    /// Incorrect assignment with mismatching mappings (count L =/= R).
+    UnevenAssignment {
+        /// Where the assignment was found.
+        location: Location,
+        /// The number of left-values found.
+        left: usize,
+        /// The number of expressions found.
+        right: usize,
+    },
+    /// Invalid complex assignment with more than one left-value.
+    MultiComplexAssignment {
+        /// Where the assignment was found.
+        location: Location,
+        /// The number of left-values found.
+        num: usize,
+    },
+    /// Illegal or unsupported expression used as an assignment left-value.
+    InvalidLeftValue {
+        /// Where the violation was found.
+        location: Location,
+    },
+    /// Constant or unchangeable symbol used as an assignment left-value.
+    ImmutableLeftValue {
+        /// The immutable symbol.
+        symbol: Span<'a>,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -186,6 +212,10 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }
             | Self::UnevenShortVarDecl { .. }
+            | Self::UnevenAssignment { .. }
+            | Self::MultiComplexAssignment { .. }
+            | Self::InvalidLeftValue { .. }
+            | Self::ImmutableLeftValue { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }

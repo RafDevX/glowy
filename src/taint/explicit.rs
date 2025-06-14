@@ -1,7 +1,7 @@
 use std::cmp;
 
 use parser::{
-    ast::{BindingDeclSpecNode, ShortVarDeclNode},
+    ast::{AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, ShortVarDeclNode},
     Annotation, Location,
 };
 
@@ -153,4 +153,83 @@ pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDe
         &node.location,
         &node.annotation,
     );
+}
+
+pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode<'a>) {
+    if node.kind != AssignmentKind::Simple && node.lhs.len() != 1 {
+        ctx.report_error(AnalysisErrorKind::MultiComplexAssignment {
+            location: node.location.clone(),
+            num: node.lhs.len(),
+        });
+
+        return;
+    } else if node.lhs.len() != node.rhs.len() {
+        ctx.report_error(AnalysisErrorKind::UnevenAssignment {
+            location: node.location.clone(),
+            left: node.lhs.len(),
+            right: node.rhs.len(),
+        });
+
+        return;
+    }
+
+    // TODO: branch backtrace
+
+    for (lhs, rhs) in node.lhs.iter().zip(node.rhs.iter()) {
+        // TODO: support more kinds of left-values, e.g. indexing
+        // (maybe have a module for complex data-types like arrays and structs
+        //  which defines a trait that we can use to set values like we do for
+        //  raw symbols here?)
+
+        let ExprNode::Name(name) = lhs else {
+            let location = exprs::get_expr_location(lhs).unwrap_or_else(|| node.location.clone());
+
+            ctx.report_error(AnalysisErrorKind::InvalidLeftValue { location });
+
+            return;
+        };
+
+        let Some(symbol) = exprs::resolve_operand_name(ctx, name) else {
+            // error already reported
+            return;
+        };
+
+        if !symbol.borrow().mutable() {
+            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue {
+                symbol: name.id.clone(),
+            });
+
+            return;
+        }
+
+        let rhs_backtrace = exprs::visit_single_expr(ctx, rhs);
+
+        let mut children = vec![rhs_backtrace /*, branch_backtrace */];
+
+        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
+
+        if node.kind != AssignmentKind::Simple || !in_current_scope {
+            // for complex assignments like `x += y` we need to keep x's label,
+            // but for simple assignments like `x = y` we can usually overwrite
+            // it and drop the previous x label, except if x was not declared in
+            // the current scope, in which case we (heuristically) have to
+            // conservatively assume that this is e.g. an if branch and so the
+            // other branch might not have a simple assignment, so we can't
+            // forget x's previous label either
+            // FIXME: try to improve symtab alt branch support to avoid this
+
+            children.push(symbol.borrow().label_backtrace().cloned());
+        }
+
+        let children: Vec<_> = children.into_iter().flatten().collect();
+
+        let backtrace = LabelBacktrace::fold(
+            &children,
+            LabelBacktraceKind::Assignment,
+            Some(name.id.content()), // symbol.declared_name()?
+            ctx.pin(node.location.clone()),
+        );
+
+        symbol.borrow_mut().set_label_backtrace(backtrace);
+    }
 }

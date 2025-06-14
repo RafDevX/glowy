@@ -1,4 +1,7 @@
-use parser::ast::{ExprNode, IndexingNode, OperandNameNode, UnaryOpKind};
+use parser::{
+    ast::{ExprNode, IndexingNode, OperandNameNode, UnaryOpKind},
+    Location,
+};
 
 use crate::{
     context::AnalysisContext,
@@ -183,4 +186,28 @@ pub fn visit_indexing<'a>(
             ctx.pin(node.location.clone()),
         )),
     }
+}
+
+pub fn get_expr_location(node: &ExprNode<'_>) -> Option<Location> {
+    let location = match node {
+        ExprNode::Name(name) => {
+            let start = if let Some(package) = &name.package {
+                package.location().start
+            } else {
+                name.id.location().start
+            };
+
+            start..name.id.location().end
+        }
+        ExprNode::Call(call) => call.location.clone(),
+        ExprNode::Indexing(indexing) => indexing.location.clone(),
+        ExprNode::UnaryOp { location, .. } | ExprNode::BinaryOp { location, .. } => {
+            location.clone()
+        }
+
+        // vvv FIXME: try to add to parser? literally the only thing forcing an Option here
+        ExprNode::Literal(_) => return None,
+    };
+
+    Some(location)
 }

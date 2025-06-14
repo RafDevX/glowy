@@ -233,6 +233,10 @@ impl<'a> SymbolTable<'a> {
             .set_local_symbol(name, symbol)
     }
 
+    pub fn is_symbol_in_current_scope(&self, symbol: SymbolRef<'a>) -> bool {
+        self.current_scope.borrow().contains_local_symbol(symbol)
+    }
+
     /// Returns None if no qualifier was specified but the package has not yet
     /// been analyzed, so its native name is not yet known. Otherwise, the
     /// return indicates whether the new spec conflicts with a previous spec
@@ -333,6 +337,10 @@ impl<'a> Scope<'a> {
     fn set_local_symbol(&mut self, name: &'a str, symbol: SymbolRef<'a>) -> Option<SymbolRef<'a>> {
         self.symbols.insert(name, symbol)
     }
+
+    fn contains_local_symbol(&self, symbol: SymbolRef<'a>) -> bool {
+        self.symbols.values().any(|s| Rc::ptr_eq(s, &symbol))
+    }
 }
 
 // Scopes cannot own Symbols directly because multiple scopes may need to refer
@@ -382,8 +390,16 @@ impl<'a> Symbol<'a> {
         &self.declared_name
     }
 
+    pub fn mutable(&self) -> bool {
+        self.mutable
+    }
+
     pub fn label_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.label_backtrace.as_ref()
+    }
+
+    pub fn set_label_backtrace(&mut self, label_backtrace: Option<LabelBacktrace<'a>>) {
+        self.label_backtrace = label_backtrace;
     }
 
     pub fn func_metadata(&self) -> Option<FunctionMetadataRef<'a>> {
