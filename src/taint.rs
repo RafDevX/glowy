@@ -9,6 +9,7 @@ mod channels;
 mod explicit;
 mod exprs;
 mod funcs;
+mod implicit;
 
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
@@ -116,7 +117,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Assignment(assignment) => explicit::visit_assignment(ctx, assignment),
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
-        StatementNode::If(r#if) => todo!(),
+        StatementNode::If(r#if) => implicit::visit_if(ctx, r#if),
         StatementNode::Block(block) => visit_block(ctx, block),
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Go { expr, location } => match expr {
