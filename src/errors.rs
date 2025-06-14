@@ -193,6 +193,11 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the illegal expression was found.
         location: Location,
     },
+    /// Illegal `go` statement with a non-call expression.
+    GoNotCall {
+        /// Where the statement was found.
+        location: Location,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -222,6 +227,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::InvalidLeftValue { .. }
             | Self::ImmutableLeftValue { .. }
             | Self::IllegalChannelExpression { .. }
+            | Self::GoNotCall { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }

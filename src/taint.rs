@@ -1,5 +1,5 @@
 use parser::{
-    ast::{DeclNode, ImportSpecNode, SourceFileNode, StatementNode},
+    ast::{DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
     Span,
 };
 
@@ -116,6 +116,16 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             ctx.symtab_mut().select_parent_scope(); // pop
         }
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
-        StatementNode::Go { expr, location } => todo!(),
+        StatementNode::Go { expr, location } => match expr {
+            ExprNode::Call(call) => {
+                // for our purposes, a `go` statement is functionally equivalent to a function call
+                funcs::visit_call(ctx, call);
+            }
+            _ => {
+                ctx.report_error(AnalysisErrorKind::GoNotCall {
+                    location: location.clone(),
+                });
+            }
+        },
     }
 }
