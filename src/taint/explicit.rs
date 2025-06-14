@@ -88,13 +88,11 @@ fn visit_binding_decl_spec<'a>(
             // TODO: `match` other scopes
         };
 
-        // TODO: branch backtrace
-
         let backtrace = LabelBacktrace::fold(
             [
                 explicit_backtrace.as_ref(),
                 expr_backtrace.as_ref(),
-                /*, branch_backtrace */
+                ctx.branch_backtrace(),
             ]
             .into_iter()
             .flatten(),
@@ -188,8 +186,6 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         return;
     }
 
-    // TODO: branch backtrace
-
     for (lhs, rhs_backtrace) in node.lhs.iter().zip(rhs_backtraces.iter()) {
         // TODO: support more kinds of left-values, e.g. indexing
         // (maybe have a module for complex data-types like arrays and structs
@@ -217,7 +213,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             return;
         }
 
-        let mut children = vec![rhs_backtrace.as_ref() /*, branch_backtrace */];
+        let mut children = vec![rhs_backtrace.as_ref(), ctx.branch_backtrace()];
 
         let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
 

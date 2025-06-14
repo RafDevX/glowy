@@ -114,8 +114,6 @@ fn calculate_outcome<'a>(
     exprs: &[ExprNode<'a>],
     location: &Location,
 ) -> Vec<Option<LabelBacktrace<'a>>> {
-    // TODO: branch backtrace
-
     // if there's a single expression with a single function call, then nothing
     // below applies and that function call's outcome is the final outcome
     // (case 2 from https://go.dev/ref/spec#Return_statements)
@@ -143,18 +141,15 @@ fn calculate_outcome<'a>(
     };
 
     for expr in &exprs {
-        let child = exprs::visit_single_expr(ctx, expr);
+        let expr_backtrace = exprs::visit_single_expr(ctx, expr);
 
-        let backtrace = LabelBacktrace::new(
+        let backtrace = LabelBacktrace::fold(
+            [expr_backtrace.as_ref(), ctx.branch_backtrace()]
+                .into_iter()
+                .flatten(),
             LabelBacktraceKind::Return,
-            child
-                .as_ref()
-                .map(|bt| bt.label().clone())
-                .unwrap_or(Label::Bottom),
-            // .union(branch_backtrace.unwrap_or(Label::Bottom))
             None,
             ctx.pin(location.clone()),
-            child.iter(), //.chain(branch_backtrace)
         );
 
         outcome.push(backtrace);

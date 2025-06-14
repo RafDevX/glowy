@@ -46,15 +46,17 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
         return;
     };
 
-    // TODO: branch backtrace
-
     let borrowed = symbol.borrow();
     let expr_backtrace = exprs::visit_single_expr(ctx, &node.expr);
 
     let backtrace = LabelBacktrace::fold(
-        [borrowed.label_backtrace(), expr_backtrace.as_ref()]
-            .into_iter()
-            .flatten(),
+        [
+            borrowed.label_backtrace(),
+            expr_backtrace.as_ref(),
+            ctx.branch_backtrace(),
+        ]
+        .into_iter()
+        .flatten(),
         LabelBacktraceKind::Send,
         Some(name.id.content()),
         ctx.pin(node.location.clone()),
