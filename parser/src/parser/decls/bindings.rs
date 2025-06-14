@@ -1,6 +1,6 @@
 use crate::{
     ast::{BindingDeclSpecNode, DeclNode},
-    parser::{expect, exprs::parse_expression, of_kind, types::parse_type, PResult},
+    parser::{expect, exprs::parse_expressions_list_while, of_kind, types::parse_type, PResult},
     token::{Annotation, Token, TokenKind},
     Location, ParsingError, TokenStream,
 };
@@ -68,7 +68,6 @@ fn parse_spec<'a>(
     kind: &BindingKind,
 ) -> PResult<'a, BindingDeclSpecNode<'a>> {
     let mut ids = vec![];
-    let mut exprs = vec![];
     let mut r#type = None;
 
     loop {
@@ -85,6 +84,15 @@ fn parse_spec<'a>(
             }
             Some(_) => {
                 r#type = Some(parse_type(s)?);
+
+                if let Some(next) = s.peek().cloned().transpose()? {
+                    if matches!(next.kind, TokenKind::SemiColon | TokenKind::ParenR) {
+                        // empty expressions list (sometimes allowed)
+                        break;
+                    }
+                }
+
+                // otherwise, it's either an = or illegal
                 expect(s, TokenKind::Assign, Some(kind.spec_context()))?;
             }
             None => {
@@ -99,15 +107,12 @@ fn parse_spec<'a>(
         break;
     }
 
-    // TODO: allow empty expression list for consts (if prev spec was non-empty)
+    let exprs = parse_expressions_list_while(s, |t| {
+        !matches!(t.kind, TokenKind::SemiColon | TokenKind::ParenR)
+    })?
+    .unwrap_or_else(Vec::new); // got end-of-file but that's fine, same as empty expressions list
 
-    exprs.push(parse_expression(s)?);
-    while exprs.len() < ids.len() {
-        expect(s, TokenKind::Comma, Some("list of expressions"))?;
-        exprs.push(parse_expression(s)?);
-    }
-
-    Ok(BindingDeclSpecNode::try_new(ids, exprs, r#type).unwrap())
+    Ok(BindingDeclSpecNode { ids, exprs, r#type })
 }
 
 fn parse_specs_list<'a>(

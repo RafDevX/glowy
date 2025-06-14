@@ -40,10 +40,12 @@ fn visit_binding_decl_spec<'a>(
     // TODO: handle case where `var x, y = f()`;
     // i.e., use visit_expr instead of visit_single_expr
 
+    // TODO: report error for uneven count
+
     let mut redeclarations = vec![];
     let mut any_new = false;
 
-    for (name, expr) in &node.mapping {
+    for (name, expr) in node.ids.iter().zip(node.exprs.iter()) {
         if name.content() == "_" {
             // blank identifier, so we don't really need to do anything else
             // except visiting the expression to process e.g. function calls
@@ -143,12 +145,8 @@ pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDe
     visit_binding_decl_spec(
         ctx,
         &BindingDeclSpecNode {
-            mapping: node
-                .ids
-                .iter()
-                .cloned()
-                .zip(node.exprs.iter().cloned())
-                .collect(),
+            ids: node.ids.clone(),
+            exprs: node.exprs.clone(),
             r#type: None,
         },
         true,
@@ -211,7 +209,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
         let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
 
-        let borrowed = symbol.borrow();
+        let mut borrowed = symbol.borrow_mut();
 
         if node.kind != AssignmentKind::Simple || !in_current_scope {
             // for complex assignments like `x += y` we need to keep x's label,
@@ -233,7 +231,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             ctx.pin(node.location.clone()),
         );
 
-        symbol.borrow_mut().set_label_backtrace(backtrace);
+        borrowed.set_label_backtrace(backtrace);
     }
 }
 

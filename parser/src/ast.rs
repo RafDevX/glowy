@@ -48,28 +48,9 @@ impl<'a> From<FunctionDeclNode<'a>> for DeclNode<'a> {
 // binding = const or var, since specs look the same for both
 #[derive(Clone, Debug, PartialEq)]
 pub struct BindingDeclSpecNode<'a> {
-    pub mapping: Vec<(Span<'a>, ExprNode<'a>)>,
+    pub ids: Vec<Span<'a>>,
+    pub exprs: Vec<ExprNode<'a>>,
     pub r#type: Option<TypeNode<'a>>,
-}
-
-#[derive(Clone, Debug)]
-pub struct MismatchingBindingDeclSpecListsLength;
-
-impl<'a> BindingDeclSpecNode<'a> {
-    pub fn try_new(
-        ids: Vec<Span<'a>>,
-        exprs: Vec<ExprNode<'a>>,
-        r#type: Option<TypeNode<'a>>,
-    ) -> Result<Self, MismatchingBindingDeclSpecListsLength> {
-        if ids.len() != exprs.len() {
-            Err(MismatchingBindingDeclSpecListsLength {})
-        } else {
-            Ok(Self {
-                mapping: ids.into_iter().zip(exprs).collect(),
-                r#type,
-            })
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

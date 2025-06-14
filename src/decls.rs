@@ -69,8 +69,8 @@ fn visit_binding_decl_spec<'a>(
     node: &BindingDeclSpecNode<'a>,
     mutable: bool,
 ) {
-    for (name, _) in &node.mapping {
-        let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, None);
+    for id in &node.ids {
+        let symbol = Symbol::new_ref(ctx.pin(id.clone()), mutable, None);
 
         ctx.declare_new_symbol(symbol);
     }
