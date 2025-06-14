@@ -102,7 +102,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         }
         StatementNode::Send(send) => todo!(),
         StatementNode::Inc { operand, location } | StatementNode::Dec { operand, location } => {
-            todo!()
+            explicit::visit_incdec(ctx, operand, location);
         }
         StatementNode::Assignment(assignment) => explicit::visit_assignment(ctx, assignment),
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),

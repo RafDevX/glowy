@@ -1,7 +1,10 @@
 use std::cmp;
 
 use parser::{
-    ast::{AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, ShortVarDeclNode},
+    ast::{
+        AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, LiteralNode,
+        ShortVarDeclNode,
+    },
     Annotation, Location,
 };
 
@@ -232,4 +235,22 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
         symbol.borrow_mut().set_label_backtrace(backtrace);
     }
+}
+
+pub fn visit_incdec<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    operand: &ExprNode<'a>,
+    location: &Location,
+) {
+    // for simplicity, we treat this as syntactic sugar for an assignment
+
+    visit_assignment(
+        ctx,
+        &AssignmentNode {
+            kind: AssignmentKind::Sum, // can be anything except Simple
+            lhs: vec![operand.clone()],
+            rhs: vec![ExprNode::Literal(LiteralNode::Int(1))],
+            location: location.clone(),
+        },
+    );
 }
