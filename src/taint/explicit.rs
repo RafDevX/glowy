@@ -166,11 +166,23 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         });
 
         return;
-    } else if node.lhs.len() != node.rhs.len() {
+    }
+
+    let rhs_backtraces = match node.rhs.as_slice() {
+        // vvv case where `a, b = f()` with `f` returning multiple values
+        [ExprNode::Call(call)] if node.lhs.len() > 1 => funcs::visit_call(ctx, call),
+        _ => node
+            .rhs
+            .iter()
+            .map(|expr| exprs::visit_single_expr(ctx, expr))
+            .collect(),
+    };
+
+    if node.lhs.len() != rhs_backtraces.len() {
         ctx.report_error(AnalysisErrorKind::UnevenAssignment {
             location: node.location.clone(),
             left: node.lhs.len(),
-            right: node.rhs.len(),
+            right: rhs_backtraces.len(),
         });
 
         return;
@@ -178,7 +190,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
     // TODO: branch backtrace
 
-    for (lhs, rhs) in node.lhs.iter().zip(node.rhs.iter()) {
+    for (lhs, rhs_backtrace) in node.lhs.iter().zip(rhs_backtraces.iter()) {
         // TODO: support more kinds of left-values, e.g. indexing
         // (maybe have a module for complex data-types like arrays and structs
         //  which defines a trait that we can use to set values like we do for
@@ -204,8 +216,6 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
             return;
         }
-
-        let rhs_backtrace = exprs::visit_single_expr(ctx, rhs);
 
         let mut children = vec![rhs_backtrace.as_ref() /*, branch_backtrace */];
 
