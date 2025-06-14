@@ -2,6 +2,7 @@ use std::{fmt, path::Path};
 
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
+    labels::LabelBacktrace,
     symbols::{FunctionMetadataRef, SymbolRef, SymbolTable},
     Pinned,
 };
@@ -16,7 +17,7 @@ pub struct AnalysisContext<'a> {
     /// Errors emitted during analysis
     errors: Vec<AnalysisError<'a>>,
 
-    /// Current stack of functions being declared.
+    /// Current stack of functions being declared
     funcs: Vec<FunctionMetadataRef<'a>>,
     /// Whether the current function is returning.
     ///
@@ -27,6 +28,9 @@ pub struct AnalysisContext<'a> {
     /// returning inside nested loops the outer loop should not continue
     /// accepting statements.
     returning: bool,
+
+    /// Stack of (independent but always a child of previous) branch backtraces
+    branch_backtraces: Vec<LabelBacktrace<'a>>,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -38,6 +42,7 @@ impl<'a> AnalysisContext<'a> {
             errors: Vec::new(),
             funcs: Vec::new(),
             returning: false,
+            branch_backtraces: Vec::new(),
         }
     }
 
@@ -75,6 +80,26 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn set_returning(&mut self, returning: bool) {
         self.returning = returning;
+    }
+
+    pub fn branch_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
+        self.branch_backtraces.last()
+    }
+
+    pub fn push_branch_backtrace(&mut self, backtrace: LabelBacktrace<'a>) {
+        // merge with existing branch label so that the new one can be used
+        // everywhere on its own without having to worry about the old ones
+        let composite = if let Some(existing) = self.branch_backtrace() {
+            backtrace.with_child(existing)
+        } else {
+            backtrace
+        };
+
+        self.branch_backtraces.push(composite);
+    }
+
+    pub fn pop_branch_backtrace(&mut self) {
+        self.branch_backtraces.pop();
     }
 
     pub fn report_error(&mut self, kind: AnalysisErrorKind<'a>) {

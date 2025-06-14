@@ -13,7 +13,7 @@
 //! These labels' evolution and propagation history can be easily tracked using
 //! a hierarchy structure, which is here implemented via [`LabelBacktrace`].
 
-use std::{cmp, collections::BTreeSet, fmt};
+use std::{cmp, collections::BTreeSet, fmt, iter};
 
 use parser::{Location, Span};
 
@@ -423,6 +423,18 @@ impl<'a> LabelBacktrace<'a> {
         // ^ None iff children are empty
     }
 
+    /// Constructs a new instance equal to this one but with one more child.
+    pub(crate) fn with_child(&self, child: &LabelBacktrace<'a>) -> Self {
+        Self::new(
+            self.kind,
+            self.label.union(child.label()),
+            self.symbol,
+            self.location.clone(),
+            iter::once(child).chain(self.children.iter()),
+        )
+        .unwrap() // safe because if self exists, label is not Bottom
+    }
+
     /// Returns a new instance (with symbol = None) representing a step above
     /// in the hierarchy between two instances (self and other).
     pub(crate) fn union(
@@ -541,6 +553,8 @@ pub enum LabelBacktraceKind {
     Assignment,
     /// Compounded label derived from the parts of a composite expression.
     Expression,
+    /// Aggregate label implicitly inherited from surrounding control flows.
+    Branch,
     /// Label originating from a value sent into a given channel.
     Send,
     /// Aggregate label for values received from a given channel.
