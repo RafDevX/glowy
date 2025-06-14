@@ -207,9 +207,11 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
         let rhs_backtrace = exprs::visit_single_expr(ctx, rhs);
 
-        let mut children = vec![rhs_backtrace /*, branch_backtrace */];
+        let mut children = vec![rhs_backtrace.as_ref() /*, branch_backtrace */];
 
         let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
+
+        let borrowed = symbol.borrow();
 
         if node.kind != AssignmentKind::Simple || !in_current_scope {
             // for complex assignments like `x += y` we need to keep x's label,
@@ -221,13 +223,11 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             // forget x's previous label either
             // FIXME: try to improve symtab alt branch support to avoid this
 
-            children.push(symbol.borrow().label_backtrace().cloned());
+            children.push(borrowed.label_backtrace());
         }
 
-        let children: Vec<_> = children.into_iter().flatten().collect();
-
         let backtrace = LabelBacktrace::fold(
-            &children,
+            children.into_iter().flatten(),
             LabelBacktraceKind::Assignment,
             Some(name.id.content()), // symbol.declared_name()?
             ctx.pin(node.location.clone()),

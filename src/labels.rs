@@ -405,14 +405,18 @@ impl<'a> LabelBacktrace<'a> {
     }
 
     /// Constructs a new instance equal to the union of all its children.
-    pub(crate) fn fold(
-        children: &[Self],
+    pub(crate) fn fold<'b>(
+        children: impl IntoIterator<Item = &'b LabelBacktrace<'a>> + Clone,
         with_kind: LabelBacktraceKind,
         with_symbol: Option<&'a str>,
         at_location: Pinned<Location>,
-    ) -> Option<Self> {
+    ) -> Option<Self>
+    where
+        'a: 'b,
+    {
         let label = children
-            .iter()
+            .clone()
+            .into_iter()
             .fold(Label::Bottom, |acc, bt| acc.union(bt.label()));
 
         Self::new(with_kind, label, with_symbol, at_location, children)

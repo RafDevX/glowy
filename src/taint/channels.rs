@@ -48,16 +48,13 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
 
     // TODO: branch backtrace
 
-    let children: Vec<_> = [
-        symbol.borrow().label_backtrace().cloned(),
-        exprs::visit_single_expr(ctx, &node.expr),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let borrowed = symbol.borrow();
+    let expr_backtrace = exprs::visit_single_expr(ctx, &node.expr);
 
     let backtrace = LabelBacktrace::fold(
-        &children,
+        [borrowed.label_backtrace(), expr_backtrace.as_ref()]
+            .into_iter()
+            .flatten(),
         LabelBacktraceKind::Send,
         Some(name.id.content()),
         ctx.pin(node.location.clone()),
