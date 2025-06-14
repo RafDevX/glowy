@@ -41,7 +41,7 @@
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
 use parser::{ast::FunctionSignatureNode, Span};
 
@@ -50,6 +50,7 @@ use crate::{
     FullPackagePath, Pinned,
 };
 
+#[derive(Debug)]
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers
     universe_scope: Scope<'a>,
@@ -273,6 +274,7 @@ impl Default for SymbolTable<'_> {
     }
 }
 
+#[derive(Debug)]
 struct PackageScopeEnvelope<'a> {
     /// Package name (!= package path's last component)
     package_name: Pinned<Span<'a>>,
@@ -340,6 +342,27 @@ impl<'a> Scope<'a> {
 
     fn contains_local_symbol(&self, symbol: SymbolRef<'a>) -> bool {
         self.symbols.values().any(|s| Rc::ptr_eq(s, &symbol))
+    }
+}
+
+impl fmt::Debug for Scope<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[derive(Debug)]
+        struct Scope<'d, 'a> {
+            #[allow(dead_code)]
+            symbols: &'d HashMap<&'a str, SymbolRef<'a>>,
+            // no `parent` to avoid infinite loop
+            #[allow(dead_code)]
+            children: &'d Vec<ScopeRef<'a>>,
+        }
+
+        let Self {
+            symbols,
+            children,
+            parent: _,
+        } = self;
+
+        fmt::Debug::fmt(&Scope { symbols, children }, f)
     }
 }
 
