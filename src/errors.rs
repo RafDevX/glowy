@@ -153,13 +153,13 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the function call took place.
         location: Location,
     },
-    /// Incorrect short variable declaration with mismatching mappings.
-    UnevenShortVarDecl {
-        /// Where the short variable declaration was found.
+    /// Incorrect binding declaration spec with mismatching mappings.
+    UnevenBindingDeclSpec {
+        /// Where the variable declaration spec was found.
         location: Location,
         /// The number of identifiers found.
         left: usize,
-        /// The number of expressions found.
+        /// The number of expressions or values found.
         right: usize,
     },
     /// Incorrect assignment with mismatching mappings (count L =/= R).
@@ -216,7 +216,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::Unreachable
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }
-            | Self::UnevenShortVarDecl { .. }
+            | Self::UnevenBindingDeclSpec { .. }
             | Self::UnevenAssignment { .. }
             | Self::MultiComplexAssignment { .. }
             | Self::InvalidLeftValue { .. }

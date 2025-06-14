@@ -13,6 +13,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
+    taint::funcs,
 };
 
 use super::exprs;
@@ -37,58 +38,69 @@ fn visit_binding_decl_spec<'a>(
     location: &Location,
     annotation: &Option<Box<Annotation<'a>>>,
 ) {
-    // TODO: handle case where `var x, y = f()`;
-    // i.e., use visit_expr instead of visit_single_expr
+    let backtraces = match node.exprs.as_slice() {
+        // vvv case where `var a, b = f()` with `f` returning multiple values
+        // (note: `const` cannot do this - we check `mutable` as a heuristic)
+        [ExprNode::Call(call)] if node.ids.len() > 1 && mutable => funcs::visit_call(ctx, call),
+        _ => node
+            .exprs
+            .iter()
+            .map(|expr| exprs::visit_single_expr(ctx, expr))
+            .collect(),
+    };
 
-    // TODO: report error for uneven count
+    if node.ids.len() != backtraces.len() {
+        ctx.report_error(AnalysisErrorKind::UnevenBindingDeclSpec {
+            location: location.clone(),
+            left: node.ids.len(),
+            right: backtraces.len(),
+        });
+
+        return;
+    }
 
     let mut redeclarations = vec![];
     let mut any_new = false;
 
-    for (name, expr) in node.ids.iter().zip(node.exprs.iter()) {
+    for (name, expr_backtrace) in node.ids.iter().zip(backtraces.iter()) {
         if name.content() == "_" {
             // blank identifier, so we don't really need to do anything else
             // except visiting the expression to process e.g. function calls
-            // (needed to detect insecure flows wrt integrity, for example).
-            exprs::visit_single_expr(ctx, expr);
+            // (needed to detect insecure flows wrt integrity, for example),
+            // but this was necessarily already done or we wouldn't have the
+            // corresponding `expr_backtrace`
 
             continue;
         }
 
-        let mut label = Label::Bottom;
-        let mut children_backtraces = vec![]; // order matters
+        let mut explicit_backtrace = None;
 
         if let Some(annotation) = annotation {
             if annotation.scope == "label" {
-                let annotation_label = Label::from_tags(&annotation.tags);
-                label = label.union(&annotation_label);
-
-                let explicit = LabelBacktrace::new_root(
+                explicit_backtrace = Some(LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
-                    annotation_label,
+                    Label::from_tags(&annotation.tags),
                     name.content(),
                     ctx.pin(location.clone()),
-                );
-
-                children_backtraces.push(explicit);
+                ));
             }
 
             // TODO: `match` other scopes
         };
 
-        if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, expr) {
-            label = label.union(expr_backtrace.label());
-            children_backtraces.push(expr_backtrace);
-        }
-
         // TODO: branch backtrace
 
-        let backtrace = LabelBacktrace::new(
+        let backtrace = LabelBacktrace::fold(
+            [
+                explicit_backtrace.as_ref(),
+                expr_backtrace.as_ref(),
+                /*, branch_backtrace */
+            ]
+            .into_iter()
+            .flatten(),
             LabelBacktraceKind::Assignment,
-            label,
             Some(name.content()),
             ctx.pin(location.clone()),
-            &children_backtraces,
         );
 
         let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, backtrace);
@@ -131,16 +143,6 @@ fn visit_binding_decl_spec<'a>(
 
 pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDeclNode<'a>) {
     // for simplicity, we treat this as if it was a binding decl spec
-
-    if node.ids.len() != node.exprs.len() {
-        ctx.report_error(AnalysisErrorKind::UnevenShortVarDecl {
-            location: node.location.clone(),
-            left: node.ids.len(),
-            right: node.exprs.len(),
-        });
-
-        return;
-    }
 
     visit_binding_decl_spec(
         ctx,
