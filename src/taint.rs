@@ -1,5 +1,5 @@
 use parser::{
-    ast::{DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
+    ast::{BlockNode, DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
     Span,
 };
 
@@ -79,6 +79,15 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
     }
 }
 
+fn visit_block<'a>(ctx: &mut AnalysisContext<'a>, node: &BlockNode<'a>) {
+    ctx.symtab_mut().select_next_child_scope(); // push
+
+    // (BlockNode is just a type alias for Vec, so we can pass it directly)
+    visit_statements(ctx, node);
+
+    ctx.symtab_mut().select_parent_scope(); // pop
+}
+
 fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
     for statement in statements {
         if ctx.returning() && *statement != StatementNode::Empty {
@@ -108,13 +117,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => todo!(),
-        StatementNode::Block(statements) => {
-            ctx.symtab_mut().select_next_child_scope(); // push
-
-            visit_statements(ctx, statements);
-
-            ctx.symtab_mut().select_parent_scope(); // pop
-        }
+        StatementNode::Block(block) => visit_block(ctx, block),
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Go { expr, location } => match expr {
             ExprNode::Call(call) => {
