@@ -41,7 +41,7 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
 }
 
 pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'a>> {
-    expect(s, TokenKind::For, Some("for loop"))?;
+    let beginning = expect(s, TokenKind::For, Some("for loop"))?;
 
     let header = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::CurlyL)) => {
@@ -226,9 +226,15 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
         }
     };
 
+    let header_location = s.location_since(&beginning);
+
     let body = parse_block(s)?;
 
-    Ok(ForNode { header, body })
+    Ok(ForNode {
+        header,
+        header_location,
+        body,
+    })
 }
 
 pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
@@ -387,6 +393,7 @@ mod tests {
                             location: 66..69
                         }))
                     }),
+                    header_location: 47..69,
                     body: vec![StatementNode::Empty]
                 }),
                 StatementNode::For(ForNode {
@@ -402,6 +409,7 @@ mod tests {
                             LiteralNode::Int(4)
                         ))))
                     }),
+                    header_location: 153..169,
                     body: vec![StatementNode::Empty]
                 }),
                 StatementNode::For(ForNode {
@@ -415,6 +423,7 @@ mod tests {
                         }),
                         post: None
                     }),
+                    header_location: 253..263,
                     body: vec![StatementNode::Empty]
                 }),
                 StatementNode::For(ForNode {
@@ -423,6 +432,7 @@ mod tests {
                         cond: None,
                         post: None
                     }),
+                    header_location: 347..350,
                     body: vec![]
                 })
             ],

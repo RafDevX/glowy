@@ -351,6 +351,7 @@ pub enum ElseNode<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ForNode<'a> {
     pub header: ForHeaderNode<'a>,
+    pub header_location: Location,
     pub body: BlockNode<'a>,
 }
 
@@ -369,12 +370,12 @@ pub struct ForClauseNode<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ForRangeNode<'a> {
-    Assignment {
-        lhs: Vec<ExprNode<'a>>,
-        range_expr: ExprNode<'a>,
-    },
     Decl {
         lhs: Vec<Span<'a>>,
+        range_expr: ExprNode<'a>,
+    },
+    Assignment {
+        lhs: Vec<ExprNode<'a>>,
         range_expr: ExprNode<'a>,
     },
     None {
