@@ -67,7 +67,7 @@ pub enum TypeNode<'a> {
     // TODO: Literal
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChannelDirection {
     Send,
     Receive,
@@ -124,7 +124,7 @@ pub enum ExprNode<'a> {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UnaryOpKind {
     Identity,   // +x is 0 + x
     Negation,   // -x is 0 - x
@@ -135,7 +135,7 @@ pub enum UnaryOpKind {
     Receive,    // <-x
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BinaryOpKind {
     Eq,         // x == y
     NotEq,      // x != y
@@ -310,7 +310,7 @@ pub struct AssignmentNode<'a> {
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AssignmentKind {
     Simple,     //   =
     Sum,        //  +=
