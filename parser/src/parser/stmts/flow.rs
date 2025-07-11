@@ -1,14 +1,14 @@
 use crate::{
-    ast::{ElseNode, IfNode, StatementNode},
+    ast::{ElseNode, ForClauseNode, ForHeaderNode, ForNode, ForRangeNode, IfNode, StatementNode},
     parser::{
         expect,
         exprs::{parse_expression, parse_expressions_list_while},
         of_kind,
-        stmts::{parse_block, terminal_token},
+        stmts::{parse_block, parse_statement, terminal_token},
         PResult,
     },
     token::{Token, TokenKind},
-    TokenStream,
+    ParsingError, TokenStream,
 };
 
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {
@@ -38,6 +38,197 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
         then,
         otherwise,
     })
+}
+
+pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'a>> {
+    expect(s, TokenKind::For, Some("for loop"))?;
+
+    let header = match s.peek().cloned().transpose()? {
+        Some(of_kind!(TokenKind::CurlyL)) => {
+            // for { }
+
+            ForHeaderNode::Clause(ForClauseNode {
+                init: None,
+                cond: None,
+                post: None,
+            })
+        }
+        Some(of_kind!(TokenKind::SemiColon)) => {
+            // for ; cond? ; post? { }
+
+            s.next(); // advance
+
+            let cond = if let Some(Ok(of_kind!(TokenKind::SemiColon))) = s.peek() {
+                None
+            } else {
+                Some(parse_expression(s)?)
+            };
+
+            expect(s, TokenKind::SemiColon, Some("for clause"))?;
+
+            let post = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+                None
+            } else {
+                Some(Box::new(parse_statement(s, false)?))
+            };
+
+            ForHeaderNode::Clause(ForClauseNode {
+                init: None,
+                cond,
+                post,
+            })
+        }
+        Some(of_kind!(TokenKind::Range)) => {
+            // for range expr { }
+
+            s.next(); // advance
+
+            let range_expr = parse_expression(s)?;
+
+            ForHeaderNode::Range(ForRangeNode::None { range_expr })
+        }
+        _ => {
+            // possibilities of what we can find at this point
+            enum ForKind {
+                SingleCondition, // for one_bare_condition { }
+                ClauseWithInit,  // for init; cond?; post? { }
+                RangeDecl,       // for a, b := range expr { }
+                RangeAssignment, // for a, b  = range expr { }
+            }
+
+            // we assume it's the simplest for, unless we find proof otherwise
+            let mut kind = ForKind::SingleCondition;
+
+            // if we find a "range" token, it confirms this kind
+            let mut range_kind_hint = None;
+
+            // no point in using BacktrackingContext if we'll never commit
+            for future in s.clone() {
+                match future?.kind {
+                    TokenKind::CurlyL => break, // was actually SingleCondition
+                    TokenKind::SemiColon => {
+                        // can no longer be a single condition; must have init
+                        kind = ForKind::ClauseWithInit;
+                        break;
+                    }
+                    TokenKind::ColonAssign if range_kind_hint.is_none() => {
+                        // it might be a `for a := range expr`, but it might
+                        // also just be a normal `for i := 0; i < 5; i++`, so
+                        // we need to also find a "range" keyword to confirm
+                        range_kind_hint = Some(ForKind::RangeDecl);
+                    }
+                    TokenKind::Assign if range_kind_hint.is_none() => {
+                        range_kind_hint = Some(ForKind::RangeAssignment);
+                    }
+                    TokenKind::Range => {
+                        if let Some(hint) = range_kind_hint {
+                            // confirmed
+                            kind = hint;
+                        }
+                        // else: range without preceding := or = must be wrong,
+                        // but we'll let it error further down the line within
+                        // non-for-range parsing so we have more surrounding
+                        // context information for the error
+
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            match kind {
+                ForKind::SingleCondition => {
+                    let cond = parse_expression(s)?;
+
+                    ForHeaderNode::Clause(ForClauseNode {
+                        init: None,
+                        cond: Some(cond),
+                        post: None,
+                    })
+                }
+                ForKind::ClauseWithInit => {
+                    let init = Some(Box::new(parse_statement(s, false)?));
+
+                    expect(s, TokenKind::SemiColon, Some("for clause"))?;
+
+                    let cond = if let Some(Ok(of_kind!(TokenKind::SemiColon))) = s.peek() {
+                        None
+                    } else {
+                        Some(parse_expression(s)?)
+                    };
+
+                    expect(s, TokenKind::SemiColon, Some("for clause"))?;
+
+                    let post = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+                        None
+                    } else {
+                        Some(Box::new(parse_statement(s, false)?))
+                    };
+
+                    ForHeaderNode::Clause(ForClauseNode { init, cond, post })
+                }
+                ForKind::RangeDecl => {
+                    let mut lhs = vec![];
+                    let mut expect_comma = false;
+
+                    loop {
+                        match s.next().transpose()? {
+                            Some(token @ of_kind!(TokenKind::Ident)) if !expect_comma => {
+                                lhs.push(token.span);
+                                expect_comma = true;
+                            }
+                            Some(of_kind!(TokenKind::Comma)) if expect_comma => {
+                                expect_comma = false
+                            }
+                            Some(of_kind!(TokenKind::ColonAssign)) if !lhs.is_empty() => break,
+                            found => {
+                                let expected = if lhs.is_empty() {
+                                    TokenKind::Ident
+                                } else {
+                                    TokenKind::ColonAssign
+                                };
+
+                                return Err(ParsingError::UnexpectedTokenKind {
+                                    expected,
+                                    found,
+                                    context: Some("for range clause"),
+                                });
+                            }
+                        }
+                    }
+
+                    expect(s, TokenKind::Range, Some("for range clause"))?;
+
+                    let range_expr = parse_expression(s)?;
+
+                    ForHeaderNode::Range(ForRangeNode::Decl { lhs, range_expr })
+                }
+                ForKind::RangeAssignment => {
+                    let lhs =
+                        parse_expressions_list_while(s, |token| token.kind != TokenKind::Assign)?
+                            .unwrap_or_else(Vec::new); // got end-of-file but that's equivalent to empty expressions list
+
+                    if lhs.is_empty() {
+                        return Err(ParsingError::UnexpectedConstruct {
+                            expected: "a list of expressions",
+                            found: s.next().transpose()?,
+                        });
+                    }
+
+                    expect(s, TokenKind::Assign, Some("for range clause"))?;
+                    expect(s, TokenKind::Range, Some("for range clause"))?;
+
+                    let range_expr = parse_expression(s)?;
+
+                    ForHeaderNode::Range(ForRangeNode::Assignment { lhs, range_expr })
+                }
+            }
+        }
+    };
+
+    let body = parse_block(s)?;
+
+    Ok(ForNode { header, body })
 }
 
 pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
@@ -164,6 +355,97 @@ mod tests {
                 ",
             )
             .unwrap(),
+        )
+    }
+
+    #[test]
+    fn for_clause() {
+        assert_eq!(
+            vec![
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Clause(ForClauseNode {
+                        init: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
+                            ids: vec![Span::new("i", 51, 3)],
+                            exprs: vec![ExprNode::Literal(LiteralNode::Int(0))],
+                            location: 51..57,
+                            annotation: None
+                        }))),
+                        cond: Some(ExprNode::BinaryOp {
+                            kind: BinaryOpKind::Less,
+                            left: Box::new(ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("i", 59, 3)
+                            })),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int(5))),
+                            location: 59..64
+                        }),
+                        post: Some(Box::new(StatementNode::Inc {
+                            operand: ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("i", 66, 3)
+                            }),
+                            location: 66..69
+                        }))
+                    }),
+                    body: vec![StatementNode::Empty]
+                }),
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Clause(ForClauseNode {
+                        init: None,
+                        cond: Some(ExprNode::BinaryOp {
+                            kind: BinaryOpKind::LessEq,
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int(1))),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                            location: 159..165
+                        }),
+                        post: Some(Box::new(StatementNode::Expr(ExprNode::Literal(
+                            LiteralNode::Int(4)
+                        ))))
+                    }),
+                    body: vec![StatementNode::Empty]
+                }),
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Clause(ForClauseNode {
+                        init: None,
+                        cond: Some(ExprNode::BinaryOp {
+                            kind: BinaryOpKind::Greater,
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int(10))),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                            location: 257..263
+                        }),
+                        post: None
+                    }),
+                    body: vec![StatementNode::Empty]
+                }),
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Clause(ForClauseNode {
+                        init: None,
+                        cond: None,
+                        post: None
+                    }),
+                    body: vec![]
+                })
+            ],
+            parse(
+                "
+                    {
+                        for i := 0; i < 5; i++ {
+                            ;
+                        }
+
+                        for ; 1 <= 2 ; 4 {
+                            ;
+                        }
+
+                        for 10 > 2 {
+                            ;
+                        }
+
+                        for { }
+                    }
+        "
+            )
+            .unwrap()
         )
     }
 }

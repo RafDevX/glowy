@@ -234,6 +234,7 @@ pub enum StatementNode<'a> {
     // non-simple
     Decl(DeclNode<'a>),
     If(IfNode<'a>),
+    For(ForNode<'a>),
     Block(BlockNode<'a>),
     Return {
         exprs: Vec<ExprNode<'a>>,
@@ -278,6 +279,12 @@ impl<'a> From<DeclNode<'a>> for StatementNode<'a> {
 impl<'a> From<IfNode<'a>> for StatementNode<'a> {
     fn from(node: IfNode<'a>) -> Self {
         Self::If(node)
+    }
+}
+
+impl<'a> From<ForNode<'a>> for StatementNode<'a> {
+    fn from(node: ForNode<'a>) -> Self {
+        Self::For(node)
     }
 }
 
@@ -339,4 +346,38 @@ pub struct IfNode<'a> {
 pub enum ElseNode<'a> {
     If(Box<IfNode<'a>>),
     Block(BlockNode<'a>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForNode<'a> {
+    pub header: ForHeaderNode<'a>,
+    pub body: BlockNode<'a>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ForHeaderNode<'a> {
+    Clause(ForClauseNode<'a>),
+    Range(ForRangeNode<'a>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForClauseNode<'a> {
+    pub init: Option<Box<StatementNode<'a>>>,
+    pub cond: Option<ExprNode<'a>>, // if omitted, same as "true"
+    pub post: Option<Box<StatementNode<'a>>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ForRangeNode<'a> {
+    Assignment {
+        lhs: Vec<ExprNode<'a>>,
+        range_expr: ExprNode<'a>,
+    },
+    Decl {
+        lhs: Vec<Span<'a>>,
+        range_expr: ExprNode<'a>,
+    },
+    None {
+        range_expr: ExprNode<'a>,
+    },
 }

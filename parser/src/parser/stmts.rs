@@ -1,6 +1,6 @@
 use self::{
     concur::parse_go_statement,
-    flow::{parse_if_statement, parse_return_statement},
+    flow::{parse_for_statement, parse_if_statement, parse_return_statement},
 };
 use super::{
     decls::bindings::{parse_const_decl, parse_var_decl},
@@ -190,6 +190,7 @@ fn parse_statement<'a>(
             StatementNode::Block(parse_block(s)?)
         }
         Some(of_kind!(TokenKind::If)) if allow_non_simple => parse_if_statement(s)?.into(),
+        Some(of_kind!(TokenKind::For)) if allow_non_simple => parse_for_statement(s)?.into(),
         Some(of_kind!(TokenKind::Return)) if allow_non_simple => parse_return_statement(s)?,
         Some(of_kind!(TokenKind::Go)) if allow_non_simple => parse_go_statement(s)?,
 
@@ -227,7 +228,12 @@ pub fn parse_block<'a>(s: &mut TokenStream<'a>) -> PResult<'a, BlockNode<'a>> {
 
 // may terminate a statement
 fn terminal_token(kind: &TokenKind) -> bool {
-    matches!(kind, TokenKind::SemiColon | TokenKind::CurlyR)
+    matches!(
+        kind,
+        TokenKind::SemiColon // i++; <---
+        | TokenKind::CurlyL // for ...; i++ { <---
+        | TokenKind::CurlyR // { ...; i++ } <---
+    )
 }
 
 pub struct UnknownAssignmentKind;
