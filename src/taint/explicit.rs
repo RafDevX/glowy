@@ -5,7 +5,7 @@ use parser::{
         AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, LiteralNode,
         ShortVarDeclNode,
     },
-    Annotation, Location,
+    Annotation, Location, Span,
 };
 
 use crate::{
@@ -49,10 +49,31 @@ fn visit_binding_decl_spec<'a>(
             .collect(),
     };
 
-    if node.ids.len() != backtraces.len() {
+    visit_raw_binding_decl_spec(
+        ctx,
+        &node.ids,
+        &backtraces,
+        mutable,
+        short,
+        location,
+        annotation,
+    );
+}
+
+// for declaration-like cases more generic than an actual declaration node
+pub fn visit_raw_binding_decl_spec<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    ids: &[Span<'a>],
+    backtraces: &[Option<LabelBacktrace<'a>>],
+    mutable: bool,
+    short: bool, // allows redeclaration in some circumstances
+    location: &Location,
+    annotation: &Option<Box<Annotation<'a>>>,
+) {
+    if ids.len() != backtraces.len() {
         ctx.report_error(AnalysisErrorKind::UnevenBindingDeclSpec {
             location: location.clone(),
-            left: node.ids.len(),
+            left: ids.len(),
             right: backtraces.len(),
         });
 
@@ -62,7 +83,7 @@ fn visit_binding_decl_spec<'a>(
     let mut redeclarations = vec![];
     let mut any_new = false;
 
-    for (name, expr_backtrace) in node.ids.iter().zip(backtraces.iter()) {
+    for (name, expr_backtrace) in ids.iter().zip(backtraces.iter()) {
         if name.content() == "_" {
             // blank identifier, so we don't really need to do anything else
             // except visiting the expression to process e.g. function calls
@@ -176,24 +197,35 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             .collect(),
     };
 
-    if node.lhs.len() != rhs_backtraces.len() {
+    visit_raw_assignment(ctx, node.kind, &node.lhs, &rhs_backtraces, &node.location);
+}
+
+// for assignment-like cases more generic than an actual assignment node
+pub fn visit_raw_assignment<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    kind: AssignmentKind,
+    lhs_exprs: &[ExprNode<'a>],
+    rhs_backtraces: &[Option<LabelBacktrace<'a>>],
+    location: &Location,
+) {
+    if lhs_exprs.len() != rhs_backtraces.len() {
         ctx.report_error(AnalysisErrorKind::UnevenAssignment {
-            location: node.location.clone(),
-            left: node.lhs.len(),
+            location: location.clone(),
+            left: lhs_exprs.len(),
             right: rhs_backtraces.len(),
         });
 
         return;
     }
 
-    for (lhs, rhs_backtrace) in node.lhs.iter().zip(rhs_backtraces.iter()) {
+    for (lhs, rhs_backtrace) in lhs_exprs.iter().zip(rhs_backtraces.iter()) {
         // TODO: support more kinds of left-values, e.g. indexing
         // (maybe have a module for complex data-types like arrays and structs
         //  which defines a trait that we can use to set values like we do for
         //  raw symbols here?)
 
         let ExprNode::Name(name) = lhs else {
-            let location = exprs::get_expr_location(lhs).unwrap_or_else(|| node.location.clone());
+            let location = exprs::get_expr_location(lhs).unwrap_or_else(|| location.clone());
 
             ctx.report_error(AnalysisErrorKind::InvalidLeftValue { location });
 
@@ -219,7 +251,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
         let mut borrowed = symbol.borrow_mut();
 
-        if node.kind != AssignmentKind::Simple || !in_current_scope {
+        if kind != AssignmentKind::Simple || !in_current_scope {
             // for complex assignments like `x += y` we need to keep x's label,
             // but for simple assignments like `x = y` we can usually overwrite
             // it and drop the previous x label, except if x was not declared in
@@ -236,7 +268,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             children.into_iter().flatten(),
             LabelBacktraceKind::Assignment,
             Some(name.id.content()), // symbol.declared_name()?
-            ctx.pin(node.location.clone()),
+            ctx.pin(location.clone()),
         );
 
         borrowed.set_label_backtrace(backtrace);

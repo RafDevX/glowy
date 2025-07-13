@@ -16,6 +16,10 @@ pub fn visit_receive<'a>(
     operand: &ExprNode<'a>,
     location: &Location,
 ) -> Option<LabelBacktrace<'a>> {
+    // TODO: must update channel's label to match branch label, because
+    // otherwise "has a value been read" or "has the channel been depleted" can
+    // be used to exfiltrate information
+
     exprs::visit_single_expr(ctx, operand).and_then(|child| {
         LabelBacktrace::new(
             LabelBacktraceKind::Receive,
