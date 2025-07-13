@@ -458,4 +458,63 @@ mod tests {
             .unwrap()
         )
     }
+
+    #[test]
+    fn for_range() {
+        assert_eq!(
+            vec![
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Range(ForRangeNode::Decl {
+                        lhs: vec![Span::new("i", 51, 3), Span::new("item", 54, 3)],
+                        range_expr: ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("arr", 68, 3)
+                        })
+                    }),
+                    header_location: 47..71,
+                    body: vec![StatementNode::Empty]
+                }),
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Range(ForRangeNode::Assignment {
+                        lhs: vec![ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("x", 159, 7)
+                        })],
+                        range_expr: ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("arr", 169, 7)
+                        })
+                    }),
+                    header_location: 155..172,
+                    body: vec![StatementNode::Empty]
+                }),
+                StatementNode::For(ForNode {
+                    header: ForHeaderNode::Range(ForRangeNode::None {
+                        range_expr: ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("ch", 266, 11)
+                        })
+                    }),
+                    header_location: 256..268,
+                    body: vec![]
+                })
+            ],
+            parse(
+                "
+                    {
+                        for i, item := range arr {
+                            ;
+                        }
+
+                        for x = range arr {
+                            ;
+                        }
+
+                        for range ch {}
+                    }
+        "
+            )
+            .unwrap()
+        )
+    }
 }
