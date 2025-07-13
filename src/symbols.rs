@@ -41,7 +41,7 @@
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
 
-use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
 
 use parser::{ast::FunctionSignatureNode, Span};
 
@@ -75,7 +75,7 @@ pub struct SymbolTable<'a> {
 impl<'a> SymbolTable<'a> {
     pub fn new() -> Self {
         Self {
-            universe_scope: Scope::new(None), // TODO: populate universe
+            universe_scope: Scope::new_universe(),
             package_scopes: HashMap::new(),
 
             current_file_named_imports: HashMap::new(),
@@ -332,6 +332,26 @@ impl<'a> Scope<'a> {
         Rc::new(RefCell::new(Self::new(None)))
     }
 
+    // https://go.dev/ref/spec#Predeclared_identifiers
+    fn new_universe() -> Self {
+        let mut scope = Self::new(None);
+
+        macro_rules! predeclared_constant {
+            ($scope:expr, $id:expr) => {
+                $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id))
+            };
+        }
+
+        predeclared_constant!(scope, "true");
+        predeclared_constant!(scope, "false");
+        predeclared_constant!(scope, "iota");
+        predeclared_constant!(scope, "nil"); // not really a constant, but close enough
+
+        // TODO: pre-declare functions (need to set some number of expected args?)
+
+        scope
+    }
+
     fn get_local_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
         self.symbols.get(name).cloned()
     }
@@ -407,6 +427,15 @@ impl<'a> Symbol<'a> {
             mutable,
             label_backtrace,
         )))
+    }
+
+    fn new_predeclared_ref(name: &'static str) -> SymbolRef<'a> {
+        Self::new_ref(
+            // vv not very pretty, but it should never matter anyway
+            Pinned::new(PathBuf::new(), Span::new(name, 0, 0)),
+            false,
+            None,
+        )
     }
 
     pub fn declared_name(&self) -> &Pinned<Span<'a>> {
