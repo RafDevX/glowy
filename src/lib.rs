@@ -62,10 +62,10 @@ pub struct Pinned<T: Clone + fmt::Debug + PartialEq> {
 }
 
 impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
-    fn new(virtual_file_path: PathBuf, span: T) -> Self {
+    fn new(virtual_file_path: PathBuf, inner: T) -> Self {
         Self {
             virtual_file_path,
-            inner: span,
+            inner,
         }
     }
 
