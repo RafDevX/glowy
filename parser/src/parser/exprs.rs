@@ -31,20 +31,32 @@ fn parse_operand_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, OperandNameNod
 pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::Ident)) => parse_operand_name(s)?.into(),
-        Some(of_kind!(TokenKind::Int(v))) => {
+        Some(token @ of_kind!(TokenKind::Int(value))) => {
             s.next(); // advance
 
-            LiteralNode::Int(v).into()
+            LiteralNode::Int {
+                value,
+                location: token.span.location(),
+            }
+            .into()
         }
-        Some(of_kind!(TokenKind::Rune(v))) => {
+        Some(token @ of_kind!(TokenKind::Rune(value))) => {
             s.next(); // advance
 
-            LiteralNode::Rune(v).into()
+            LiteralNode::Rune {
+                value,
+                location: token.span.location(),
+            }
+            .into()
         }
-        Some(of_kind!(TokenKind::String(v))) => {
+        Some(ref token @ of_kind!(TokenKind::String(ref value))) => {
             s.next(); // advance
 
-            LiteralNode::String(v).into()
+            LiteralNode::String {
+                value: value.clone(),
+                location: token.span.location(),
+            }
+            .into()
         }
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance

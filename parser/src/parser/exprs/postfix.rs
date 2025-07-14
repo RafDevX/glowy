@@ -118,27 +118,42 @@ mod tests {
                             package: Some(Span::new("abc", 1, 1)),
                             id: Span::new("def", 5, 1)
                         })),
-                        right: Box::new(ExprNode::Literal(LiteralNode::Int(14))),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 14,
+                            location: 11..13
+                        })),
                         location: 1..13,
                     }),
                     type_arg: None,
                     args: vec![
                         ExprNode::BinaryOp {
                             kind: BinaryOpKind::Sum,
-                            left: Box::new(ExprNode::Literal(LiteralNode::Int(21))),
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 21,
+                                location: 15..17
+                            })),
                             right: Box::new(ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Product,
-                                left: Box::new(ExprNode::Literal(LiteralNode::Int(7))),
+                                left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 7,
+                                    location: 20..21
+                                })),
                                 right: Box::new(ExprNode::UnaryOp {
                                     kind: UnaryOpKind::Negation,
-                                    operand: Box::new(ExprNode::Literal(LiteralNode::Int(9))),
+                                    operand: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                        value: 9,
+                                        location: 25..26
+                                    })),
                                     location: 24..26,
                                 }),
                                 location: 20..26,
                             }),
                             location: 15..26,
                         },
-                        ExprNode::Literal(LiteralNode::Int(0))
+                        ExprNode::Literal(LiteralNode::Int {
+                            value: 0,
+                            location: 28..29
+                        })
                     ],
                     variadic: true,
                     location: 14..33,
@@ -165,7 +180,10 @@ mod tests {
                             package: Some(Span::new("abc", 1, 1)),
                             id: Span::new("def", 5, 1)
                         })),
-                        right: Box::new(ExprNode::Literal(LiteralNode::Int(14))),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 14,
+                            location: 11..13
+                        })),
                         location: 1..13,
                     }),
                     index: Box::new(ExprNode::BinaryOp {
@@ -174,7 +192,10 @@ mod tests {
                             package: None,
                             id: Span::new("k", 15, 1)
                         })),
-                        right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 2,
+                            location: 19..20
+                        })),
                         location: 15..20,
                     }),
                     location: 14..22,
@@ -206,7 +227,10 @@ mod tests {
                     direction: None,
                 }),
                 args: vec![
-                    ExprNode::Literal(LiteralNode::Rune('\u{0007}')),
+                    ExprNode::Literal(LiteralNode::Rune {
+                        value: '\u{0007}',
+                        location: 14..18
+                    }),
                     ExprNode::Call(CallNode {
                         func: Box::new(ExprNode::Name(OperandNameNode {
                             package: None,

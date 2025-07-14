@@ -280,10 +280,16 @@ mod tests {
                             package: None,
                             id: Span::new("a", 50, 3)
                         })),
-                        right: Box::new(ExprNode::Literal(LiteralNode::Int(3))),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 3,
+                            location: 54..55
+                        })),
                         location: 50..55,
                     }),
-                    right: Box::new(ExprNode::Literal(LiteralNode::Int(4))),
+                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 4,
+                        location: 58..59
+                    })),
                     location: 50..59,
                 },
                 then: vec![
@@ -294,7 +300,10 @@ mod tests {
                             package: None,
                             id: Span::new("a", 120, 5)
                         })],
-                        rhs: vec![ExprNode::Literal(LiteralNode::Int(4))],
+                        rhs: vec![ExprNode::Literal(LiteralNode::Int {
+                            value: 4,
+                            location: 124..125
+                        })],
                         location: 120..125,
                     })
                 ],
@@ -303,14 +312,20 @@ mod tests {
                         kind: UnaryOpKind::Negation,
                         operand: Box::new(ExprNode::UnaryOp {
                             kind: UnaryOpKind::Negation,
-                            operand: Box::new(ExprNode::Literal(LiteralNode::Int(9))),
+                            operand: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 9,
+                                location: 164..165
+                            })),
                             location: 163..165,
                         }),
                         location: 161..166,
                     },
                     then: vec![StatementNode::ShortVarDecl(ShortVarDeclNode {
                         ids: vec![Span::new("k", 197, 7)],
-                        exprs: vec![ExprNode::Literal(LiteralNode::Int(3))],
+                        exprs: vec![ExprNode::Literal(LiteralNode::Int {
+                            value: 3,
+                            location: 202..203
+                        })],
                         location: 197..203,
                         annotation: None
                     })],
@@ -336,8 +351,14 @@ mod tests {
                                 })
                             ],
                             rhs: vec![
-                                ExprNode::Literal(LiteralNode::Int(3)),
-                                ExprNode::Literal(LiteralNode::Int(2)),
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 3,
+                                    location: 342..343
+                                }),
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 2,
+                                    location: 345..346
+                                }),
                             ],
                             location: 331..346,
                         })
@@ -372,7 +393,10 @@ mod tests {
                     header: ForHeaderNode::Clause(ForClauseNode {
                         init: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
                             ids: vec![Span::new("i", 51, 3)],
-                            exprs: vec![ExprNode::Literal(LiteralNode::Int(0))],
+                            exprs: vec![ExprNode::Literal(LiteralNode::Int {
+                                value: 0,
+                                location: 56..57
+                            })],
                             location: 51..57,
                             annotation: None
                         }))),
@@ -382,7 +406,10 @@ mod tests {
                                 package: None,
                                 id: Span::new("i", 59, 3)
                             })),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int(5))),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 5,
+                                location: 63..64
+                            })),
                             location: 59..64
                         }),
                         post: Some(Box::new(StatementNode::Inc {
@@ -401,12 +428,21 @@ mod tests {
                         init: None,
                         cond: Some(ExprNode::BinaryOp {
                             kind: BinaryOpKind::LessEq,
-                            left: Box::new(ExprNode::Literal(LiteralNode::Int(1))),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 1,
+                                location: 159..160
+                            })),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 2,
+                                location: 164..165
+                            })),
                             location: 159..165
                         }),
                         post: Some(Box::new(StatementNode::Expr(ExprNode::Literal(
-                            LiteralNode::Int(4)
+                            LiteralNode::Int {
+                                value: 4,
+                                location: 168..169
+                            }
                         ))))
                     }),
                     header_location: 153..169,
@@ -417,8 +453,14 @@ mod tests {
                         init: None,
                         cond: Some(ExprNode::BinaryOp {
                             kind: BinaryOpKind::Greater,
-                            left: Box::new(ExprNode::Literal(LiteralNode::Int(10))),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 10,
+                                location: 257..259
+                            })),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 2,
+                                location: 262..263
+                            })),
                             location: 257..263
                         }),
                         post: None

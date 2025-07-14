@@ -153,7 +153,10 @@ mod tests {
                 kind: BinaryOpKind::LogicalOr,
                 left: Box::new(ExprNode::BinaryOp {
                     kind: BinaryOpKind::Sum,
-                    left: Box::new(ExprNode::Literal(LiteralNode::Int(42))),
+                    left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 42,
+                        location: 0..2
+                    })),
                     right: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Product,
                         left: Box::new(ExprNode::UnaryOp {
@@ -164,7 +167,10 @@ mod tests {
                             })),
                             location: 5..7
                         }),
-                        right: Box::new(ExprNode::Literal(LiteralNode::Int(3))),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 3,
+                            location: 10..11
+                        })),
                         location: 5..11
                     }),
                     location: 0..11
@@ -181,22 +187,34 @@ mod tests {
                             kind: BinaryOpKind::Eq,
                             left: Box::new(ExprNode::UnaryOp {
                                 kind: UnaryOpKind::Identity,
-                                operand: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                                operand: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 2,
+                                    location: 21..22
+                                })),
                                 location: 20..22
                             }),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int(4))),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 4,
+                                location: 26..27
+                            })),
                             location: 20..27
                         }),
                         right: Box::new(ExprNode::BinaryOp {
                             kind: BinaryOpKind::BitwiseXor,
                             left: Box::new(ExprNode::UnaryOp {
                                 kind: UnaryOpKind::Receive,
-                                operand: Box::new(ExprNode::Literal(LiteralNode::Int(9))),
+                                operand: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 9,
+                                    location: 33..34
+                                })),
                                 location: 31..34
                             }),
                             right: Box::new(ExprNode::BinaryOp {
                                 kind: BinaryOpKind::ShiftLeft,
-                                left: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                                left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 2,
+                                    location: 37..38
+                                })),
                                 right: Box::new(ExprNode::Name(OperandNameNode {
                                     package: None,
                                     id: Span::new("abc", 42, 1)
@@ -220,10 +238,16 @@ mod tests {
         assert_eq!(
             ExprNode::BinaryOp {
                 kind: BinaryOpKind::Product,
-                left: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                    value: 2,
+                    location: 0..1
+                })),
                 right: Box::new(ExprNode::BinaryOp {
                     kind: BinaryOpKind::Diff,
-                    left: Box::new(ExprNode::Literal(LiteralNode::Int(3))),
+                    left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 3,
+                        location: 7..8
+                    })),
                     right: Box::new(ExprNode::UnaryOp {
                         kind: UnaryOpKind::Address,
                         operand: Box::new(ExprNode::Name(OperandNameNode {

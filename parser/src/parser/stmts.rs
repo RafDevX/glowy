@@ -283,8 +283,14 @@ mod tests {
             vec![
                 StatementNode::Expr(ExprNode::BinaryOp {
                     kind: BinaryOpKind::Sum,
-                    left: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
-                    right: Box::new(ExprNode::Literal(LiteralNode::Int(7))),
+                    left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 2,
+                        location: 39..40
+                    })),
+                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 7,
+                        location: 43..44
+                    })),
                     location: 39..44,
                 }),
                 StatementNode::Empty,
@@ -317,7 +323,10 @@ mod tests {
                     lhs: vec![
                         ExprNode::UnaryOp {
                             kind: UnaryOpKind::Negation,
-                            operand: Box::new(ExprNode::Literal(LiteralNode::Int(4))),
+                            operand: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 4,
+                                location: 122..123
+                            })),
                             location: 121..123,
                         },
                         ExprNode::Name(OperandNameNode {
@@ -332,14 +341,26 @@ mod tests {
                     rhs: vec![
                         ExprNode::BinaryOp {
                             kind: BinaryOpKind::Product,
-                            left: Box::new(ExprNode::Literal(LiteralNode::Int(4))),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 4,
+                                location: 134..135
+                            })),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 2,
+                                location: 138..139
+                            })),
                             location: 134..139,
                         },
                         ExprNode::BinaryOp {
                             kind: BinaryOpKind::Sum,
-                            left: Box::new(ExprNode::Literal(LiteralNode::Int(5))),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int(2))),
+                            left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 5,
+                                location: 141..142
+                            })),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 2,
+                                location: 145..146
+                            })),
                             location: 141..146,
                         },
                         ExprNode::Name(OperandNameNode {
