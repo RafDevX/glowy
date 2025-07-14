@@ -37,10 +37,9 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
     let ExprNode::Name(name) = &node.channel else {
         // TODO: support more indirect kinds of channel expressions
 
-        let location =
-            exprs::get_expr_location(&node.channel).unwrap_or_else(|| node.location.clone());
-
-        ctx.report_error(AnalysisErrorKind::IllegalChannelExpression { location });
+        ctx.report_error(AnalysisErrorKind::IllegalChannelExpression {
+            location: exprs::get_expr_location(&node.channel),
+        });
 
         return;
     };

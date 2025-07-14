@@ -1,5 +1,5 @@
 use parser::{
-    ast::{ExprNode, IndexingNode, OperandNameNode, UnaryOpKind},
+    ast::{ExprNode, IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind},
     Location,
 };
 
@@ -188,8 +188,8 @@ pub fn visit_indexing<'a>(
     }
 }
 
-pub fn get_expr_location(node: &ExprNode<'_>) -> Option<Location> {
-    let location = match node {
+pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
+    match node {
         ExprNode::Name(name) => {
             let start = if let Some(package) = &name.package {
                 package.location().start
@@ -204,10 +204,10 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Option<Location> {
         ExprNode::UnaryOp { location, .. } | ExprNode::BinaryOp { location, .. } => {
             location.clone()
         }
-
-        // vvv FIXME: try to add to parser? literally the only thing forcing an Option here
-        ExprNode::Literal(_) => return None,
-    };
-
-    Some(location)
+        ExprNode::Literal(lit) => match lit {
+            LiteralNode::Int { location, .. } => location.clone(),
+            LiteralNode::Rune { location, .. } => location.clone(),
+            LiteralNode::String { location, .. } => location.clone(),
+        },
+    }
 }

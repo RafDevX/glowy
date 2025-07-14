@@ -14,16 +14,12 @@ use crate::{
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     let pushed = if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, &node.cond) {
-        let location = exprs::get_expr_location(&node.cond)
-            .map(|l| ctx.pin(l))
-            .unwrap_or_else(|| expr_backtrace.location().clone());
-
         ctx.push_branch_backtrace(
             LabelBacktrace::new(
                 LabelBacktraceKind::Branch,
                 expr_backtrace.label().clone(),
                 None,
-                location,
+                ctx.pin(exprs::get_expr_location(&node.cond)),
                 &[expr_backtrace],
             )
             .unwrap(), // safe since expr_backtrace exists (label is not Bottom)
@@ -86,16 +82,12 @@ fn visit_for_clause<'a>(
 
     let pushed = if let Some(cond) = &clause.cond {
         if let Some(cond_backtrace) = exprs::visit_single_expr(ctx, cond) {
-            let location = exprs::get_expr_location(cond)
-                .map(|l| ctx.pin(l))
-                .unwrap_or_else(|| ctx.pin(header_location.clone()));
-
             ctx.push_branch_backtrace(
                 LabelBacktrace::new(
                     LabelBacktraceKind::Branch,
                     cond_backtrace.label().clone(),
                     None,
-                    location,
+                    ctx.pin(header_location.clone()),
                     &[cond_backtrace],
                 )
                 .unwrap(), // safe since cond_backtrace exists (label != Bottom)

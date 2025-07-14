@@ -239,9 +239,9 @@ pub fn visit_raw_assignment<'a>(
         //  raw symbols here?)
 
         let ExprNode::Name(name) = lhs else {
-            let location = exprs::get_expr_location(lhs).unwrap_or_else(|| location.clone());
-
-            ctx.report_error(AnalysisErrorKind::InvalidLeftValue { location });
+            ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                location: exprs::get_expr_location(lhs),
+            });
 
             return;
         };
@@ -301,7 +301,10 @@ pub fn visit_incdec<'a>(
         &AssignmentNode {
             kind: AssignmentKind::Sum, // can be anything except Simple
             lhs: vec![operand.clone()],
-            rhs: vec![ExprNode::Literal(LiteralNode::Int(1))],
+            rhs: vec![ExprNode::Literal(LiteralNode::Int {
+                value: 1,
+                location: location.clone(),
+            })],
             location: location.clone(),
         },
     );
