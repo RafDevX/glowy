@@ -19,6 +19,7 @@ pub enum LexingError<'a> {
     InvalidNumberLiteralChar(Span<'a>),
     IntParseFailure(Span<'a>, ParseIntError),
     FloatParseFailure(Span<'a>, ParseFloatError),
+    NumberTrailingUnderscore(Span<'a>),
     MultipleCharactersInRune(Span<'a>),
     EmptyRune(Span<'a>),
     LineBreakInString(Span<'a>),
@@ -59,32 +60,38 @@ impl<'a> Diagnostics<'a> for LexingError<'a> {
                 details: err.to_string(),
                 context: Some(context.clone()),
             },
-            Self::MultipleCharactersInRune(context) => ErrorDiagnosticInfo {
+            Self::NumberTrailingUnderscore(context) => ErrorDiagnosticInfo {
                 code: s!("L005"),
+                overview: s!("illegal trailing underscore in number literal"),
+                details: s!("underscores are only allowed between consecutive digits"),
+                context: Some(context.clone()),
+            },
+            Self::MultipleCharactersInRune(context) => ErrorDiagnosticInfo {
+                code: s!("L006"),
                 overview: s!("multiple characters in rune"),
                 details: s!("found more than one character in the given rune"),
                 context: Some(context.clone()),
             },
             Self::EmptyRune(context) => ErrorDiagnosticInfo {
-                code: s!("L006"),
+                code: s!("L007"),
                 overview: s!("empty rune"),
                 details: s!("found no characters in the given rune"),
                 context: Some(context.clone()),
             },
             Self::LineBreakInString(context) => ErrorDiagnosticInfo {
-                code: s!("L007"),
+                code: s!("L008"),
                 overview: s!("line break in string"),
                 details: s!("the newline character (\\n) is not allowed in string literals"),
                 context: Some(context.clone()),
             },
             Self::InvalidStringEscapeSequence(context) => ErrorDiagnosticInfo {
-                code: s!("L008"),
+                code: s!("L009"),
                 overview: s!("invalid escape sequence"),
                 details: s!("escape sequence in string is invalid"),
                 context: Some(context.clone()),
             },
             Self::UnclosedString => ErrorDiagnosticInfo {
-                code: s!("L009"),
+                code: s!("L010"),
                 overview: s!("unclosed string"),
                 details: s!("reached EOF before finding a closing string delimiter"),
                 context: None,
@@ -284,10 +291,9 @@ impl<'a> Lexer<'a> {
             seen_period: bool, // the . in 3.14
             seen_exp: bool,    // the e in 2e6, or the p in 0x2p4
             exp_has_digits: bool,
+            last_was_digit: bool,
             err: Option<LexingError<'a>>,
         }
-
-        // TODO: allow separating _'s (only between consecutive digits!)
 
         let (span, state) = self.accumulate_while(
             NumberLexState {
@@ -296,6 +302,7 @@ impl<'a> Lexer<'a> {
                 seen_period: false,
                 seen_exp: false,
                 exp_has_digits: false,
+                last_was_digit: false,
                 err: None,
             },
             |ch, state, lexer| {
@@ -310,6 +317,20 @@ impl<'a> Lexer<'a> {
 
                         return false;
                     }};
+                }
+
+                if ch == '_' {
+                    // Go allows separating underscores, only one at a time and
+                    // only between consecutive digits (e.g. 2_45_6 is ok, but
+                    // 2._5 or 1__2 is invalid)
+                    if state.last_was_digit {
+                        state.last_was_digit = false;
+                        return true; // continue to next character
+                    } else {
+                        invalid!(state, lexer);
+                    }
+                } else if ch.is_ascii_digit() {
+                    state.last_was_digit = true;
                 }
 
                 match state.mode {
@@ -389,6 +410,13 @@ impl<'a> Lexer<'a> {
             return Err(err);
         };
 
+        if span.content().ends_with('_') {
+            // this is the only case not caught while reading: if the number
+            // ends and the last thing read was an underscore, which is illegal,
+            // since underscores are only allowed between digits
+            return Err(LexingError::NumberTrailingUnderscore(span));
+        }
+
         let (radix, start) = match state.mode {
             NumberLexMode::Unknown => unreachable!("invoker did not peek first! ran out of tokens"),
             NumberLexMode::Set | NumberLexMode::Decimal => (10, span.content),
@@ -397,11 +425,13 @@ impl<'a> Lexer<'a> {
             NumberLexMode::Hex => (16, &span.content[2..]),
         };
 
+        let num_str = start.replace('_', "");
+
         if state.seen_period || state.seen_exp {
             // float
 
             let result = if radix == 10 {
-                f64::from_str(start)
+                f64::from_str(&num_str)
             } else if radix == 16 {
                 // hexadecimal floats are valid Go and accepted by the lexer up
                 // to this point, but sadly they cannot be easily parsed by Rust
@@ -412,7 +442,7 @@ impl<'a> Lexer<'a> {
 
                 // we thus implement a ridiculous frankenstein conversion
                 // ourselves, under the hope that it shall never be used
-                parse_hexadecimal_float(start)
+                parse_hexadecimal_float(&num_str)
             } else {
                 unreachable!("unexpected base-{radix} float")
             };
@@ -424,7 +454,7 @@ impl<'a> Lexer<'a> {
         } else {
             // int
 
-            match u64::from_str_radix(start, radix) {
+            match u64::from_str_radix(&num_str, radix) {
                 Ok(int) => Ok(Token::new(TokenKind::Int(int), span)),
                 Err(err) => Err(LexingError::IntParseFailure(span, err)),
             }
@@ -978,6 +1008,33 @@ mod tests {
             lex(concat!(
                 "\t 0. 72.40 072.40 2.71828 1.e+0\n 6.6742e-11 1E6 .25 .12345E+5 15. 0.15e+02",
                 "\t 0x1p-2 0x2.p10 0x1.Fp+0 0X.8p-0 0X1FFFP-16"
+            ))
+            .unwrap()
+        )
+    }
+
+    #[test]
+    fn underscores() {
+        assert_eq!(
+            vec![
+                Token::new(TokenKind::Int(42), Span::new("4_2", 2, 1)),
+                Token::new(TokenKind::Int(600), Span::new("0_600", 6, 1)),
+                Token::new(TokenKind::Int(195951310), Span::new("0xBad_Face", 12, 1)),
+                Token::new(
+                    TokenKind::Int(170141183460469),
+                    Span::new("170_141183_460469", 23, 1)
+                ),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 40, 1)),
+                Token::new(TokenKind::Float(15.0), Span::new("1_5.", 41, 2)),
+                Token::new(TokenKind::Float(15.0), Span::new("0.15e+0_2", 46, 2)),
+                Token::new(
+                    TokenKind::Float(0.1249847412109375),
+                    Span::new("0X_1FFFP-16", 56, 2)
+                ),
+            ],
+            lex(concat!(
+                "\t 4_2 0_600 0xBad_Face 170_141183_460469\n",
+                "1_5. 0.15e+0_2 0X_1FFFP-16"
             ))
             .unwrap()
         )
