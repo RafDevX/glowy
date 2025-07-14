@@ -58,6 +58,7 @@ pub enum TokenKind {
     AmpCaretAssign, // &^=
 
     Int(u64),       // 3
+    Float(f64),     // 3.14
     Rune(char),     // 'a'
     String(String), // "hello world"
 
@@ -84,6 +85,7 @@ impl TokenKind {
             self,
             TokenKind::Ident
                 | TokenKind::Int(_)
+                | TokenKind::Float(_)
                 | TokenKind::Rune(_)
                 | TokenKind::String(_)
                 | TokenKind::Return

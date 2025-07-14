@@ -150,22 +150,22 @@ mod tests {
                             }),
                             location: 15..26,
                         },
-                        ExprNode::Literal(LiteralNode::Int {
-                            value: 0,
-                            location: 28..29
+                        ExprNode::Literal(LiteralNode::Rune {
+                            value: 'a',
+                            location: 28..31
                         })
                     ],
                     variadic: true,
-                    location: 14..33,
+                    location: 14..35,
                     annotation: None,
                 })),
                 type_arg: None,
                 args: vec![],
                 variadic: false,
-                location: 33..35,
+                location: 35..37,
                 annotation: None
             }),
-            parse("(abc.def + 14)(21 + 7 * -9, 0...)()").unwrap()
+            parse("(abc.def + 14)(21 + 7 * -9, 'a'...)()").unwrap()
         )
     }
 

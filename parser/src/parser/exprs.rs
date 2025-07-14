@@ -40,6 +40,15 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             }
             .into()
         }
+        Some(token @ of_kind!(TokenKind::Float(value))) => {
+            s.next(); // advance
+
+            LiteralNode::Float {
+                value,
+                location: token.span.location(),
+            }
+            .into()
+        }
         Some(token @ of_kind!(TokenKind::Rune(value))) => {
             s.next(); // advance
 

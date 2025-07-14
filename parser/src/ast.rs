@@ -191,6 +191,7 @@ pub struct OperandNameNode<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum LiteralNode {
     Int { value: u64, location: Location },
+    Float { value: f64, location: Location },
     Rune { value: char, location: Location },
     String { value: String, location: Location },
 }

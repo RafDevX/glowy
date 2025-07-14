@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, num::ParseIntError, str::Chars};
+use std::{
+    collections::VecDeque,
+    num::{ParseFloatError, ParseIntError},
+    str::{Chars, FromStr},
+};
 
 use finl_unicode::categories::CharacterCategories;
 use regex::Regex;
@@ -14,6 +18,7 @@ pub enum LexingError<'a> {
     UnknownChar(Span<'a>),
     InvalidNumberLiteralChar(Span<'a>),
     IntParseFailure(Span<'a>, ParseIntError),
+    FloatParseFailure(Span<'a>, ParseFloatError),
     MultipleCharactersInRune(Span<'a>),
     EmptyRune(Span<'a>),
     LineBreakInString(Span<'a>),
@@ -48,32 +53,38 @@ impl<'a> Diagnostics<'a> for LexingError<'a> {
                 details: err.to_string(),
                 context: Some(context.clone()),
             },
-            Self::MultipleCharactersInRune(context) => ErrorDiagnosticInfo {
+            Self::FloatParseFailure(context, err) => ErrorDiagnosticInfo {
                 code: s!("L004"),
+                overview: s!("failed to parse float literal"),
+                details: err.to_string(),
+                context: Some(context.clone()),
+            },
+            Self::MultipleCharactersInRune(context) => ErrorDiagnosticInfo {
+                code: s!("L005"),
                 overview: s!("multiple characters in rune"),
                 details: s!("found more than one character in the given rune"),
                 context: Some(context.clone()),
             },
             Self::EmptyRune(context) => ErrorDiagnosticInfo {
-                code: s!("L005"),
+                code: s!("L006"),
                 overview: s!("empty rune"),
                 details: s!("found no characters in the given rune"),
                 context: Some(context.clone()),
             },
             Self::LineBreakInString(context) => ErrorDiagnosticInfo {
-                code: s!("L006"),
+                code: s!("L007"),
                 overview: s!("line break in string"),
                 details: s!("the newline character (\\n) is not allowed in string literals"),
                 context: Some(context.clone()),
             },
             Self::InvalidStringEscapeSequence(context) => ErrorDiagnosticInfo {
-                code: s!("L007"),
+                code: s!("L008"),
                 overview: s!("invalid escape sequence"),
                 details: s!("escape sequence in string is invalid"),
                 context: Some(context.clone()),
             },
             Self::UnclosedString => ErrorDiagnosticInfo {
-                code: s!("L008"),
+                code: s!("L009"),
                 overview: s!("unclosed string"),
                 details: s!("reached EOF before finding a closing string delimiter"),
                 context: None,
@@ -269,50 +280,105 @@ impl<'a> Lexer<'a> {
 
         struct NumberLexState<'a> {
             mode: NumberLexMode,
-            read: bool, // whether a real digit has been read yet
+            seen_digits: bool, // whether any real digit has been read yet
+            seen_period: bool, // the . in 3.14
+            seen_exp: bool,    // the e in 2e6, or the p in 0x2p4
+            exp_has_digits: bool,
             err: Option<LexingError<'a>>,
         }
 
-        // TODO: support floats
         // TODO: allow separating _'s (only between consecutive digits!)
 
         let (span, state) = self.accumulate_while(
             NumberLexState {
                 mode: NumberLexMode::Unknown,
-                read: false,
+                seen_digits: false,
+                seen_period: false,
+                seen_exp: false,
+                exp_has_digits: false,
                 err: None,
             },
             |ch, state, lexer| {
+                macro_rules! invalid {
+                    ($state:expr, $lexer:expr) => {{
+                        // if had already read something, unknown char might be another token
+                        if !$state.seen_digits {
+                            // haven't read anything yet, this is officially an error
+                            let span = $lexer.read_span().unwrap();
+                            $state.err = Some(LexingError::InvalidNumberLiteralChar(span));
+                        }
+
+                        return false;
+                    }};
+                }
+
                 match state.mode {
                     NumberLexMode::Unknown if ch == '0' => state.mode = NumberLexMode::Set,
-                    NumberLexMode::Decimal | NumberLexMode::Unknown | NumberLexMode::Set
-                        if ch.is_ascii_digit() =>
-                    {
-                        state.mode = NumberLexMode::Decimal;
-                        state.read = true;
-                    }
                     NumberLexMode::Set => {
                         state.mode = match ch.to_ascii_lowercase() {
                             'b' => NumberLexMode::Binary,
                             'o' => NumberLexMode::Octal,
                             'x' => NumberLexMode::Hex,
+                            '0'..='9' => {
+                                state.seen_digits = true;
+
+                                NumberLexMode::Decimal
+                            }
+                            '.' => {
+                                state.seen_digits = true; // first 0 counts as real
+                                state.seen_period = true;
+
+                                NumberLexMode::Decimal
+                            }
+                            'e' => {
+                                state.seen_exp = true;
+
+                                NumberLexMode::Decimal
+                            }
                             _ => return false, // this is probably another token
                         }
                     }
-                    NumberLexMode::Binary if ch == '0' || ch == '1' => state.read = true,
-                    NumberLexMode::Octal if ch.is_digit(8) => state.read = true,
-                    NumberLexMode::Hex if ch.is_ascii_hexdigit() => state.read = true,
-                    _ => {
-                        // if had already read something, unknown char might be another token
-                        if state.read {
-                            return false;
-                        } else {
-                            // haven't read anything yet, this is officially an error
-                            let span = lexer.read_span().unwrap();
-                            state.err = Some(LexingError::InvalidNumberLiteralChar(span));
-                            return false;
+                    NumberLexMode::Unknown | NumberLexMode::Decimal => {
+                        match ch {
+                            '0'..='9' => {
+                                state.mode = NumberLexMode::Decimal;
+                                if state.seen_exp {
+                                    state.exp_has_digits = true;
+                                } else {
+                                    state.seen_digits = true;
+                                }
+                            }
+                            '.' if !state.seen_period && !state.seen_exp => {
+                                state.mode = NumberLexMode::Decimal;
+                                state.seen_period = true;
+                            }
+                            'e' | 'E' if state.seen_digits && !state.seen_exp => {
+                                state.seen_exp = true;
+                            }
+                            '+' | '-' if state.seen_exp && !state.exp_has_digits => {} // allow
+                            _ => invalid!(state, lexer),
                         }
                     }
+                    NumberLexMode::Binary if ch == '0' || ch == '1' => state.seen_digits = true,
+                    NumberLexMode::Octal if ch.is_digit(8) => state.seen_digits = true,
+                    NumberLexMode::Hex => match ch {
+                        '.' if !state.seen_period && !state.seen_exp => {
+                            state.seen_period = true;
+                        }
+                        'p' | 'P' if state.seen_digits && !state.seen_exp => {
+                            state.seen_exp = true;
+                        }
+                        '+' | '-' if state.seen_exp && !state.exp_has_digits => {} // allow
+                        digit if digit.is_ascii_hexdigit() => {
+                            if state.seen_exp {
+                                state.exp_has_digits = true;
+                            } else {
+                                state.seen_digits = true;
+                            }
+                        }
+                        _ => invalid!(state, lexer),
+                    },
+                    _ => invalid!(state, lexer),
                 }
 
                 true
@@ -331,9 +397,37 @@ impl<'a> Lexer<'a> {
             NumberLexMode::Hex => (16, &span.content[2..]),
         };
 
-        match u64::from_str_radix(start, radix) {
-            Ok(int) => Ok(Token::new(TokenKind::Int(int), span)),
-            Err(err) => Err(LexingError::IntParseFailure(span, err)),
+        if state.seen_period || state.seen_exp {
+            // float
+
+            let result = if radix == 10 {
+                f64::from_str(start)
+            } else if radix == 16 {
+                // hexadecimal floats are valid Go and accepted by the lexer up
+                // to this point, but sadly they cannot be easily parsed by Rust
+                // (std) into an f64, since 10 years ago f64::from_str_radix was
+                // deprecated, and even before then it was reportedly wildly
+                // inaccurate for base 16;
+                // https://internals.rust-lang.org/t/deprecate-f-32-64-from-str-radix/2405
+
+                // we thus implement a ridiculous frankenstein conversion
+                // ourselves, under the hope that it shall never be used
+                parse_hexadecimal_float(start)
+            } else {
+                unreachable!("unexpected base-{radix} float")
+            };
+
+            match result {
+                Ok(float) => Ok(Token::new(TokenKind::Float(float), span)),
+                Err(err) => Err(LexingError::FloatParseFailure(span, err)),
+            }
+        } else {
+            // int
+
+            match u64::from_str_radix(start, radix) {
+                Ok(int) => Ok(Token::new(TokenKind::Int(int), span)),
+                Err(err) => Err(LexingError::IntParseFailure(span, err)),
+            }
         }
     }
 
@@ -553,20 +647,28 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn period_or_ellipsis(&mut self) -> Token<'a> {
+    fn period_or_ellipsis(&mut self) -> LResult<'a> {
         // cannot use greedy since ".." is not a valid token..
 
         // we can't use &view[..3] == "..." because ..3 might fall
         // outside char boundaries, e.g. "..ü" would panic
         let upcoming: Vec<_> = self.src.clone().take(3).collect();
 
-        if upcoming.len() == 3 && upcoming.iter().all(|x| *x == '.') {
+        let token = if upcoming.len() == 3 && upcoming.iter().all(|x| *x == '.') {
             Token::new(TokenKind::Ellipsis, self.read_n::<3>())
         } else if upcoming.first() == Some(&'.') {
-            Token::new(TokenKind::Period, self.read_span().unwrap())
+            if upcoming.get(1).map(char::is_ascii_digit).unwrap_or(false) {
+                // float literal with elided integer part, such as .25 == 0.25
+                return self.number_literal();
+            } else {
+                // just a normal period
+                Token::new(TokenKind::Period, self.read_span().unwrap())
+            }
         } else {
             unreachable!("invoker code did not check for a period!")
-        }
+        };
+
+        Ok(token)
     }
 
     fn greedy(&mut self, tree: &TokenOptionsTree<'static>) -> Token<'a> {
@@ -683,7 +785,10 @@ impl<'a> Iterator for Lexer<'a> {
                 TokenKind::PipeAssign
             ),
 
-            Some('.') => self.period_or_ellipsis(),
+            Some('.') => match self.period_or_ellipsis() {
+                Ok(token) => token,
+                err @ Err(_) => return Some(err),
+            },
 
             Some('&') => self.greedy(&tree!(
                 TokenKind::Amp,
@@ -727,8 +832,6 @@ impl<'a> Iterator for Lexer<'a> {
                 ]
             )),
 
-            // TODO: support floats starting with dot (e.g., `.3`)
-            // (this is not trivial since it conflicts with TokenKind::Period)
             Some(ch) if ch.is_ascii_digit() => match self.number_literal() {
                 Ok(token) => token,
                 err @ Err(_) => return Some(err),
@@ -771,6 +874,44 @@ fn is_whitespace(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '\r' | '\n')
 }
 
+// truly a sign of decaying times; see invoker for more context
+fn parse_hexadecimal_float(s: &str) -> Result<f64, ParseFloatError> {
+    // we (perhaps foolishly) assume that the string is structurally correct
+    // (i.e., resembles a float in shape), and thus unwrap away -- in theory
+    // this should be fine since we manually created the string inside the lexer
+    // ourselves and already validated most conditions and edge cases
+    // (note: no 0x prefix is expected; this is removed before invocation)
+
+    let (mantissa_str, exp) = match s.split_once(['p', 'P']) {
+        Some((m, e)) => (m, Some(e.parse().unwrap())), // exponent is i32 for f64
+        None => (s, None),
+        // ^ technically it's not valid Go to omit the exponent in a hexadecimal
+        // float, but we have no easy way to propagate this error since we can't
+        // construct a ParseFloatError, so we just deal with it
+    };
+
+    let (int_part, frac_part) = match mantissa_str.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (mantissa_str, ""),
+    };
+
+    let mut mantissa = 0.0;
+
+    if !int_part.is_empty() {
+        mantissa += u64::from_str_radix(int_part, 16).unwrap() as f64;
+    }
+
+    if !frac_part.is_empty() {
+        for (i, ch) in frac_part.chars().enumerate() {
+            let digit = ch.to_digit(16).unwrap();
+
+            mantissa += (digit as f64) / 16f64.powi((i + 1) as i32);
+        }
+    }
+
+    Ok(mantissa * exp.map(|e| 2f64.powi(e)).unwrap_or(1.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -805,6 +946,40 @@ mod tests {
                 Token::new(TokenKind::Int(0), Span::new("0", 33, 2))
             ],
             lex("\t 3 50 0b11101 0o771 0xf45\n 0123 0").unwrap()
+        )
+    }
+
+    #[test]
+    fn float_lits() {
+        assert_eq!(
+            vec![
+                Token::new(TokenKind::Float(0.0), Span::new("0.", 2, 1)),
+                Token::new(TokenKind::Float(72.4), Span::new("72.40", 5, 1)),
+                Token::new(TokenKind::Float(72.4), Span::new("072.40", 11, 1)),
+                #[allow(clippy::approx_constant)]
+                Token::new(TokenKind::Float(2.71828), Span::new("2.71828", 18, 1)),
+                Token::new(TokenKind::Float(1.0), Span::new("1.e+0", 26, 1)),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 31, 1)),
+                Token::new(TokenKind::Float(6.6742e-11), Span::new("6.6742e-11", 33, 2)),
+                Token::new(TokenKind::Float(1_000_000.0), Span::new("1E6", 44, 2)),
+                Token::new(TokenKind::Float(0.25), Span::new(".25", 48, 2)),
+                Token::new(TokenKind::Float(12345.0), Span::new(".12345E+5", 52, 2)),
+                Token::new(TokenKind::Float(15.0), Span::new("15.", 62, 2)),
+                Token::new(TokenKind::Float(15.0), Span::new("0.15e+02", 66, 2)),
+                Token::new(TokenKind::Float(0.25), Span::new("0x1p-2", 76, 2)),
+                Token::new(TokenKind::Float(2048.0), Span::new("0x2.p10", 83, 2)),
+                Token::new(TokenKind::Float(1.9375), Span::new("0x1.Fp+0", 91, 2)),
+                Token::new(TokenKind::Float(0.5), Span::new("0X.8p-0", 100, 2)),
+                Token::new(
+                    TokenKind::Float(0.1249847412109375),
+                    Span::new("0X1FFFP-16", 108, 2)
+                ),
+            ],
+            lex(concat!(
+                "\t 0. 72.40 072.40 2.71828 1.e+0\n 6.6742e-11 1E6 .25 .12345E+5 15. 0.15e+02",
+                "\t 0x1p-2 0x2.p10 0x1.Fp+0 0X.8p-0 0X1FFFP-16"
+            ))
+            .unwrap()
         )
     }
 
