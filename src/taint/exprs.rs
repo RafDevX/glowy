@@ -206,6 +206,7 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
         }
         ExprNode::Literal(lit) => match lit {
             LiteralNode::Int { location, .. } => location.clone(),
+            LiteralNode::Float { location, .. } => location.clone(),
             LiteralNode::Rune { location, .. } => location.clone(),
             LiteralNode::String { location, .. } => location.clone(),
         },
