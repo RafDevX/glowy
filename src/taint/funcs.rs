@@ -163,7 +163,7 @@ pub fn visit_call<'a>(
     node: &CallNode<'a>,
 ) -> Vec<Option<LabelBacktrace<'a>>> {
     let Some(metadata) = func_metadata_from_call_expr(ctx, &node.func) else {
-        return vec![]; // error already reported
+        return vec![]; // error already reported, or builtin
     };
     let borrowed = metadata.borrow();
     let params = &borrowed.signature().params;

@@ -76,7 +76,10 @@ impl<'a> SymbolTable<'a> {
     pub fn new() -> Self {
         Self {
             universe_scope: Scope::new_universe(),
-            package_scopes: HashMap::new(),
+            package_scopes: HashMap::from([(
+                "fmt".to_owned(),
+                PackageScopeEnvelope::new_builtin("fmt", &["Println"]),
+            )]),
 
             current_file_named_imports: HashMap::new(),
             current_file_wildcard_imports: Vec::new(),
@@ -293,6 +296,21 @@ impl<'a> PackageScopeEnvelope<'a> {
             scope,
             next_child_index: 0,
         }
+    }
+
+    fn new_builtin(package_name: &'static str, items: &[&'static str]) -> Self {
+        let envelope = Self::new(Pinned {
+            virtual_file_path: PathBuf::new(),
+            inner: Span::new(package_name, 0, 0),
+        });
+
+        for item in items {
+            let symbol = Symbol::new_predeclared_ref(item);
+
+            envelope.scope.borrow_mut().set_local_symbol(item, symbol);
+        }
+
+        envelope
     }
 }
 
