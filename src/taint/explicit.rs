@@ -38,6 +38,20 @@ fn visit_binding_decl_spec<'a>(
     location: &Location,
     annotation: &Option<Box<Annotation<'a>>>,
 ) {
+    if node.exprs.is_empty() && node.r#type.is_some() && !short {
+        // no initialization expression; zero-value is used;
+        // for our purposes, we just need to remember the decl exists
+        // (branch label is irrelevant in this case)
+
+        for name in &node.ids {
+            let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, None);
+
+            ctx.declare_new_symbol(symbol);
+        }
+
+        return;
+    }
+
     let backtraces = match node.exprs.as_slice() {
         // vvv case where `var a, b = f()` with `f` returning multiple values
         // (note: `const` cannot do this - we check `mutable` as a heuristic)

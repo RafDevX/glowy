@@ -36,6 +36,18 @@ pub fn visit_source_file<'a>(
     }
 
     for decl in &node.top_level_decls {
+        // init functions are not actually declared (and there may be multiple
+        // defined, even in the same file). note that this only applies for
+        // top-level declarations (i.e., package scope), not anywhere else
+        if let DeclNode::Function(func) = decl {
+            if func.name.content() == "init" {
+                // this will create a new scope, which is intended
+                visit_block(ctx, &func.body);
+
+                continue;
+            }
+        }
+
         visit_decl(ctx, decl);
     }
 
