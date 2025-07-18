@@ -233,10 +233,18 @@ pub enum StatementNode<'a> {
     ShortVarDecl(ShortVarDeclNode<'a>),
 
     // non-simple
+    Block(BlockNode<'a>),
     Decl(DeclNode<'a>),
     If(IfNode<'a>),
     For(ForNode<'a>),
-    Block(BlockNode<'a>),
+    Continue {
+        label: Option<Span<'a>>,
+        location: Location, // for better error messages
+    },
+    Break {
+        label: Option<Span<'a>>,
+        location: Location, // for better error messages
+    },
     Return {
         exprs: Vec<ExprNode<'a>>,
         location: Location, // for better error messages

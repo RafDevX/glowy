@@ -237,6 +237,48 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
     })
 }
 
+pub fn parse_continue_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
+    let beginning = expect(s, TokenKind::Continue, Some("continue statement"))?;
+
+    let label = if s
+        .peek()
+        .cloned()
+        .transpose()?
+        .map(|t| terminal_token(&t.kind))
+        .unwrap_or(true)
+    // ^ eof is arguably terminal
+    {
+        None
+    } else {
+        Some(expect(s, TokenKind::Ident, Some("continue label"))?.span)
+    };
+
+    let location = s.location_since(&beginning);
+
+    Ok(StatementNode::Continue { label, location })
+}
+
+pub fn parse_break_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
+    let beginning = expect(s, TokenKind::Break, Some("break statement"))?;
+
+    let label = if s
+        .peek()
+        .cloned()
+        .transpose()?
+        .map(|t| terminal_token(&t.kind))
+        .unwrap_or(true)
+    // ^ eof is arguably terminal
+    {
+        None
+    } else {
+        Some(expect(s, TokenKind::Ident, Some("break label"))?.span)
+    };
+
+    let location = s.location_since(&beginning);
+
+    Ok(StatementNode::Break { label, location })
+}
+
 pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
     let token = expect(s, TokenKind::Return, Some("return statement"))?;
 
@@ -553,6 +595,122 @@ mod tests {
                         }
 
                         for range ch {}
+                    }
+        "
+            )
+            .unwrap()
+        )
+    }
+
+    #[test]
+    fn for_continue_break() {
+        assert_eq!(
+            vec![StatementNode::For(ForNode {
+                header: ForHeaderNode::Range(ForRangeNode::Decl {
+                    lhs: vec![Span::new("i", 51, 3), Span::new("item", 54, 3)],
+                    range_expr: ExprNode::Name(OperandNameNode {
+                        package: None,
+                        id: Span::new("arr", 68, 3)
+                    })
+                }),
+                header_location: 47..71,
+                body: vec![StatementNode::If(IfNode {
+                    cond: ExprNode::BinaryOp {
+                        kind: BinaryOpKind::Eq,
+                        left: Box::new(ExprNode::BinaryOp {
+                            kind: BinaryOpKind::Remainder,
+                            left: Box::new(ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("i", 105, 4)
+                            })),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 2,
+                                location: 109..110
+                            })),
+                            location: 105..110
+                        }),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 0,
+                            location: 114..115
+                        })),
+                        location: 105..115
+                    },
+                    then: vec![StatementNode::Continue {
+                        label: None,
+                        location: 150..158
+                    }],
+                    otherwise: Some(ElseNode::If(Box::new(IfNode {
+                        cond: ExprNode::BinaryOp {
+                            kind: BinaryOpKind::Eq,
+                            left: Box::new(ExprNode::BinaryOp {
+                                kind: BinaryOpKind::Remainder,
+                                left: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("i", 197, 6)
+                                })),
+                                right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 3,
+                                    location: 201..202
+                                })),
+                                location: 197..202
+                            }),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 0,
+                                location: 206..207
+                            })),
+                            location: 197..207
+                        },
+                        then: vec![StatementNode::Continue {
+                            label: Some(Span::new("Label", 251, 7)),
+                            location: 242..256
+                        }],
+                        otherwise: Some(ElseNode::If(Box::new(IfNode {
+                            cond: ExprNode::BinaryOp {
+                                kind: BinaryOpKind::Eq,
+                                left: Box::new(ExprNode::BinaryOp {
+                                    kind: BinaryOpKind::Remainder,
+                                    left: Box::new(ExprNode::Name(OperandNameNode {
+                                        package: None,
+                                        id: Span::new("i", 295, 8)
+                                    })),
+                                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                        value: 5,
+                                        location: 299..300
+                                    })),
+                                    location: 295..300
+                                }),
+                                right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 0,
+                                    location: 304..305
+                                })),
+                                location: 295..305
+                            },
+                            then: vec![StatementNode::Break {
+                                label: Some(Span::new("Label", 346, 9)),
+                                location: 340..351
+                            }],
+                            otherwise: Some(ElseNode::Block(vec![StatementNode::Break {
+                                label: None,
+                                location: 421..426
+                            }]))
+                        })))
+                    })))
+                })]
+            }),],
+            parse(
+                "
+                    {
+                        for i, item := range arr {
+                            if i % 2 == 0 {
+                                continue
+                            } else if i % 3 == 0 {
+                                continue Label
+                            } else if i % 5 == 0 {
+                                break Label
+                            } else {
+                                break
+                            }
+                        }
                     }
         "
             )

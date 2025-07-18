@@ -1,6 +1,9 @@
 use self::{
     concur::parse_go_statement,
-    flow::{parse_for_statement, parse_if_statement, parse_return_statement},
+    flow::{
+        parse_break_statement, parse_continue_statement, parse_for_statement, parse_if_statement,
+        parse_return_statement,
+    },
 };
 use super::{
     decls::bindings::{parse_const_decl, parse_var_decl},
@@ -191,6 +194,8 @@ fn parse_statement<'a>(
         }
         Some(of_kind!(TokenKind::If)) if allow_non_simple => parse_if_statement(s)?.into(),
         Some(of_kind!(TokenKind::For)) if allow_non_simple => parse_for_statement(s)?.into(),
+        Some(of_kind!(TokenKind::Continue)) if allow_non_simple => parse_continue_statement(s)?,
+        Some(of_kind!(TokenKind::Break)) if allow_non_simple => parse_break_statement(s)?,
         Some(of_kind!(TokenKind::Return)) if allow_non_simple => parse_return_statement(s)?,
         Some(of_kind!(TokenKind::Go)) if allow_non_simple => parse_go_statement(s)?,
 
