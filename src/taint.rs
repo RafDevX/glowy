@@ -104,11 +104,6 @@ fn visit_block<'a>(ctx: &mut AnalysisContext<'a>, node: &BlockNode<'a>) {
 fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
     for statement in statements {
         if ctx.returning() && *statement != StatementNode::Empty {
-            // FIXME: don't have any location information at this point (from
-            // parser) to pass to ErrorKind::Unreachable, which makes it pretty
-            // opaque and thus very broad error messages (file-granularity)
-            ctx.report_error(AnalysisErrorKind::Unreachable);
-
             break;
         }
 
