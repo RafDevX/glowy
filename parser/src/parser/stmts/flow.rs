@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {
-    expect(s, TokenKind::If, Some("if statement"))?;
+    let beginning = expect(s, TokenKind::If, Some("if statement"))?;
 
     // TODO: support simple statements to execute before condition
 
@@ -33,10 +33,13 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
         None
     };
 
+    let location = s.location_since(&beginning);
+
     Ok(IfNode {
         cond,
         then,
         otherwise,
+        location,
     })
 }
 
@@ -230,10 +233,13 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
 
     let body = parse_block(s)?;
 
+    let location = s.location_since(&beginning);
+
     Ok(ForNode {
         header,
         header_location,
         body,
+        location,
     })
 }
 
@@ -404,8 +410,10 @@ mod tests {
                             ],
                             location: 331..346,
                         })
-                    ]))
-                })))
+                    ])),
+                    location: 158..373,
+                }))),
+                location: 47..373,
             })],
             parse(
                 "
@@ -463,7 +471,8 @@ mod tests {
                         }))
                     }),
                     header_location: 47..69,
-                    body: vec![StatementNode::Empty { location: 100..101 }]
+                    body: vec![StatementNode::Empty { location: 100..101 }],
+                    location: 47..127
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Clause(ForClauseNode {
@@ -488,7 +497,8 @@ mod tests {
                         ))))
                     }),
                     header_location: 153..169,
-                    body: vec![StatementNode::Empty { location: 200..201 }]
+                    body: vec![StatementNode::Empty { location: 200..201 }],
+                    location: 153..227,
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Clause(ForClauseNode {
@@ -508,7 +518,8 @@ mod tests {
                         post: None
                     }),
                     header_location: 253..263,
-                    body: vec![StatementNode::Empty { location: 294..295 }]
+                    body: vec![StatementNode::Empty { location: 294..295 }],
+                    location: 253..321,
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Clause(ForClauseNode {
@@ -517,7 +528,8 @@ mod tests {
                         post: None
                     }),
                     header_location: 347..350,
-                    body: vec![]
+                    body: vec![],
+                    location: 347..354,
                 })
             ],
             parse(
@@ -556,7 +568,8 @@ mod tests {
                         })
                     }),
                     header_location: 47..71,
-                    body: vec![StatementNode::Empty { location: 102..103 }]
+                    body: vec![StatementNode::Empty { location: 102..103 }],
+                    location: 47..129,
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::Assignment {
@@ -570,7 +583,8 @@ mod tests {
                         })
                     }),
                     header_location: 155..172,
-                    body: vec![StatementNode::Empty { location: 203..204 }]
+                    body: vec![StatementNode::Empty { location: 203..204 }],
+                    location: 155..230,
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::None {
@@ -580,7 +594,8 @@ mod tests {
                         })
                     }),
                     header_location: 256..268,
-                    body: vec![]
+                    body: vec![],
+                    location: 256..271,
                 })
             ],
             parse(
@@ -692,10 +707,14 @@ mod tests {
                             otherwise: Some(ElseNode::Block(vec![StatementNode::Break {
                                 label: None,
                                 location: 421..426
-                            }]))
-                        })))
-                    })))
-                })]
+                            }])),
+                            location: 292..456,
+                        }))),
+                        location: 194..456,
+                    }))),
+                    location: 102..456,
+                })],
+                location: 47..482,
             })],
             parse(
                 "

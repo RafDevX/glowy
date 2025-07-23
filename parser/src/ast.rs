@@ -351,6 +351,7 @@ pub struct IfNode<'a> {
     pub cond: ExprNode<'a>,
     pub then: BlockNode<'a>,
     pub otherwise: Option<ElseNode<'a>>,
+    pub location: Location,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -364,6 +365,7 @@ pub struct ForNode<'a> {
     pub header: ForHeaderNode<'a>,
     pub header_location: Location,
     pub body: BlockNode<'a>,
+    pub location: Location,
 }
 
 #[derive(Clone, Debug, PartialEq)]
