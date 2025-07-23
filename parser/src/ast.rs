@@ -218,7 +218,9 @@ pub type BlockNode<'a> = Vec<StatementNode<'a>>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum StatementNode<'a> {
     // simple
-    Empty,
+    Empty {
+        location: Location, // for better error messages
+    },
     Expr(ExprNode<'a>),
     Send(SendNode<'a>),
     Inc {

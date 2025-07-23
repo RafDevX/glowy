@@ -188,7 +188,9 @@ fn parse_statement<'a>(
     allow_non_simple: bool,
 ) -> PResult<'a, StatementNode<'a>> {
     let node = match s.peek().cloned().transpose()? {
-        Some(of_kind!(TokenKind::SemiColon)) => StatementNode::Empty,
+        Some(t @ of_kind!(TokenKind::SemiColon)) => StatementNode::Empty {
+            location: t.span.location(),
+        },
         Some(of_kind!(TokenKind::CurlyL)) if allow_non_simple => {
             StatementNode::Block(parse_block(s)?)
         }
@@ -298,7 +300,7 @@ mod tests {
                     })),
                     location: 39..44,
                 }),
-                StatementNode::Empty,
+                StatementNode::Empty { location: 66..67 },
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
                     lhs: vec![

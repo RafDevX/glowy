@@ -335,7 +335,7 @@ mod tests {
                     location: 50..59,
                 },
                 then: vec![
-                    StatementNode::Empty,
+                    StatementNode::Empty { location: 90..91 },
                     StatementNode::Assignment(AssignmentNode {
                         kind: AssignmentKind::Simple,
                         lhs: vec![ExprNode::Name(OperandNameNode {
@@ -463,7 +463,7 @@ mod tests {
                         }))
                     }),
                     header_location: 47..69,
-                    body: vec![StatementNode::Empty]
+                    body: vec![StatementNode::Empty { location: 100..101 }]
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Clause(ForClauseNode {
@@ -488,7 +488,7 @@ mod tests {
                         ))))
                     }),
                     header_location: 153..169,
-                    body: vec![StatementNode::Empty]
+                    body: vec![StatementNode::Empty { location: 200..201 }]
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Clause(ForClauseNode {
@@ -508,7 +508,7 @@ mod tests {
                         post: None
                     }),
                     header_location: 253..263,
-                    body: vec![StatementNode::Empty]
+                    body: vec![StatementNode::Empty { location: 294..295 }]
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Clause(ForClauseNode {
@@ -556,7 +556,7 @@ mod tests {
                         })
                     }),
                     header_location: 47..71,
-                    body: vec![StatementNode::Empty]
+                    body: vec![StatementNode::Empty { location: 102..103 }]
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::Assignment {
@@ -570,7 +570,7 @@ mod tests {
                         })
                     }),
                     header_location: 155..172,
-                    body: vec![StatementNode::Empty]
+                    body: vec![StatementNode::Empty { location: 203..204 }]
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::None {
@@ -696,7 +696,7 @@ mod tests {
                         })))
                     })))
                 })]
-            }),],
+            })],
             parse(
                 "
                     {
