@@ -125,10 +125,13 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         }
         StatementNode::Assignment(assignment) => explicit::visit_assignment(ctx, assignment),
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),
+        StatementNode::Block(block) => visit_block(ctx, block),
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => implicit::visit_if(ctx, r#if),
         StatementNode::For(r#for) => implicit::visit_for(ctx, r#for),
-        StatementNode::Block(block) => visit_block(ctx, block),
+        StatementNode::Continue { label, location } | StatementNode::Break { label, location } => {
+            implicit::visit_continue_break(ctx, label.as_ref(), location)
+        }
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Go { expr, location } => match expr {
             ExprNode::Call(call) => {

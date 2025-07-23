@@ -3,11 +3,11 @@ use parser::{
         AssignmentKind, BlockNode, ElseNode, ForClauseNode, ForHeaderNode, ForNode, ForRangeNode,
         IfNode,
     },
-    Location,
+    Location, Span,
 };
 
 use crate::{
-    context::AnalysisContext,
+    context::{AnalysisContext, DeferTarget},
     labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{explicit, exprs},
 };
@@ -48,6 +48,8 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
 
     if pushed {
+        // only pop after visiting otherwise, since else is essentially an
+        // implicit `if !cond`
         ctx.pop_branch_backtrace();
     }
 }
@@ -57,6 +59,8 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
     // implicit block, so we select it here
     ctx.symtab_mut().select_next_child_scope();
 
+    ctx.increase_branch_scope_depth();
+
     match &node.header {
         ForHeaderNode::Clause(clause) => {
             visit_for_clause(ctx, clause, &node.body, &node.header_location)
@@ -65,6 +69,8 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
             visit_for_range(ctx, range, &node.body, &node.header_location)
         }
     }
+
+    ctx.decrease_branch_scope_depth();
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
 }
@@ -174,4 +180,18 @@ fn visit_for_range<'a>(
     if pushed {
         ctx.pop_branch_backtrace();
     }
+}
+
+pub fn visit_continue_break<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    label: Option<&Span<'a>>,
+    location: &Location,
+) {
+    let target = if let Some(label) = label {
+        DeferTarget::LabeledLoop(label.content())
+    } else {
+        DeferTarget::InnermostLoop
+    };
+
+    ctx.defer_branch_backtrace(target, location.clone());
 }
