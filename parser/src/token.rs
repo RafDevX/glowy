@@ -90,6 +90,8 @@ impl TokenKind {
                 | TokenKind::Float(_)
                 | TokenKind::Rune(_)
                 | TokenKind::String(_)
+                | TokenKind::Break
+                | TokenKind::Continue
                 | TokenKind::Return
                 | TokenKind::PlusPlus
                 | TokenKind::MinusMinus
