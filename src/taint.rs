@@ -1,6 +1,9 @@
 use parser::{
-    ast::{BlockNode, DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
-    Span,
+    ast::{
+        AssignmentNode, BlockNode, DeclNode, ExprNode, ForNode, FunctionDeclNode, IfNode,
+        ImportSpecNode, SendNode, ShortVarDeclNode, SourceFileNode, StatementNode,
+    },
+    Location, Span,
 };
 
 use crate::{context::AnalysisContext, errors::AnalysisErrorKind, FullPackagePath};
@@ -102,20 +105,28 @@ fn visit_block<'a>(ctx: &mut AnalysisContext<'a>, node: &BlockNode<'a>) {
 }
 
 fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
+    let mut disallow_further = false;
+
     for statement in statements {
-        // TODO: consider re-adding in some form the check to ensure no
-        // unreachable statements after a `return`/`break`/`continue` within the
-        // same block.
-        // Possibly change visit_statement to return a bool on whether it was
-        // a terminating statement?
+        if disallow_further {
+            ctx.report_error(AnalysisErrorKind::Unreachable {
+                location: get_statement_location(statement),
+            });
+
+            break;
+        }
 
         visit_statement(ctx, statement);
+
+        if disallows_subsequent_statements(statement) {
+            disallow_further = true;
+        }
     }
 }
 
 fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) {
     match node {
-        StatementNode::Empty => {}
+        StatementNode::Empty { .. } => {}
         StatementNode::Expr(expr) => {
             exprs::visit_expr(ctx, expr);
         }
@@ -144,5 +155,60 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                 });
             }
         },
+    }
+}
+
+fn get_statement_location(node: &StatementNode) -> Location {
+    let location = match node {
+        StatementNode::Empty { location }
+        | StatementNode::Send(SendNode { location, .. })
+        | StatementNode::Inc { location, .. }
+        | StatementNode::Dec { location, .. }
+        | StatementNode::Assignment(AssignmentNode { location, .. })
+        | StatementNode::ShortVarDecl(ShortVarDeclNode { location, .. })
+        | StatementNode::Decl(
+            DeclNode::Const { location, .. }
+            | DeclNode::Var { location, .. }
+            | DeclNode::Function(FunctionDeclNode { location, .. }),
+        )
+        | StatementNode::If(IfNode { location, .. })
+        | StatementNode::For(ForNode { location, .. })
+        | StatementNode::Continue { location, .. }
+        | StatementNode::Break { location, .. }
+        | StatementNode::Return { location, .. }
+        | StatementNode::Go { location, .. } => location,
+        StatementNode::Expr(expr) => return exprs::get_expr_location(expr),
+        StatementNode::Block(stmts) => {
+            if let Some(first) = stmts.first() {
+                if let Some(last) = stmts.last() {
+                    let first = get_statement_location(first);
+                    let last = get_statement_location(last);
+
+                    return first.start..last.end;
+                }
+            }
+
+            return 0..usize::MAX;
+            // FIXME: ^ can't have location information for an empty block
+        }
+    };
+
+    location.clone()
+    // it would be preferable if this function could return &'a Location, but
+    // this doesn't work for expressions, since get_expr_location returns a
+    // Location and we can't a reference to it (since this function owns it).
+    // in addition, block needs to create a new location altogether
+}
+
+fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
+    match node {
+        StatementNode::Continue { .. }
+        | StatementNode::Break { .. }
+        | StatementNode::Return { .. } => true,
+        StatementNode::Block(statements) => statements
+            .last()
+            .map(|last| disallows_subsequent_statements(last))
+            .unwrap_or(false),
+        _ => false,
     }
 }

@@ -129,6 +129,11 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the extraneous return statement was found.
         location: Location,
     },
+    /// Illegal statement present after a return statement.
+    Unreachable {
+        /// Where the offending statement was found.
+        location: Location,
+    },
     /// Invalid call of an expression that could not be resolved to a function.
     IllegalCallExpression {
         /// Where the unsupported call expression was found.
@@ -207,6 +212,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::UnknownSymbol { .. }
             | Self::UnknownQualifier { .. }
             | Self::UnexpectedReturn { .. }
+            | Self::Unreachable { .. }
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }
             | Self::UnevenBindingDeclSpec { .. }
