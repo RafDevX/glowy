@@ -91,7 +91,7 @@ fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSignature
 }
 
 pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionDeclNode<'a>> {
-    expect(s, TokenKind::Func, Some("function declaration"))?;
+    let beginning = expect(s, TokenKind::Func, Some("function declaration"))?;
 
     let name = expect(s, TokenKind::Ident, Some("function name"))?.span;
 
@@ -107,9 +107,12 @@ pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionD
 
     let body = parse_block(s)?;
 
+    let location = s.location_since(&beginning);
+
     Ok(FunctionDeclNode {
         name,
         signature,
         body,
+        location,
     })
 }

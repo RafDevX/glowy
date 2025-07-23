@@ -83,6 +83,7 @@ pub struct FunctionDeclNode<'a> {
     ///  make parsing much more complicated due to 2 optional elements
     ///  in a row, namely signature result and body)
     pub body: BlockNode<'a>,
+    pub location: Location,
 }
 
 #[derive(Clone, Debug, PartialEq)]
