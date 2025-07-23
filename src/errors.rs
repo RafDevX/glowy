@@ -124,14 +124,6 @@ pub enum AnalysisErrorKind<'a> {
         /// The provided qualifier that could not be resolved.
         found: Span<'a>,
     },
-    /// Invalid function with declared result but no return statement in body.
-    ///
-    /// If a function result type is specified, a return statement must be
-    /// present since otherwise the returned type would be void.
-    MissingReturn {
-        /// The name of the function with a declared result but no return
-        func: Span<'a>, // TODO: won't work for anonymous literals
-    },
     /// Illegal return statement outside of a function declaration.
     UnexpectedReturn {
         /// Where the extraneous return statement was found.
@@ -214,7 +206,6 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::IllegalRedeclaration { .. }
             | Self::UnknownSymbol { .. }
             | Self::UnknownQualifier { .. }
-            | Self::MissingReturn { .. }
             | Self::UnexpectedReturn { .. }
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }

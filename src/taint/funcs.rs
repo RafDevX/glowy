@@ -7,7 +7,7 @@ use parser::{
 };
 
 use crate::{
-    context::AnalysisContext,
+    context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
     symbols::{FunctionMetadata, FunctionMetadataRef, Symbol},
@@ -73,16 +73,11 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
     symbol.borrow_mut().set_func_metadata(metadata.clone());
 
     ctx.push_function(metadata);
+    ctx.increase_branch_scope_depth();
 
     super::visit_statements(ctx, &node.body);
 
-    if node.signature.result.is_some() && !ctx.returning() {
-        ctx.report_error(AnalysisErrorKind::MissingReturn {
-            func: node.name.clone(),
-        });
-    }
-
-    ctx.set_returning(false);
+    ctx.decrease_branch_scope_depth();
     ctx.pop_function();
 
     ctx.symtab_mut().select_parent_scope(); // pop
@@ -105,7 +100,7 @@ pub fn visit_return<'a>(
 
     func.borrow_mut().set_outcome(outcome);
 
-    ctx.set_returning(true);
+    ctx.defer_branch_backtrace(DeferTarget::Function, location.clone());
 }
 
 fn calculate_outcome<'a>(

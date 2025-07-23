@@ -1,8 +1,10 @@
 use std::{fmt, path::Path};
 
+use parser::Location;
+
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
-    labels::LabelBacktrace,
+    labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::{FunctionMetadataRef, SymbolRef, SymbolTable},
     Pinned,
 };
@@ -19,18 +21,44 @@ pub struct AnalysisContext<'a> {
 
     /// Current stack of functions being declared
     funcs: Vec<FunctionMetadataRef<'a>>,
-    /// Whether the current function is returning.
-    ///
-    /// This means that a return statement was found, and so any subsequent
-    /// statements found are unreachable and should be reported as errors
-    /// instead of analyzed. This is necessary context information because it
-    /// might be necessary to interrupt multiple levels of iteration, e.g. if
-    /// returning inside nested loops the outer loop should not continue
-    /// accepting statements.
-    returning: bool,
 
     /// Stack of (independent but always a child of previous) branch backtraces
     branch_backtraces: Vec<LabelBacktrace<'a>>,
+    /// Branch backtraces that are out of scope but are still in effect.
+    ///
+    /// This happens as a result of flow-altering statements like `return`,
+    /// `continue`, and `break`. For example:
+    /// ```go
+    /// if cond {
+    ///     return
+    /// }
+    ///
+    /// something // label backtrace from cond must remain in effect here
+    /// ```
+    deferred_branch_backtraces: Vec<DeferredBranchBacktrace<'a>>,
+    /// Composition of the last branch backtraces with all the deferred.
+    current_calculated_branch_backtrace: Option<LabelBacktrace<'a>>,
+    /// How many levels deep analysis currently is within loops/functions.
+    ///
+    /// Keeping track of this is necessary to correctly support
+    /// [`Self::deferred_branch_backtraces`] so that nested structures (such as
+    /// loops or functions) can be analyzed properly. For example:
+    /// ```go
+    /// for {
+    ///     if cond {
+    ///         break // cond backtrace is deferred to boundary of InnermostLoop
+    ///     }
+    ///
+    ///     for {
+    ///         break
+    ///         // without a notion of depth at time of defer, the end of this
+    ///         // inner loop would lead to the deferred cond backtrace to be
+    ///         // popped here, even though it should remain until the end of
+    ///         // the outer loop
+    ///     }
+    /// }
+    /// ```
+    current_branch_scope_depth: u8,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -41,8 +69,10 @@ impl<'a> AnalysisContext<'a> {
             current_file: None,
             errors: Vec::new(),
             funcs: Vec::new(),
-            returning: false,
             branch_backtraces: Vec::new(),
+            deferred_branch_backtraces: Vec::new(),
+            current_calculated_branch_backtrace: None,
+            current_branch_scope_depth: 0,
         }
     }
 
@@ -74,16 +104,10 @@ impl<'a> AnalysisContext<'a> {
         self.funcs.pop();
     }
 
-    pub fn returning(&self) -> bool {
-        self.returning
-    }
-
-    pub fn set_returning(&mut self, returning: bool) {
-        self.returning = returning;
-    }
-
     pub fn branch_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
-        self.branch_backtraces.last()
+        self.current_calculated_branch_backtrace
+            .as_ref()
+            .or(self.branch_backtraces.last())
     }
 
     pub fn push_branch_backtrace(&mut self, backtrace: LabelBacktrace<'a>) {
@@ -96,10 +120,69 @@ impl<'a> AnalysisContext<'a> {
         };
 
         self.branch_backtraces.push(composite);
+
+        self.calculate_composite_branch_backtrace();
     }
 
     pub fn pop_branch_backtrace(&mut self) {
         self.branch_backtraces.pop();
+
+        self.calculate_composite_branch_backtrace();
+    }
+
+    pub fn defer_branch_backtrace(&mut self, until: DeferTarget<'a>, location: Location) {
+        let Some(backtrace) = self.branch_backtrace().cloned() else {
+            // nothing to do
+            return;
+        };
+
+        let deferred = DeferredBranchBacktrace {
+            backtrace,
+            until,
+            at_depth: self.current_branch_scope_depth,
+            because: self.pin(location),
+        };
+
+        self.deferred_branch_backtraces.push(deferred);
+
+        self.calculate_composite_branch_backtrace();
+    }
+
+    pub fn trigger_defer_target(&mut self, target: DeferTarget<'a>) {
+        self.deferred_branch_backtraces.retain(|deferred| {
+            deferred.until != target && deferred.at_depth < self.current_branch_scope_depth
+        });
+
+        self.calculate_composite_branch_backtrace();
+    }
+
+    fn calculate_composite_branch_backtrace(&mut self) {
+        self.current_calculated_branch_backtrace = if self.deferred_branch_backtraces.is_empty() {
+            None // avoid cloning self.branch_backtraces.last(); read in getter instead
+        } else {
+            LabelBacktrace::fold(
+                self.branch_backtraces.last().into_iter().chain(
+                    self.deferred_branch_backtraces
+                        .iter()
+                        .map(|deferred| &deferred.backtrace),
+                ),
+                LabelBacktraceKind::Branch,
+                None,
+                self.deferred_branch_backtraces
+                    .last()
+                    .map(|deferred| &deferred.because)
+                    .cloned()
+                    .unwrap(), // deferred is never empty; we checked
+            )
+        }
+    }
+
+    pub fn increase_branch_scope_depth(&mut self) {
+        self.current_branch_scope_depth += 1;
+    }
+
+    pub fn decrease_branch_scope_depth(&mut self) {
+        self.current_branch_scope_depth -= 1;
     }
 
     pub fn report_error(&mut self, kind: AnalysisErrorKind<'a>) {
@@ -183,4 +266,18 @@ impl AnalysisStage {
             Self::RecordDeclarations | Self::EnforceSecurityPolicies
         )
     }
+}
+
+struct DeferredBranchBacktrace<'a> {
+    backtrace: LabelBacktrace<'a>,
+    until: DeferTarget<'a>,
+    at_depth: u8,
+    because: Pinned<Location>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum DeferTarget<'a> {
+    Function,
+    InnermostLoop,
+    LabeledLoop(&'a str),
 }

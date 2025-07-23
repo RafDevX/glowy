@@ -103,9 +103,11 @@ fn visit_block<'a>(ctx: &mut AnalysisContext<'a>, node: &BlockNode<'a>) {
 
 fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
     for statement in statements {
-        if ctx.returning() && *statement != StatementNode::Empty {
-            break;
-        }
+        // TODO: consider re-adding in some form the check to ensure no
+        // unreachable statements after a `return`/`break`/`continue` within the
+        // same block.
+        // Possibly change visit_statement to return a bool on whether it was
+        // a terminating statement?
 
         visit_statement(ctx, statement);
     }
