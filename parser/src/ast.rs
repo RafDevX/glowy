@@ -236,6 +236,10 @@ pub enum StatementNode<'a> {
     ShortVarDecl(ShortVarDeclNode<'a>),
 
     // non-simple
+    Labeled {
+        label: Span<'a>,
+        inner: Box<StatementNode<'a>>,
+    },
     Block(BlockNode<'a>),
     Decl(DeclNode<'a>),
     If(IfNode<'a>),

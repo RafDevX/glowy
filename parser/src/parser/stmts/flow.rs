@@ -620,64 +620,41 @@ mod tests {
     #[test]
     fn for_continue_break() {
         assert_eq!(
-            vec![StatementNode::For(ForNode {
-                header: ForHeaderNode::Range(ForRangeNode::Decl {
-                    lhs: vec![Span::new("i", 51, 3), Span::new("item", 54, 3)],
-                    range_expr: ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("arr", 68, 3)
-                    })
-                }),
-                header_location: 47..71,
-                body: vec![StatementNode::If(IfNode {
-                    cond: ExprNode::BinaryOp {
-                        kind: BinaryOpKind::Eq,
-                        left: Box::new(ExprNode::BinaryOp {
-                            kind: BinaryOpKind::Remainder,
-                            left: Box::new(ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("i", 105, 4)
-                            })),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                value: 2,
-                                location: 109..110
-                            })),
-                            location: 105..110
-                        }),
-                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                            value: 0,
-                            location: 114..115
-                        })),
-                        location: 105..115
-                    },
-                    then: vec![StatementNode::Continue {
-                        label: None,
-                        location: 150..158
-                    }],
-                    otherwise: Some(ElseNode::If(Box::new(IfNode {
+            vec![StatementNode::Labeled {
+                label: Span::new("Label", 47, 3),
+                inner: Box::new(StatementNode::For(ForNode {
+                    header: ForHeaderNode::Range(ForRangeNode::Decl {
+                        lhs: vec![Span::new("i", 58, 3), Span::new("item", 61, 3)],
+                        range_expr: ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("arr", 75, 3)
+                        })
+                    }),
+                    header_location: 54..78,
+                    body: vec![StatementNode::If(IfNode {
                         cond: ExprNode::BinaryOp {
                             kind: BinaryOpKind::Eq,
                             left: Box::new(ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Remainder,
                                 left: Box::new(ExprNode::Name(OperandNameNode {
                                     package: None,
-                                    id: Span::new("i", 197, 6)
+                                    id: Span::new("i", 112, 4)
                                 })),
                                 right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                    value: 3,
-                                    location: 201..202
+                                    value: 2,
+                                    location: 116..117
                                 })),
-                                location: 197..202
+                                location: 112..117
                             }),
                             right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                 value: 0,
-                                location: 206..207
+                                location: 121..122
                             })),
-                            location: 197..207
+                            location: 112..122
                         },
                         then: vec![StatementNode::Continue {
-                            label: Some(Span::new("Label", 251, 7)),
-                            location: 242..256
+                            label: None,
+                            location: 157..165
                         }],
                         otherwise: Some(ElseNode::If(Box::new(IfNode {
                             cond: ExprNode::BinaryOp {
@@ -686,40 +663,66 @@ mod tests {
                                     kind: BinaryOpKind::Remainder,
                                     left: Box::new(ExprNode::Name(OperandNameNode {
                                         package: None,
-                                        id: Span::new("i", 295, 8)
+                                        id: Span::new("i", 204, 6)
                                     })),
                                     right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                        value: 5,
-                                        location: 299..300
+                                        value: 3,
+                                        location: 208..209
                                     })),
-                                    location: 295..300
+                                    location: 204..209
                                 }),
                                 right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                     value: 0,
-                                    location: 304..305
+                                    location: 213..214
                                 })),
-                                location: 295..305
+                                location: 204..214
                             },
-                            then: vec![StatementNode::Break {
-                                label: Some(Span::new("Label", 346, 9)),
-                                location: 340..351
+                            then: vec![StatementNode::Continue {
+                                label: Some(Span::new("Label", 258, 7)),
+                                location: 249..263
                             }],
-                            otherwise: Some(ElseNode::Block(vec![StatementNode::Break {
-                                label: None,
-                                location: 421..426
-                            }])),
-                            location: 292..456,
+                            otherwise: Some(ElseNode::If(Box::new(IfNode {
+                                cond: ExprNode::BinaryOp {
+                                    kind: BinaryOpKind::Eq,
+                                    left: Box::new(ExprNode::BinaryOp {
+                                        kind: BinaryOpKind::Remainder,
+                                        left: Box::new(ExprNode::Name(OperandNameNode {
+                                            package: None,
+                                            id: Span::new("i", 302, 8)
+                                        })),
+                                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                            value: 5,
+                                            location: 306..307
+                                        })),
+                                        location: 302..307
+                                    }),
+                                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                        value: 0,
+                                        location: 311..312
+                                    })),
+                                    location: 302..312
+                                },
+                                then: vec![StatementNode::Break {
+                                    label: Some(Span::new("Label", 353, 9)),
+                                    location: 347..358
+                                }],
+                                otherwise: Some(ElseNode::Block(vec![StatementNode::Break {
+                                    label: None,
+                                    location: 428..433
+                                }])),
+                                location: 299..463,
+                            }))),
+                            location: 201..463,
                         }))),
-                        location: 194..456,
-                    }))),
-                    location: 102..456,
-                })],
-                location: 47..482,
-            })],
+                        location: 109..463,
+                    })],
+                    location: 54..489,
+                }))
+            }],
             parse(
                 "
                     {
-                        for i, item := range arr {
+                        Label: for i, item := range arr {
                             if i % 2 == 0 {
                                 continue
                             } else if i % 3 == 0 {

@@ -128,6 +128,17 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
 
     let first = expect(b, TokenKind::Ident, Some("statement"))?;
 
+    if let Some(Ok(of_kind!(TokenKind::Colon))) = b.peek() {
+        // labeled statement
+        b.next(); // take colon
+        context.commit()?; // we're sure, so we'll use the main stream now
+
+        return Ok(StatementNode::Labeled {
+            label: first.span,
+            inner: Box::new(parse_statement(s, true)?),
+        });
+    }
+
     // assume it's a short var decl and that we're collecting ids (vs expressions)
     let mut ids = vec![first.span.clone()];
 
