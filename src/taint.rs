@@ -6,7 +6,11 @@ use parser::{
     Location, Span,
 };
 
-use crate::{context::AnalysisContext, errors::AnalysisErrorKind, FullPackagePath};
+use crate::{
+    context::{AnalysisContext, DeferTarget},
+    errors::AnalysisErrorKind,
+    FullPackagePath,
+};
 
 mod channels;
 mod explicit;
@@ -136,6 +140,13 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         }
         StatementNode::Assignment(assignment) => explicit::visit_assignment(ctx, assignment),
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),
+        StatementNode::Labeled { label, inner } => {
+            visit_statement(ctx, inner);
+
+            if let StatementNode::For(_) = inner.as_ref() {
+                ctx.trigger_defer_target(DeferTarget::LabeledLoop(label.content()));
+            }
+        }
         StatementNode::Block(block) => visit_block(ctx, block),
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => implicit::visit_if(ctx, r#if),
@@ -178,6 +189,11 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Return { location, .. }
         | StatementNode::Go { location, .. } => location,
         StatementNode::Expr(expr) => return exprs::get_expr_location(expr),
+        StatementNode::Labeled { label, inner } => {
+            let loc = get_statement_location(inner);
+
+            return label.location().start..loc.end;
+        }
         StatementNode::Block(stmts) => {
             if let Some(first) = stmts.first() {
                 if let Some(last) = stmts.last() {
