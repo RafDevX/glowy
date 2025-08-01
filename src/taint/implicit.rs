@@ -13,6 +13,15 @@ use crate::{
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
+    // Go spec: each if, for and switch is considered to be in its own
+    // implicit block, so we select it here
+    ctx.symtab_mut().select_next_child_scope();
+
+    if let Some(statement) = &node.stmt {
+        // simple statement to be executed before the condition is evaluated
+        super::visit_statement(ctx, statement);
+    }
+
     let pushed = if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, &node.cond) {
         ctx.push_branch_backtrace(
             LabelBacktrace::new(
@@ -29,12 +38,6 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     } else {
         false
     };
-
-    // Go spec: each if, for and switch is considered to be in its own
-    // implicit block, so we select it here
-    ctx.symtab_mut().select_next_child_scope();
-
-    // TODO: visit the if's simple statement, if any
 
     // vvv this will create another scope for the if body, which is intended
     super::visit_block(ctx, &node.then);
