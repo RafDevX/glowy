@@ -352,7 +352,7 @@ pub struct ShortVarDeclNode<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IfNode<'a> {
-    // TODO: pub stmt: Box<StatementNode<'a>>,
+    pub stmt: Option<Box<StatementNode<'a>>>, // run before cond is evaluated
     pub cond: ExprNode<'a>,
     pub then: BlockNode<'a>,
     pub otherwise: Option<ElseNode<'a>>,

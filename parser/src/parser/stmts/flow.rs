@@ -14,7 +14,26 @@ use crate::{
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {
     let beginning = expect(s, TokenKind::If, Some("if statement"))?;
 
-    // TODO: support simple statements to execute before condition
+    let mut stmt = None;
+
+    // no point in using BacktrackingContext if we'll never commit
+    for future in s.clone() {
+        match future?.kind {
+            TokenKind::CurlyL => break, // reached block & no semi was found
+            TokenKind::SemiColon => {
+                // ok, there's a simple statement we need to parse before
+                // the actual condition (note we use the actual stream again
+                // now, the clone was just to look for a semicolon)
+
+                stmt = Some(Box::new(parse_statement(s, false)?));
+
+                expect(s, TokenKind::SemiColon, Some("if statement"))?;
+
+                break;
+            }
+            _ => {}
+        }
+    }
 
     let cond = parse_expression(s)?;
     let then = parse_block(s)?;
@@ -36,6 +55,7 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
     let location = s.location_since(&beginning);
 
     Ok(IfNode {
+        stmt,
         cond,
         then,
         otherwise,
@@ -302,8 +322,8 @@ mod tests {
     use super::*;
     use crate::{
         ast::{
-            AssignmentKind, AssignmentNode, BinaryOpKind, BlockNode, ExprNode, LiteralNode,
-            OperandNameNode, ShortVarDeclNode, StatementNode, UnaryOpKind,
+            AssignmentKind, AssignmentNode, BinaryOpKind, BlockNode, CallNode, ExprNode,
+            LiteralNode, OperandNameNode, ShortVarDeclNode, StatementNode, UnaryOpKind,
         },
         lexer::Lexer,
         parser::stmts::parse_block,
@@ -320,6 +340,7 @@ mod tests {
     fn if_chain() {
         assert_eq!(
             vec![StatementNode::If(IfNode {
+                stmt: None,
                 cond: ExprNode::BinaryOp {
                     kind: BinaryOpKind::Greater,
                     left: Box::new(ExprNode::BinaryOp {
@@ -356,6 +377,7 @@ mod tests {
                     })
                 ],
                 otherwise: Some(ElseNode::If(Box::new(IfNode {
+                    stmt: None,
                     cond: ExprNode::UnaryOp {
                         kind: UnaryOpKind::Negation,
                         operand: Box::new(ExprNode::UnaryOp {
@@ -427,6 +449,80 @@ mod tests {
                             {};
                             m--;
                             k, m.r &^= 3, 2;
+                        };
+                    }
+                ",
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn if_with_prep_statement() {
+        assert_eq!(
+            vec![StatementNode::If(IfNode {
+                stmt: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
+                    ids: vec![Span::new("x", 50, 3)],
+                    exprs: vec![ExprNode::Literal(LiteralNode::Int {
+                        value: 4,
+                        location: 55..56
+                    })],
+                    location: 50..56,
+                    annotation: None
+                }))),
+                cond: ExprNode::BinaryOp {
+                    kind: BinaryOpKind::Less,
+                    left: Box::new(ExprNode::Name(OperandNameNode {
+                        package: None,
+                        id: Span::new("x", 58, 3)
+                    })),
+                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 3,
+                        location: 62..63
+                    })),
+                    location: 58..63
+                },
+                then: vec![StatementNode::Empty { location: 94..95 }],
+                otherwise: Some(ElseNode::If(Box::new(IfNode {
+                    stmt: None,
+                    cond: ExprNode::Name(OperandNameNode {
+                        package: None,
+                        id: Span::new("false", 130, 5)
+                    }),
+                    then: vec![StatementNode::Empty { location: 166..167 }],
+                    otherwise: Some(ElseNode::If(Box::new(IfNode {
+                        stmt: Some(Box::new(StatementNode::Expr(ExprNode::Call(CallNode {
+                            func: Box::new(ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("y", 202, 7)
+                            })),
+                            type_arg: None,
+                            args: vec![],
+                            variadic: false,
+                            location: 203..205,
+                            annotation: None
+                        })))),
+                        cond: ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("true", 207, 7)
+                        }),
+                        then: vec![StatementNode::Block(vec![])],
+                        otherwise: None,
+                        location: 199..270
+                    }))),
+                    location: 127..270
+                }))),
+                location: 47..270
+            })],
+            parse(
+                "
+                    {
+                        if x := 4; x < 3 {
+                            ;
+                        } else if false {
+                            ;
+                        } else if y(); true {
+                            {}
                         };
                     }
                 ",
@@ -632,6 +728,7 @@ mod tests {
                     }),
                     header_location: 54..78,
                     body: vec![StatementNode::If(IfNode {
+                        stmt: None,
                         cond: ExprNode::BinaryOp {
                             kind: BinaryOpKind::Eq,
                             left: Box::new(ExprNode::BinaryOp {
@@ -657,6 +754,7 @@ mod tests {
                             location: 157..165
                         }],
                         otherwise: Some(ElseNode::If(Box::new(IfNode {
+                            stmt: None,
                             cond: ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Eq,
                                 left: Box::new(ExprNode::BinaryOp {
@@ -682,6 +780,7 @@ mod tests {
                                 location: 249..263
                             }],
                             otherwise: Some(ElseNode::If(Box::new(IfNode {
+                                stmt: None,
                                 cond: ExprNode::BinaryOp {
                                     kind: BinaryOpKind::Eq,
                                     left: Box::new(ExprNode::BinaryOp {
