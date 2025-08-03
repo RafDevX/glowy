@@ -574,8 +574,6 @@ pub enum LabelBacktraceKind {
     Expression,
     /// Aggregate label implicitly inherited from surrounding control flows.
     Branch,
-    /// Residual label from previous case expressions in a switch statement.
-    Fallthrough,
     /// Label originating from a value sent into a given channel.
     Send,
     /// Aggregate label for values received from a given channel.

@@ -211,7 +211,23 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         super::visit_statement(ctx, stmt);
     }
 
-    let pushed_expr = if let Some(expr) = &node.expr {
+    // Branch backtraces for each clause cannot be popped at the end of each
+    // case block because their negation is implicitly asserted for all other
+    // clauses. For example,
+    // ```go
+    // switch {
+    //     case secret % 2 == 0: // do nothing
+    //     case true: fmt.Println("secret is odd") // (!)
+    // }
+    // ```
+    // here we must remember the branch backtrace introduced by the first case
+    // clause even when analyzing the second clause, otherwise information about
+    // the secret can be leaked.
+    // Note that this is distinct from node.clauses.len()+1? because some might
+    // have no backtraces (e.g., `case 3:`).
+    let mut n_pushes = 0;
+
+    if let Some(expr) = &node.expr {
         if let Some(bt) = exprs::visit_single_expr(ctx, expr) {
             ctx.push_branch_backtrace(bt.as_single_child(
                 LabelBacktraceKind::Branch,
@@ -219,15 +235,9 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
                 ctx.pin(exprs::get_expr_location(expr)),
             ));
 
-            true
-        } else {
-            false
+            n_pushes += 1;
         }
-    } else {
-        false
-    };
-
-    let mut fallthrough_backtraces: Vec<LabelBacktrace<'a>> = Vec::new();
+    }
 
     for clause in &node.clauses {
         let children: Vec<_> = clause
@@ -256,72 +266,26 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
             ),
         );
 
-        // cannot take actions immediately because it'd mess up the order, we
-        // only want them to take place sometime after the point where we know
-        // whether a fallthrough statement was found or not
-        enum FallthroughAction<'a> {
-            Push(LabelBacktrace<'a>),
-            Clear,
-            None,
+        if let Some(bt) = folded {
+            ctx.push_branch_backtrace(bt);
+
+            n_pushes += 1;
         }
-        let mut fallthrough_action = FallthroughAction::None;
 
-        let body = if let Some(StatementNode::Fallthrough { location }) = clause.body.last() {
-            // cannot just defer popping branch backtrace because then it'd
-            // be in place for the next clause's expressions, which isn't
-            // intended (clause expressions can have side-effects so it matters)
-            if let Some(bt) = &folded {
-                fallthrough_action = FallthroughAction::Push(bt.clone().as_single_child(
-                    LabelBacktraceKind::Fallthrough,
-                    None,
-                    ctx.pin(location.clone()),
-                ))
-            }
-
+        let body = if let Some(StatementNode::Fallthrough { .. }) = clause.body.last() {
             // statement visitor will reject any fallthrough statement as out of
             // place, so we omit it here before passing on the block
             Cow::Owned(clause.body[..clause.body.len() - 1].to_vec())
         } else {
-            fallthrough_action = FallthroughAction::Clear;
-
             Cow::Borrowed(&clause.body)
         };
-
-        let pushed_case = if let Some(bt) = folded {
-            ctx.push_branch_backtrace(bt);
-
-            true
-        } else {
-            false
-        };
-
-        // fallthrough backtraces come after the main case backtrace in case
-        // that they are redundant, in which case we get less complexity
-        for bt in &fallthrough_backtraces {
-            ctx.push_branch_backtrace(bt.clone());
-        }
 
         // vvv this will create another scope for the clause body,
         // which is (probably?) intended? spec unclear at first glance
         super::visit_block(ctx, &body);
-
-        for _ in &fallthrough_backtraces {
-            ctx.pop_branch_backtrace();
-        }
-
-        if pushed_case {
-            ctx.pop_branch_backtrace();
-        }
-
-        // finally we can now mutate the fallthrough backtraces
-        match fallthrough_action {
-            FallthroughAction::Push(bt) => fallthrough_backtraces.push(bt),
-            FallthroughAction::Clear => fallthrough_backtraces.clear(),
-            FallthroughAction::None => {}
-        }
     }
 
-    if pushed_expr {
+    for _ in 0..n_pushes {
         ctx.pop_branch_backtrace();
     }
 }
