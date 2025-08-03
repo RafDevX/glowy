@@ -153,6 +153,13 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::If(r#if) => implicit::visit_if(ctx, r#if),
         StatementNode::For(r#for) => implicit::visit_for(ctx, r#for),
         StatementNode::Switch(switch) => implicit::visit_switch(ctx, switch),
+        StatementNode::Fallthrough { location } => {
+            // if we reached it in visit_statement, it's not supposed to be here
+            // (switch visitor collects any legitimate fallthrough statements)
+            ctx.report_error(AnalysisErrorKind::UnexpectedFallthrough {
+                location: location.clone(),
+            });
+        }
         StatementNode::Continue { label, location } | StatementNode::Break { label, location } => {
             implicit::visit_continue_break(ctx, label.as_ref(), location)
         }
@@ -190,6 +197,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
             SwitchNode::Expr(ExprSwitchNode { location, .. })
             | SwitchNode::Type(TypeSwitchNode { location, .. }),
         )
+        | StatementNode::Fallthrough { location }
         | StatementNode::Continue { location, .. }
         | StatementNode::Break { location, .. }
         | StatementNode::Return { location, .. }

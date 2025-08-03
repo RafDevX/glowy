@@ -193,6 +193,15 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
+    /// Illegal `fallthrough` statement in unexpected location.
+    ///
+    /// Fallthrough statements are only permitted as the last statement of an
+    /// expression switch clause. Using a fallthrough statement anywhere else
+    /// is invalid.
+    UnexpectedFallthrough {
+        /// Where the statement was found.
+        location: Location,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -222,6 +231,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::ImmutableLeftValue { .. }
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
+            | Self::UnexpectedFallthrough { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }
