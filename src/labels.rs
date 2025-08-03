@@ -435,6 +435,25 @@ impl<'a> LabelBacktrace<'a> {
         .unwrap() // safe because if self exists, label is not Bottom
     }
 
+    /// Constructs a new instance with self as its only child.
+    pub(crate) fn as_single_child(
+        self,
+        parent_kind: LabelBacktraceKind,
+        parent_symbol: Option<&'a str>,
+        parent_location: Pinned<Location>,
+    ) -> Self {
+        // note that we're not using Self::new to avoid cloning self and to skip
+        // unnecessary checks / label optimizations -- we already know this
+        // label isn't Bottom + cannot be compacted further because self exists
+        Self {
+            kind: parent_kind,
+            label: self.label.clone(),
+            symbol: parent_symbol,
+            location: parent_location,
+            children: vec![self],
+        }
+    }
+
     /// Returns a new instance (with symbol = None) representing a step above
     /// in the hierarchy between two instances (self and other).
     pub(crate) fn union(

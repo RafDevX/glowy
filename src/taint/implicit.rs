@@ -23,16 +23,11 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     }
 
     let pushed = if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, &node.cond) {
-        ctx.push_branch_backtrace(
-            LabelBacktrace::new(
-                LabelBacktraceKind::Branch,
-                expr_backtrace.label().clone(),
-                None,
-                ctx.pin(exprs::get_expr_location(&node.cond)),
-                &[expr_backtrace],
-            )
-            .unwrap(), // safe since expr_backtrace exists (label is not Bottom)
-        );
+        ctx.push_branch_backtrace(expr_backtrace.as_single_child(
+            LabelBacktraceKind::Branch,
+            None,
+            ctx.pin(exprs::get_expr_location(&node.cond)),
+        ));
 
         true
     } else {
@@ -91,16 +86,11 @@ fn visit_for_clause<'a>(
 
     let pushed = if let Some(cond) = &clause.cond {
         if let Some(cond_backtrace) = exprs::visit_single_expr(ctx, cond) {
-            ctx.push_branch_backtrace(
-                LabelBacktrace::new(
-                    LabelBacktraceKind::Branch,
-                    cond_backtrace.label().clone(),
-                    None,
-                    ctx.pin(header_location.clone()),
-                    &[cond_backtrace],
-                )
-                .unwrap(), // safe since cond_backtrace exists (label != Bottom)
-            );
+            ctx.push_branch_backtrace(cond_backtrace.as_single_child(
+                LabelBacktraceKind::Branch,
+                None,
+                ctx.pin(header_location.clone()),
+            ));
 
             true
         } else {

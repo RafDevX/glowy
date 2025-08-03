@@ -124,13 +124,12 @@ pub fn visit_operand_name<'a>(
         symbol
             .borrow()
             .label_backtrace()
-            .and_then(|symbol_backtrace| {
-                LabelBacktrace::new(
+            .cloned()
+            .map(|symbol_backtrace| {
+                symbol_backtrace.as_single_child(
                     LabelBacktraceKind::Expression,
-                    symbol_backtrace.label().clone(),
                     Some(node.id.content()),
                     ctx.pin(node.id.location()),
-                    [symbol_backtrace],
                 )
             })
     } else {

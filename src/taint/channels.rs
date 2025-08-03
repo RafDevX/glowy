@@ -20,14 +20,8 @@ pub fn visit_receive<'a>(
     // otherwise "has a value been read" or "has the channel been depleted" can
     // be used to exfiltrate information
 
-    exprs::visit_single_expr(ctx, operand).and_then(|child| {
-        LabelBacktrace::new(
-            LabelBacktraceKind::Receive,
-            child.label().clone(),
-            None,
-            ctx.pin(location.clone()),
-            [&child],
-        )
+    exprs::visit_single_expr(ctx, operand).map(|child| {
+        child.as_single_child(LabelBacktraceKind::Receive, None, ctx.pin(location.clone()))
     })
 }
 
