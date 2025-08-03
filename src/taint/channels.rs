@@ -21,7 +21,7 @@ pub fn visit_receive<'a>(
     // be used to exfiltrate information
 
     exprs::visit_single_expr(ctx, operand).map(|child| {
-        child.as_single_child(LabelBacktraceKind::Receive, None, ctx.pin(location.clone()))
+        child.into_single_child(LabelBacktraceKind::Receive, None, ctx.pin(location.clone()))
     })
 }
 

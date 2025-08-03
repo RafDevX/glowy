@@ -126,7 +126,7 @@ pub fn visit_operand_name<'a>(
             .label_backtrace()
             .cloned()
             .map(|symbol_backtrace| {
-                symbol_backtrace.as_single_child(
+                symbol_backtrace.into_single_child(
                     LabelBacktraceKind::Expression,
                     Some(node.id.content()),
                     ctx.pin(node.id.location()),

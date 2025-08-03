@@ -435,8 +435,8 @@ impl<'a> LabelBacktrace<'a> {
         .unwrap() // safe because if self exists, label is not Bottom
     }
 
-    /// Constructs a new instance with self as its only child.
-    pub(crate) fn as_single_child(
+    /// Constructs a new instance with self as its only child, avoiding cloning.
+    pub(crate) fn into_single_child(
         self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,

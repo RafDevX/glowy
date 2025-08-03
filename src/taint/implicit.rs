@@ -26,7 +26,7 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     }
 
     let pushed = if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, &node.cond) {
-        ctx.push_branch_backtrace(expr_backtrace.as_single_child(
+        ctx.push_branch_backtrace(expr_backtrace.into_single_child(
             LabelBacktraceKind::Branch,
             None,
             ctx.pin(exprs::get_expr_location(&node.cond)),
@@ -89,7 +89,7 @@ fn visit_for_clause<'a>(
 
     let pushed = if let Some(cond) = &clause.cond {
         if let Some(cond_backtrace) = exprs::visit_single_expr(ctx, cond) {
-            ctx.push_branch_backtrace(cond_backtrace.as_single_child(
+            ctx.push_branch_backtrace(cond_backtrace.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
                 ctx.pin(header_location.clone()),
@@ -229,7 +229,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
 
     if let Some(expr) = &node.expr {
         if let Some(bt) = exprs::visit_single_expr(ctx, expr) {
-            ctx.push_branch_backtrace(bt.as_single_child(
+            ctx.push_branch_backtrace(bt.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
                 ctx.pin(exprs::get_expr_location(expr)),
@@ -301,7 +301,7 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
             ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id.clone()), true, Some(bt.clone())));
         }
 
-        ctx.push_branch_backtrace(bt.as_single_child(
+        ctx.push_branch_backtrace(bt.into_single_child(
             LabelBacktraceKind::Branch,
             None,
             ctx.pin(exprs::get_expr_location(&node.expr)),
