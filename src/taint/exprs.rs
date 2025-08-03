@@ -3,6 +3,7 @@ use parser::{
     Location,
 };
 
+use super::{channels, funcs};
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
@@ -10,8 +11,6 @@ use crate::{
     symbols::SymbolRef,
     Pinned,
 };
-
-use super::{channels, funcs};
 
 pub fn visit_expr<'a>(
     ctx: &mut AnalysisContext<'a>,

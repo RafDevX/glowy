@@ -166,7 +166,8 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Go { expr, location } => match expr {
             ExprNode::Call(call) => {
-                // for our purposes, a `go` statement is functionally equivalent to a function call
+                // for our purposes, a `go` statement is functionally equivalent
+                // to a function call
                 funcs::visit_call(ctx, call);
             }
             _ => {

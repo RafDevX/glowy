@@ -82,8 +82,8 @@ impl SourceFile {
     ///
     /// ```
     /// let file = glowy::SourceFile::read_from_disk(
-    ///     "/auth/oidc.go", // virtual path (relative to module base)
-    ///     "./proj/auth/oidc.go" // real path on disk (relative to cwd)
+    ///     "/auth/oidc.go",       // virtual path (relative to module base)
+    ///     "./proj/auth/oidc.go", // real path on disk (relative to cwd)
     /// )?;
     /// ```
     pub fn read_from_disk<V: Into<PathBuf>, R: AsRef<Path>>(

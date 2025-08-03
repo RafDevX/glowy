@@ -322,5 +322,6 @@ fn compute_package_path(module_base: &str, virtual_file_path: &path::Path) -> Fu
         None => unreachable!("Malformed virtual file path = {virtual_file_path:?}"),
     };
 
-    module_base.to_owned() + dir_path.trim_end_matches('/') // trim for root e.g. /main.go
+    // trim for root, e.g. /main.go
+    module_base.to_owned() + dir_path.trim_end_matches('/')
 }

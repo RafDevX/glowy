@@ -8,6 +8,7 @@ use parser::{
     Annotation, Location, Span,
 };
 
+use super::exprs;
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
@@ -15,8 +16,6 @@ use crate::{
     symbols::Symbol,
     taint::funcs,
 };
-
-use super::exprs;
 
 pub fn visit_binding_decl<'a>(
     ctx: &mut AnalysisContext<'a>,

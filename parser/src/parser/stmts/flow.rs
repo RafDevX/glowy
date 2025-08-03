@@ -340,7 +340,7 @@ fn parse_expr_switch_case_clause<'a>(
         expect(s, TokenKind::Case, Some("switch case clause"))?;
 
         parse_expressions_list_while(s, |token| token.kind != TokenKind::Colon)?
-            .unwrap_or_else(Vec::new) // no colon found; no matter, we'll error after
+            .unwrap_or_else(Vec::new) // no colon found; ok, we'll error after
     };
 
     expect(s, TokenKind::Colon, Some("switch case clause"))?;

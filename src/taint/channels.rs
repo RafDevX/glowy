@@ -3,13 +3,12 @@ use parser::{
     Location,
 };
 
+use super::exprs;
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
-
-use super::exprs;
 
 pub fn visit_receive<'a>(
     ctx: &mut AnalysisContext<'a>,

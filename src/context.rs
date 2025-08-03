@@ -158,7 +158,9 @@ impl<'a> AnalysisContext<'a> {
 
     fn calculate_composite_branch_backtrace(&mut self) {
         self.current_calculated_branch_backtrace = if self.deferred_branch_backtraces.is_empty() {
-            None // avoid cloning self.branch_backtraces.last(); read in getter instead
+            // avoid cloning self.branch_backtraces.last():
+            // it'll be read in the getter instead of cloned here
+            None
         } else {
             LabelBacktrace::fold(
                 self.branch_backtraces.last().into_iter().chain(
