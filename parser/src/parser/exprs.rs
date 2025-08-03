@@ -14,18 +14,22 @@ fn parse_operand_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, OperandNameNod
     let token = expect(s, TokenKind::Ident, Some("operand name"))?;
 
     if let Some(Ok(of_kind!(TokenKind::Period))) = s.peek() {
-        s.next(); // advance
+        // make sure that it's actually `pkg.sym` and not e.g. `x.(type)` in
+        // a type switch statement (in which case the `.` shouldn't be touched)
+        if let Some(Ok(of_kind!(TokenKind::Ident))) = s.clone().nth(1) {
+            s.next(); // advance period
 
-        Ok(OperandNameNode {
-            package: Some(token.span),
-            id: expect(s, TokenKind::Ident, Some("operand name"))?.span,
-        })
-    } else {
-        Ok(OperandNameNode {
-            package: None,
-            id: token.span,
-        })
+            return Ok(OperandNameNode {
+                package: Some(token.span),
+                id: expect(s, TokenKind::Ident, Some("operand name"))?.span,
+            });
+        }
     }
+
+    Ok(OperandNameNode {
+        package: None,
+        id: token.span,
+    })
 }
 
 pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {

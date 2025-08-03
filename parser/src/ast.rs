@@ -244,6 +244,7 @@ pub enum StatementNode<'a> {
     Decl(DeclNode<'a>),
     If(IfNode<'a>),
     For(ForNode<'a>),
+    Switch(SwitchNode<'a>),
     Continue {
         label: Option<Span<'a>>,
         location: Location, // for better error messages
@@ -301,6 +302,12 @@ impl<'a> From<IfNode<'a>> for StatementNode<'a> {
 impl<'a> From<ForNode<'a>> for StatementNode<'a> {
     fn from(node: ForNode<'a>) -> Self {
         Self::For(node)
+    }
+}
+
+impl<'a> From<SwitchNode<'a>> for StatementNode<'a> {
+    fn from(node: SwitchNode<'a>) -> Self {
+        Self::Switch(node)
     }
 }
 
@@ -399,4 +406,51 @@ pub enum ForRangeNode<'a> {
     None {
         range_expr: ExprNode<'a>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SwitchNode<'a> {
+    Expr(ExprSwitchNode<'a>),
+    Type(TypeSwitchNode<'a>),
+}
+
+impl<'a> From<ExprSwitchNode<'a>> for SwitchNode<'a> {
+    fn from(node: ExprSwitchNode<'a>) -> Self {
+        Self::Expr(node)
+    }
+}
+
+impl<'a> From<TypeSwitchNode<'a>> for SwitchNode<'a> {
+    fn from(node: TypeSwitchNode<'a>) -> Self {
+        Self::Type(node)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExprSwitchNode<'a> {
+    pub stmt: Option<Box<StatementNode<'a>>>, // run before expr is executed
+    pub expr: Option<ExprNode<'a>>,
+    pub clauses: Vec<ExprSwitchCaseClause<'a>>,
+    pub location: Location,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExprSwitchCaseClause<'a> {
+    pub exprs: Vec<ExprNode<'a>>, // empty means "default"
+    pub body: Vec<StatementNode<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeSwitchNode<'a> {
+    pub stmt: Option<Box<StatementNode<'a>>>, // run before expr is executed
+    pub decl: Option<Span<'a>>,               // identifier for short var decl
+    pub expr: ExprNode<'a>,
+    pub clauses: Vec<TypeSwitchCaseClause<'a>>,
+    pub location: Location,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeSwitchCaseClause<'a> {
+    pub types: Vec<TypeNode<'a>>, // empty means "default"
+    pub body: Vec<StatementNode<'a>>,
 }

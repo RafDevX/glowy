@@ -2,7 +2,7 @@ use self::{
     concur::parse_go_statement,
     flow::{
         parse_break_statement, parse_continue_statement, parse_for_statement, parse_if_statement,
-        parse_return_statement,
+        parse_return_statement, parse_switch_statement,
     },
 };
 use super::{
@@ -207,6 +207,7 @@ fn parse_statement<'a>(
         }
         Some(of_kind!(TokenKind::If)) if allow_non_simple => parse_if_statement(s)?.into(),
         Some(of_kind!(TokenKind::For)) if allow_non_simple => parse_for_statement(s)?.into(),
+        Some(of_kind!(TokenKind::Switch)) if allow_non_simple => parse_switch_statement(s)?.into(),
         Some(of_kind!(TokenKind::Continue)) if allow_non_simple => parse_continue_statement(s)?,
         Some(of_kind!(TokenKind::Break)) if allow_non_simple => parse_break_statement(s)?,
         Some(of_kind!(TokenKind::Return)) if allow_non_simple => parse_return_statement(s)?,
@@ -223,21 +224,32 @@ fn parse_statement<'a>(
     Ok(node)
 }
 
+pub fn parse_statements_until<'a>(
+    s: &mut TokenStream<'a>,
+    stop: impl Fn(&Token) -> bool,
+) -> PResult<'a, Vec<StatementNode<'a>>> {
+    let mut stmts = vec![];
+
+    while !s.peek().cloned().transpose()?.as_ref().map_or(true, &stop) {
+        stmts.push(parse_statement(s, true)?);
+
+        // spec allows omitting semicolon before closing } and )
+        if let Some(Ok(t @ of_kind!(TokenKind::CurlyR | TokenKind::ParenR))) = s.peek() {
+            if stop(t) {
+                break;
+            }
+        }
+
+        expect(s, TokenKind::SemiColon, Some("statements list"))?;
+    }
+
+    Ok(stmts)
+}
+
 pub fn parse_block<'a>(s: &mut TokenStream<'a>) -> PResult<'a, BlockNode<'a>> {
     expect(s, TokenKind::CurlyL, Some("block"))?;
 
-    let mut stmts = vec![];
-
-    while !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::CurlyR)))) {
-        stmts.push(parse_statement(s, true)?);
-
-        // spec allows omitting semicolon before }
-        if let Some(Ok(of_kind!(TokenKind::CurlyR))) = s.peek() {
-            break;
-        }
-
-        expect(s, TokenKind::SemiColon, Some("block"))?;
-    }
+    let stmts = parse_statements_until(s, |t| t.kind == TokenKind::CurlyR)?;
 
     expect(s, TokenKind::CurlyR, Some("block"))?;
 

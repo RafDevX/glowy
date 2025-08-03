@@ -66,9 +66,11 @@ pub enum TokenKind {
 
     // keywords
     Break,
+    Case,
     Chan,
     Const,
     Continue,
+    Default,
     Else,
     For,
     Func,
@@ -78,6 +80,8 @@ pub enum TokenKind {
     Package,
     Range,
     Return,
+    Switch,
+    Type,
     Var,
 }
 
@@ -116,9 +120,11 @@ impl<'a> Token<'a> {
     pub fn from_identifier_or_keyword(span: Span<'a>) -> Self {
         let kind = match span.content {
             "break" => TokenKind::Break,
+            "case" => TokenKind::Case,
             "chan" => TokenKind::Chan,
             "const" => TokenKind::Const,
             "continue" => TokenKind::Continue,
+            "default" => TokenKind::Default,
             "else" => TokenKind::Else,
             "for" => TokenKind::For,
             "func" => TokenKind::Func,
@@ -128,6 +134,8 @@ impl<'a> Token<'a> {
             "package" => TokenKind::Package,
             "range" => TokenKind::Range,
             "return" => TokenKind::Return,
+            "switch" => TokenKind::Switch,
+            "type" => TokenKind::Type,
             "var" => TokenKind::Var,
             _ => TokenKind::Ident,
         };

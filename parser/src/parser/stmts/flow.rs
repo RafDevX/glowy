@@ -1,10 +1,14 @@
 use crate::{
-    ast::{ElseNode, ForClauseNode, ForHeaderNode, ForNode, ForRangeNode, IfNode, StatementNode},
+    ast::{
+        ElseNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode,
+        ForRangeNode, IfNode, StatementNode, SwitchNode, TypeSwitchCaseClause, TypeSwitchNode,
+    },
     parser::{
         expect,
-        exprs::{parse_expression, parse_expressions_list_while},
+        exprs::{parse_expression, parse_expressions_list_while, parse_primary_expression},
         of_kind,
-        stmts::{parse_block, parse_statement, terminal_token},
+        stmts::{parse_block, parse_statement, parse_statements_until, terminal_token},
+        types::parse_types_until,
         PResult,
     },
     token::{Token, TokenKind},
@@ -263,6 +267,185 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
     })
 }
 
+pub fn parse_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, SwitchNode<'a>> {
+    // check if it's a type switch by looking for a "type" keyword ahead
+    // (No need for BacktrackingContext if we'll never commit)
+    for future in s.clone() {
+        match future?.kind {
+            TokenKind::CurlyL => break, // we didn't find any
+            TokenKind::Type => {
+                // found it, we can go back to the original stream s
+                return parse_type_switch_statement(s).map(Into::into);
+            }
+            _ => {}
+        }
+    }
+
+    // if we got here, it's an expr type switch (and we go back to original s)
+    parse_expr_switch_statement(s).map(Into::into)
+}
+
+fn parse_expr_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprSwitchNode<'a>> {
+    let beginning = expect(s, TokenKind::Switch, Some("switch statement"))?;
+
+    let mut stmt = None;
+    for future in s.clone() {
+        match future?.kind {
+            TokenKind::CurlyL => break, // didn't find any semicolon
+            TokenKind::SemiColon => {
+                // we now know there's a simple statement we need to parse
+                // before the switch expression
+                stmt = Some(Box::new(parse_statement(s, false)?));
+
+                expect(s, TokenKind::SemiColon, Some("switch statement"))?;
+
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let expr = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+        // no switch expression (equivalent to true)
+        None
+    } else {
+        Some(parse_expression(s)?)
+    };
+
+    expect(s, TokenKind::CurlyL, Some("switch statement"))?;
+
+    let mut clauses = vec![];
+    while !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::CurlyR)))) {
+        clauses.push(parse_expr_switch_case_clause(s)?);
+    }
+
+    expect(s, TokenKind::CurlyR, Some("switch statement"))?;
+
+    Ok(ExprSwitchNode {
+        stmt,
+        expr,
+        clauses,
+        location: s.location_since(&beginning),
+    })
+}
+
+fn parse_expr_switch_case_clause<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, ExprSwitchCaseClause<'a>> {
+    let exprs = if let Some(Ok(of_kind!(TokenKind::Default))) = s.peek() {
+        s.next(); // advance
+
+        Vec::new()
+    } else {
+        expect(s, TokenKind::Case, Some("switch case clause"))?;
+
+        parse_expressions_list_while(s, |token| token.kind != TokenKind::Colon)?
+            .unwrap_or_else(Vec::new) // no colon found; no matter, we'll error after
+    };
+
+    expect(s, TokenKind::Colon, Some("switch case clause"))?;
+
+    let body = parse_statements_until(s, |token| {
+        matches!(
+            token.kind,
+            TokenKind::Case | TokenKind::Default | TokenKind::CurlyR
+        )
+    })?;
+
+    Ok(ExprSwitchCaseClause { exprs, body })
+}
+
+fn parse_type_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeSwitchNode<'a>> {
+    let beginning = expect(s, TokenKind::Switch, Some("switch statement"))?;
+
+    let mut stmt = None;
+    for future in s.clone() {
+        match future?.kind {
+            TokenKind::CurlyL => break, // didn't find any ;
+            TokenKind::SemiColon => {
+                // we now know there's a simple statement we need to parse
+                // before the switch expression
+                stmt = Some(Box::new(parse_statement(s, false)?));
+
+                expect(s, TokenKind::SemiColon, Some("switch statement"))?;
+
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    // this can't be merged with the lookup above because first we need to
+    // know if there's a semicolon before attempting to search for a :=,
+    // otherwise in `switch z := 9; x` the := will trigger early when it's not
+    // actually a type switch declaration (just part of the statement)
+    let mut decl = None;
+    for future in s.clone() {
+        match future?.kind {
+            TokenKind::CurlyL => break, // didn't find any :=
+            TokenKind::ColonAssign => {
+                let ident = expect(s, TokenKind::Ident, Some("switch declaration"))?;
+
+                decl = Some(ident.span);
+
+                expect(s, TokenKind::ColonAssign, Some("switch statement"))?;
+
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let expr = parse_primary_expression(s)?;
+
+    expect(s, TokenKind::Period, Some("type switch"))?;
+    expect(s, TokenKind::ParenL, Some("type switch"))?;
+    expect(s, TokenKind::Type, Some("type switch"))?;
+    expect(s, TokenKind::ParenR, Some("type switch"))?;
+
+    expect(s, TokenKind::CurlyL, Some("switch statement"))?;
+
+    let mut clauses = vec![];
+    while !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::CurlyR)))) {
+        clauses.push(parse_type_switch_case_clause(s)?);
+    }
+
+    expect(s, TokenKind::CurlyR, Some("switch statement"))?;
+
+    Ok(TypeSwitchNode {
+        stmt,
+        decl,
+        expr,
+        clauses,
+        location: s.location_since(&beginning),
+    })
+}
+
+fn parse_type_switch_case_clause<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, TypeSwitchCaseClause<'a>> {
+    let types = if let Some(Ok(of_kind!(TokenKind::Default))) = s.peek() {
+        s.next(); // advance
+
+        Vec::new()
+    } else {
+        expect(s, TokenKind::Case, Some("switch case clause"))?;
+
+        parse_types_until(s, |token| token.kind == TokenKind::Colon)?
+    };
+
+    expect(s, TokenKind::Colon, Some("switch case clause"))?;
+
+    let body = parse_statements_until(s, |token| {
+        matches!(
+            token.kind,
+            TokenKind::Case | TokenKind::Default | TokenKind::CurlyR
+        )
+    })?;
+
+    Ok(TypeSwitchCaseClause { types, body })
+}
+
 pub fn parse_continue_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
     let beginning = expect(s, TokenKind::Continue, Some("continue statement"))?;
 
@@ -323,7 +506,8 @@ mod tests {
     use crate::{
         ast::{
             AssignmentKind, AssignmentNode, BinaryOpKind, BlockNode, CallNode, ExprNode,
-            LiteralNode, OperandNameNode, ShortVarDeclNode, StatementNode, UnaryOpKind,
+            LiteralNode, OperandNameNode, ShortVarDeclNode, StatementNode, TypeNode,
+            TypeSwitchCaseClause, UnaryOpKind,
         },
         lexer::Lexer,
         parser::stmts::parse_block,
@@ -524,6 +708,385 @@ mod tests {
                         } else if y(); true {
                             {}
                         };
+                    }
+                ",
+            )
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn switch_expr() {
+        assert_eq!(
+            vec![
+                StatementNode::Switch(SwitchNode::Expr(ExprSwitchNode {
+                    stmt: None,
+                    expr: Some(ExprNode::Name(OperandNameNode {
+                        package: None,
+                        id: Span::new("tag", 54, 3)
+                    })),
+                    clauses: vec![
+                        ExprSwitchCaseClause {
+                            exprs: vec![],
+                            body: vec![StatementNode::Expr(ExprNode::Literal(LiteralNode::Int {
+                                value: 3,
+                                location: 97..98
+                            }))]
+                        },
+                        ExprSwitchCaseClause {
+                            exprs: vec![
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 0,
+                                    location: 132..133
+                                }),
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 1,
+                                    location: 135..136
+                                }),
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 2,
+                                    location: 138..139
+                                }),
+                            ],
+                            body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
+                                func: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("f", 141, 5)
+                                })),
+                                type_arg: None,
+                                args: vec![],
+                                variadic: false,
+                                location: 142..144,
+                                annotation: None
+                            }))]
+                        },
+                        ExprSwitchCaseClause {
+                            exprs: vec![
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 3,
+                                    location: 178..179
+                                }),
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 4,
+                                    location: 181..182
+                                }),
+                                ExprNode::Literal(LiteralNode::Int {
+                                    value: 5,
+                                    location: 184..185
+                                }),
+                            ],
+                            body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
+                                func: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("g", 187, 6)
+                                })),
+                                type_arg: None,
+                                args: vec![],
+                                variadic: false,
+                                location: 188..190,
+                                annotation: None
+                            }))]
+                        }
+                    ],
+                    location: 47..216
+                })),
+                StatementNode::Switch(SwitchNode::Expr(ExprSwitchNode {
+                    stmt: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
+                        ids: vec![Span::new("x", 249, 9)],
+                        exprs: vec![ExprNode::Call(CallNode {
+                            func: Box::new(ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("f", 254, 9)
+                            })),
+                            type_arg: None,
+                            args: vec![],
+                            variadic: false,
+                            location: 255..257,
+                            annotation: None
+                        })],
+                        location: 249..257,
+                        annotation: None
+                    }))),
+                    expr: None,
+                    clauses: vec![
+                        ExprSwitchCaseClause {
+                            exprs: vec![ExprNode::BinaryOp {
+                                kind: BinaryOpKind::Less,
+                                left: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("x", 294, 10)
+                                })),
+                                right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 0,
+                                    location: 298..299
+                                })),
+                                location: 294..299
+                            }],
+                            body: vec![StatementNode::Return {
+                                exprs: vec![ExprNode::UnaryOp {
+                                    kind: UnaryOpKind::Negation,
+                                    operand: Box::new(ExprNode::Name(OperandNameNode {
+                                        package: None,
+                                        id: Span::new("x", 309, 10)
+                                    })),
+                                    location: 308..310
+                                }],
+                                location: 301..310
+                            }]
+                        },
+                        ExprSwitchCaseClause {
+                            exprs: vec![],
+                            body: vec![StatementNode::Return {
+                                exprs: vec![ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("x", 355, 11)
+                                })],
+                                location: 348..356
+                            }]
+                        }
+                    ],
+                    location: 242..382
+                })),
+                StatementNode::Switch(SwitchNode::Expr(ExprSwitchNode {
+                    stmt: None,
+                    expr: None,
+                    clauses: vec![
+                        ExprSwitchCaseClause {
+                            exprs: vec![ExprNode::BinaryOp {
+                                kind: BinaryOpKind::Less,
+                                left: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("x", 450, 15)
+                                })),
+                                right: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("y", 454, 15)
+                                })),
+                                location: 450..455
+                            }],
+                            body: vec![
+                                StatementNode::Expr(ExprNode::Call(CallNode {
+                                    func: Box::new(ExprNode::Name(OperandNameNode {
+                                        package: None,
+                                        id: Span::new("f", 489, 16)
+                                    })),
+                                    type_arg: None,
+                                    args: vec![],
+                                    variadic: false,
+                                    location: 490..492,
+                                    annotation: None
+                                })),
+                                StatementNode::Assignment(AssignmentNode {
+                                    kind: AssignmentKind::Simple,
+                                    lhs: vec![ExprNode::Name(OperandNameNode {
+                                        package: None,
+                                        id: Span::new("z", 525, 17)
+                                    })],
+                                    rhs: vec![ExprNode::Literal(LiteralNode::Int {
+                                        value: 3,
+                                        location: 529..530
+                                    })],
+                                    location: 525..530
+                                })
+                            ]
+                        },
+                        ExprSwitchCaseClause {
+                            exprs: vec![],
+                            body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
+                                func: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("g", 600, 19)
+                                })),
+                                type_arg: None,
+                                args: vec![],
+                                variadic: false,
+                                location: 601..603,
+                                annotation: None
+                            }))]
+                        }
+                    ],
+                    location: 408..629
+                }))
+            ],
+            parse(
+                "
+                    {
+                        switch tag {
+                            default: 3
+                            case 0, 1, 2: f()
+                            case 3, 4, 5: g()
+                        }
+
+                        switch x := f(); {
+                            case x < 0: return -x
+                            default: return x
+                        }
+
+                        switch {
+                            case x < y:
+                                f()
+                                z = 3
+                            default:
+                                g()
+                        }
+                    }
+        "
+            )
+            .unwrap()
+        )
+    }
+
+    #[test]
+    fn switch_type() {
+        assert_eq!(
+            vec![
+                StatementNode::Switch(SwitchNode::Type(TypeSwitchNode {
+                    stmt: None,
+                    decl: Some(Span::new("i", 54, 3)),
+                    expr: ExprNode::Name(OperandNameNode {
+                        package: None,
+                        id: Span::new("x", 59, 3)
+                    }),
+                    clauses: vec![
+                        TypeSwitchCaseClause {
+                            types: vec![TypeNode::Name {
+                                package: None,
+                                id: Span::new("nil", 103, 4),
+                                args: vec![]
+                            }],
+                            body: vec![]
+                        },
+                        TypeSwitchCaseClause {
+                            types: vec![
+                                TypeNode::Name {
+                                    package: None,
+                                    id: Span::new("int", 141, 5),
+                                    args: vec![]
+                                },
+                                TypeNode::Name {
+                                    package: None,
+                                    id: Span::new("float64", 146, 5),
+                                    args: vec![]
+                                }
+                            ],
+                            body: vec![StatementNode::Assignment(AssignmentNode {
+                                kind: AssignmentKind::Simple,
+                                lhs: vec![ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("isEven", 155, 5)
+                                })],
+                                rhs: vec![ExprNode::BinaryOp {
+                                    kind: BinaryOpKind::Eq,
+                                    left: Box::new(ExprNode::BinaryOp {
+                                        kind: BinaryOpKind::Remainder,
+                                        left: Box::new(ExprNode::Name(OperandNameNode {
+                                            package: None,
+                                            id: Span::new("i", 164, 5)
+                                        })),
+                                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                            value: 2,
+                                            location: 168..169
+                                        })),
+                                        location: 164..169
+                                    }),
+                                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                        value: 0,
+                                        location: 173..174
+                                    })),
+                                    location: 164..174
+                                }],
+                                location: 155..174
+                            })]
+                        },
+                        TypeSwitchCaseClause {
+                            types: vec![],
+                            body: vec![
+                                StatementNode::Expr(ExprNode::Call(CallNode {
+                                    func: Box::new(ExprNode::Name(OperandNameNode {
+                                        package: None,
+                                        id: Span::new("f", 244, 7)
+                                    })),
+                                    type_arg: None,
+                                    args: vec![],
+                                    variadic: false,
+                                    location: 245..247,
+                                    annotation: None
+                                })),
+                                StatementNode::Return {
+                                    exprs: vec![ExprNode::Literal(LiteralNode::Float {
+                                        value: 12.1,
+                                        location: 287..291
+                                    })],
+                                    location: 280..291
+                                }
+                            ]
+                        }
+                    ],
+                    location: 47..317
+                })),
+                StatementNode::Switch(SwitchNode::Type(TypeSwitchNode {
+                    stmt: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
+                        ids: vec![Span::new("z", 350, 11)],
+                        exprs: vec![ExprNode::Literal(LiteralNode::Int {
+                            value: 9,
+                            location: 355..356
+                        })],
+                        location: 350..356,
+                        annotation: None
+                    }))),
+                    decl: None,
+                    expr: ExprNode::Call(CallNode {
+                        func: Box::new(ExprNode::Name(OperandNameNode {
+                            package: None,
+                            id: Span::new("f", 358, 11)
+                        })),
+                        type_arg: None,
+                        args: vec![ExprNode::Literal(LiteralNode::Int {
+                            value: 7,
+                            location: 360..361
+                        })],
+                        variadic: false,
+                        location: 359..362,
+                        annotation: None
+                    }),
+                    clauses: vec![TypeSwitchCaseClause {
+                        types: vec![TypeNode::Name {
+                            package: None,
+                            id: Span::new("float64", 405, 12),
+                            args: vec![]
+                        }],
+                        body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
+                            func: Box::new(ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("g", 414, 12)
+                            })),
+                            type_arg: None,
+                            args: vec![ExprNode::Name(OperandNameNode {
+                                package: None,
+                                id: Span::new("z", 416, 12)
+                            })],
+                            variadic: false,
+                            location: 415..418,
+                            annotation: None
+                        }))]
+                    }],
+                    location: 343..444
+                }))
+            ],
+            parse(
+                "
+                    {
+                        switch i := x.(type) {
+                            case nil:
+                            case int, float64: isEven = i % 2 == 0
+                            default:
+                                f()
+                                return 12.1
+                        }
+
+                        switch z := 9; f(7).(type) {
+                            case float64: g(z)
+                        }
                     }
                 ",
             )

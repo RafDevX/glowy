@@ -101,6 +101,26 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     }
 }
 
+pub fn parse_types_until<'a>(
+    s: &mut TokenStream<'a>,
+    stop: impl Fn(&Token) -> bool,
+) -> PResult<'a, Vec<TypeNode<'a>>> {
+    let mut types = vec![];
+
+    let mut first = true;
+    while !s.peek().cloned().transpose()?.as_ref().map_or(true, &stop) {
+        if first {
+            first = false;
+        } else {
+            expect(s, TokenKind::Comma, Some("types list"))?;
+        }
+
+        types.push(parse_type(s)?);
+    }
+
+    Ok(types)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
