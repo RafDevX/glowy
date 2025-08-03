@@ -1,7 +1,7 @@
 use parser::{
     ast::{
-        AssignmentKind, BlockNode, ElseNode, ForClauseNode, ForHeaderNode, ForNode, ForRangeNode,
-        IfNode,
+        AssignmentKind, BlockNode, ElseNode, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode,
+        ForRangeNode, IfNode, SwitchNode, TypeSwitchNode,
     },
     Location, Span,
 };
@@ -9,6 +9,7 @@ use parser::{
 use crate::{
     context::{AnalysisContext, DeferTarget},
     labels::{LabelBacktrace, LabelBacktraceKind},
+    symbols::Symbol,
     taint::{explicit, exprs},
 };
 
@@ -187,4 +188,124 @@ pub fn visit_continue_break<'a>(
     };
 
     ctx.defer_branch_backtrace(target, location.clone());
+}
+
+pub fn visit_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &SwitchNode<'a>) {
+    // Go spec: each if, for and switch is considered to be in its own
+    // implicit block, so we select it here
+    ctx.symtab_mut().select_next_child_scope();
+
+    match node {
+        SwitchNode::Expr(expr) => visit_expr_switch(ctx, expr),
+        SwitchNode::Type(r#type) => visit_type_switch(ctx, r#type),
+    }
+
+    ctx.symtab_mut().select_parent_scope(); // pop implicit block
+}
+
+fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a>) {
+    if let Some(stmt) = &node.stmt {
+        // simple statement to be executed before switch
+        super::visit_statement(ctx, stmt);
+    }
+
+    let pushed_expr = if let Some(expr) = &node.expr {
+        if let Some(bt) = exprs::visit_single_expr(ctx, expr) {
+            ctx.push_branch_backtrace(bt.as_single_child(
+                LabelBacktraceKind::Branch,
+                None,
+                ctx.pin(exprs::get_expr_location(expr)),
+            ));
+
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    for clause in &node.clauses {
+        let children: Vec<_> = clause
+            .exprs
+            .iter()
+            .filter_map(|expr| exprs::visit_single_expr(ctx, expr))
+            .collect();
+
+        let folded = LabelBacktrace::fold(
+            children.iter(),
+            LabelBacktraceKind::Branch,
+            None,
+            ctx.pin(
+                clause
+                    .exprs
+                    .first()
+                    .map(exprs::get_expr_location)
+                    .map(|l| l.start)
+                    .unwrap_or(0)
+                    ..clause
+                        .exprs
+                        .last()
+                        .map(exprs::get_expr_location)
+                        .map(|l| l.end)
+                        .unwrap_or(usize::MAX),
+            ),
+        );
+
+        let pushed_case = if let Some(bt) = folded {
+            ctx.push_branch_backtrace(bt);
+
+            true
+        } else {
+            false
+        };
+
+        // vvv this will create another scope for the clause body,
+        // which is (probably?) intended? spec unclear at first glance
+        super::visit_block(ctx, &clause.body);
+
+        if pushed_case {
+            ctx.pop_branch_backtrace();
+        }
+    }
+
+    if pushed_expr {
+        ctx.pop_branch_backtrace();
+    }
+}
+
+fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a>) {
+    if let Some(stmt) = &node.stmt {
+        // simple statement to be executed before switch
+        super::visit_statement(ctx, stmt);
+    }
+
+    let pushed = if let Some(bt) = exprs::visit_single_expr(ctx, &node.expr) {
+        if let Some(id) = &node.decl {
+            ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id.clone()), true, Some(bt.clone())));
+        }
+
+        ctx.push_branch_backtrace(bt.as_single_child(
+            LabelBacktraceKind::Branch,
+            None,
+            ctx.pin(exprs::get_expr_location(&node.expr)),
+        ));
+
+        true
+    } else {
+        false
+    };
+
+    for clause in &node.clauses {
+        // we don't actually care about clause.types because raw types aren't
+        // values and so don't have labels
+
+        // vvv this will create another scope for the clause body,
+        // which is (probably?) intended? spec unclear at first glance
+        super::visit_block(ctx, &clause.body);
+    }
+
+    if pushed {
+        ctx.pop_branch_backtrace();
+    }
 }
