@@ -208,6 +208,13 @@ fn parse_statement<'a>(
         Some(of_kind!(TokenKind::If)) if allow_non_simple => parse_if_statement(s)?.into(),
         Some(of_kind!(TokenKind::For)) if allow_non_simple => parse_for_statement(s)?.into(),
         Some(of_kind!(TokenKind::Switch)) if allow_non_simple => parse_switch_statement(s)?.into(),
+        Some(t @ of_kind!(TokenKind::Fallthrough)) if allow_non_simple => {
+            s.next(); // advance
+
+            StatementNode::Fallthrough {
+                location: t.span.location(),
+            }
+        }
         Some(of_kind!(TokenKind::Continue)) if allow_non_simple => parse_continue_statement(s)?,
         Some(of_kind!(TokenKind::Break)) if allow_non_simple => parse_break_statement(s)?,
         Some(of_kind!(TokenKind::Return)) if allow_non_simple => parse_return_statement(s)?,

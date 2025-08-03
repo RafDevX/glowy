@@ -72,6 +72,7 @@ pub enum TokenKind {
     Continue,
     Default,
     Else,
+    Fallthrough,
     For,
     Func,
     Go,
@@ -96,6 +97,7 @@ impl TokenKind {
                 | TokenKind::String(_)
                 | TokenKind::Break
                 | TokenKind::Continue
+                | TokenKind::Fallthrough
                 | TokenKind::Return
                 | TokenKind::PlusPlus
                 | TokenKind::MinusMinus
@@ -126,6 +128,7 @@ impl<'a> Token<'a> {
             "continue" => TokenKind::Continue,
             "default" => TokenKind::Default,
             "else" => TokenKind::Else,
+            "fallthrough" => TokenKind::Fallthrough,
             "for" => TokenKind::For,
             "func" => TokenKind::Func,
             "go" => TokenKind::Go,

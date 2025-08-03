@@ -887,7 +887,8 @@ mod tests {
                                         location: 529..530
                                     })],
                                     location: 525..530
-                                })
+                                }),
+                                StatementNode::Fallthrough { location: 563..574 }
                             ]
                         },
                         ExprSwitchCaseClause {
@@ -895,17 +896,17 @@ mod tests {
                             body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
                                 func: Box::new(ExprNode::Name(OperandNameNode {
                                     package: None,
-                                    id: Span::new("g", 600, 19)
+                                    id: Span::new("g", 644, 20)
                                 })),
                                 type_arg: None,
                                 args: vec![],
                                 variadic: false,
-                                location: 601..603,
+                                location: 645..647,
                                 annotation: None
                             }))]
                         }
                     ],
-                    location: 408..629
+                    location: 408..673
                 }))
             ],
             parse(
@@ -926,6 +927,7 @@ mod tests {
                             case x < y:
                                 f()
                                 z = 3
+                                fallthrough
                             default:
                                 g()
                         }

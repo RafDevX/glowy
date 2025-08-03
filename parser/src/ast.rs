@@ -245,6 +245,9 @@ pub enum StatementNode<'a> {
     If(IfNode<'a>),
     For(ForNode<'a>),
     Switch(SwitchNode<'a>),
+    Fallthrough {
+        location: Location, // for better error messages
+    },
     Continue {
         label: Option<Span<'a>>,
         location: Location, // for better error messages
