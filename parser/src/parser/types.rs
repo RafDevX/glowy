@@ -1,11 +1,11 @@
-use super::{expect, of_kind, PResult};
+use super::{expect, exprs::parse_expression, of_kind, PResult};
 use crate::{
     ast::{ChannelDirection, TypeNode},
     token::{Token, TokenKind},
     ParsingError, TokenStream,
 };
 
-pub fn parse_type_args<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeNode<'a>>> {
+fn parse_type_args<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeNode<'a>>> {
     let mut args = vec![];
 
     if !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::SquareL)))) {
@@ -38,7 +38,7 @@ pub fn parse_type_args<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeNode<
     Ok(args)
 }
 
-pub fn parse_type_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+fn parse_type_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     let token = expect(s, TokenKind::Ident, Some("type name"))?;
 
     if let Some(Ok(of_kind!(TokenKind::Period))) = s.peek() {
@@ -84,6 +84,18 @@ pub fn parse_channel_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'
     Ok(TypeNode::Channel { r#type, direction })
 }
 
+fn parse_array_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+    expect(s, TokenKind::SquareL, Some("array type"))?;
+
+    let length = Box::new(parse_expression(s)?);
+
+    expect(s, TokenKind::SquareR, Some("array type"))?;
+
+    let element = Box::new(parse_type(s)?);
+
+    Ok(TypeNode::Array { length, element })
+}
+
 pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::ParenL)) => {
@@ -92,6 +104,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
             expect(s, TokenKind::ParenR, Some("parenthesized type"))?;
             Ok(inner)
         }
+        Some(of_kind!(TokenKind::SquareL)) => parse_array_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
         Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
         found => Err(ParsingError::UnexpectedConstruct {
@@ -124,7 +137,11 @@ pub fn parse_types_until<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lexer::Lexer, Span};
+    use crate::{
+        ast::{BinaryOpKind, ExprNode, LiteralNode, OperandNameNode},
+        lexer::Lexer,
+        Span,
+    };
 
     fn parse(input: &str) -> PResult<'_, TypeNode<'_>> {
         let mut stream = TokenStream::new(Lexer::new(input));
@@ -164,6 +181,56 @@ mod tests {
                 direction: None
             },
             parse("chan (<-chan (chan<- pkg.member[chan T, K]))").unwrap()
+        )
+    }
+
+    #[test]
+    fn arrays() {
+        assert_eq!(
+            TypeNode::Array {
+                length: Box::new(ExprNode::Literal(LiteralNode::Int {
+                    value: 3,
+                    location: 1..2
+                })),
+                element: Box::new(TypeNode::Array {
+                    length: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 4,
+                        location: 4..5
+                    })),
+                    element: Box::new(TypeNode::Array {
+                        length: Box::new(ExprNode::BinaryOp {
+                            kind: BinaryOpKind::Sum,
+                            left: Box::new(ExprNode::BinaryOp {
+                                kind: BinaryOpKind::Product,
+                                left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                    value: 2,
+                                    location: 7..8
+                                })),
+                                right: Box::new(ExprNode::Name(OperandNameNode {
+                                    package: None,
+                                    id: Span::new("N", 11, 1)
+                                })),
+                                location: 7..12
+                            }),
+                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                value: 1,
+                                location: 15..16
+                            })),
+                            location: 7..16
+                        }),
+                        element: Box::new(TypeNode::Name {
+                            package: Some(Span::new("pkg", 17, 1)),
+                            id: Span::new("member", 21, 1),
+                            args: vec![TypeNode::Name {
+                                package: None,
+                                id: Span::new("T", 28, 1),
+                                args: vec![]
+                            }]
+                        })
+                    })
+                })
+            },
+            parse("[3][4][2 * N + 1]pkg.member[T]").unwrap()
         )
     }
 }

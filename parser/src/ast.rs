@@ -64,6 +64,10 @@ pub enum TypeNode<'a> {
         r#type: Box<TypeNode<'a>>, // what values can be sent/received
         direction: Option<ChannelDirection>,
     },
+    Array {
+        length: Box<ExprNode<'a>>,
+        element: Box<TypeNode<'a>>,
+    },
     // TODO: Literal
 }
 
