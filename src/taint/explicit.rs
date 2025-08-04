@@ -2,8 +2,8 @@ use std::cmp;
 
 use parser::{
     ast::{
-        AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, LiteralNode,
-        ShortVarDeclNode,
+        AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, IndexingNode, LiteralNode,
+        OperandNameNode, ShortVarDeclNode,
     },
     Annotation, Location, Span,
 };
@@ -232,59 +232,12 @@ pub fn visit_raw_assignment<'a>(
     }
 
     for (lhs, rhs_backtrace) in lhs_exprs.iter().zip(rhs_backtraces.iter()) {
-        // TODO: support more kinds of left-values, e.g. indexing
-        // (maybe have a module for complex data-types like arrays and structs
-        //  which defines a trait that we can use to set values like we do for
-        //  raw symbols here?)
-
-        let ExprNode::Name(name) = lhs else {
-            ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
-                location: exprs::get_expr_location(lhs),
-            });
-
-            return;
-        };
-
-        let Some(symbol) = exprs::resolve_operand_name(ctx, name) else {
-            // error already reported
-            return;
-        };
-
-        if !symbol.borrow().mutable() {
-            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue {
-                symbol: name.id.clone(),
-            });
-
-            return;
-        }
-
-        let mut children = vec![rhs_backtrace.as_ref(), ctx.branch_backtrace()];
-
-        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
-
-        let mut borrowed = symbol.borrow_mut();
-
-        if kind != AssignmentKind::Simple || !in_current_scope {
-            // for complex assignments like `x += y` we need to keep x's label,
-            // but for simple assignments like `x = y` we can usually overwrite
-            // it and drop the previous x label, except if x was not declared in
-            // the current scope, in which case we (heuristically) have to
-            // conservatively assume that this is e.g. an if branch and so the
-            // other branch might not have a simple assignment, so we can't
-            // forget x's previous label either
-            // FIXME: try to improve symtab alt branch support to avoid this
-
-            children.push(borrowed.label_backtrace());
-        }
-
-        let backtrace = LabelBacktrace::fold(
-            children.into_iter().flatten(),
-            LabelBacktraceKind::Assignment,
-            Some(name.id.content()), // symbol.declared_name()?
-            ctx.pin(location.clone()),
+        lhs.assign(
+            ctx,
+            rhs_backtrace.as_ref(),
+            kind == AssignmentKind::Simple,
+            location,
         );
-
-        borrowed.set_label_backtrace(backtrace);
     }
 }
 
@@ -307,4 +260,114 @@ pub fn visit_incdec<'a>(
             location: location.clone(),
         },
     );
+}
+
+trait LeftValue<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        rhs: Option<&LabelBacktrace<'a>>,
+        simple: bool,
+        location: &Location,
+    );
+}
+
+// maybe it sends the wrong message for this to be implemented for ExprNode even
+// though not all of its variants are actually supported, but this is the
+// easiest way to accomplish simple dispatching
+impl<'a> LeftValue<'a> for ExprNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        rhs: Option<&LabelBacktrace<'a>>,
+        simple: bool,
+        location: &Location,
+    ) {
+        let inner: &dyn LeftValue = match self {
+            ExprNode::Name(name) => name,
+            ExprNode::Indexing(indexing) => indexing,
+            _ => {
+                ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                    location: exprs::get_expr_location(self),
+                });
+
+                return;
+            }
+        };
+
+        inner.assign(ctx, rhs, simple, location)
+    }
+}
+
+impl<'a> LeftValue<'a> for OperandNameNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        rhs: Option<&LabelBacktrace<'a>>,
+        simple: bool,
+        location: &Location,
+    ) {
+        let Some(symbol) = exprs::resolve_operand_name(ctx, self) else {
+            // no symbol found, but error already reported
+            return;
+        };
+
+        if !symbol.borrow().mutable() {
+            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue {
+                symbol: self.id.clone(),
+            });
+
+            return;
+        }
+
+        let mut children = vec![rhs, ctx.branch_backtrace()];
+
+        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
+
+        let mut borrowed = symbol.borrow_mut();
+
+        if !simple || !in_current_scope {
+            // for complex assignments like `x += y` we need to keep x's label,
+            // but for simple assignments like `x = y` we can usually overwrite
+            // it and drop the previous x label, except if x was not declared in
+            // the current scope, in which case we (heuristically) have to
+            // conservatively assume that this is e.g. an if branch and so the
+            // other branch might not have a simple assignment, so we can't
+            // forget x's previous label either
+            // FIXME: try to improve symtab alt branch support to avoid this
+
+            children.push(borrowed.label_backtrace());
+        }
+
+        let backtrace = LabelBacktrace::fold(
+            children.into_iter().flatten(),
+            LabelBacktraceKind::Assignment,
+            Some(self.id.content()), // symbol.declared_name()?
+            ctx.pin(location.clone()),
+        );
+
+        borrowed.set_label_backtrace(backtrace);
+    }
+}
+
+impl<'a> LeftValue<'a> for IndexingNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        rhs: Option<&LabelBacktrace<'a>>,
+        _simple: bool,
+        location: &Location,
+    ) {
+        // TODO: more fine-grained labeling of arrays; for example, if all
+        // accesses are constant (~ literals, e.g. arr[2]), then remember a
+        // mapping index-label. otherwise, for every assignment like arr[x]
+        // (where we can't know x at compile-time), save in the array's symbol
+        // label that label, and then on read union that general/overall label
+        // with the one from the mapping (assuming it's a constant, otherwise
+        // union all the possible mapped values)
+
+        // never simple because we never want to override the entire array based
+        // on just one entry
+        self.expr.assign(ctx, rhs, false, location);
+    }
 }
