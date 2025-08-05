@@ -2,7 +2,7 @@ use self::postfix::parse_postfix_if_exists;
 use super::{expect, PResult};
 use crate::{
     ast::{ExprNode, LiteralNode, OperandNameNode},
-    parser::of_kind,
+    parser::{of_kind, types::parse_type, BacktrackingContext},
     token::{Token, TokenKind},
     ParsingError, TokenStream,
 };
@@ -29,6 +29,77 @@ fn parse_operand_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, OperandNameNod
     Ok(OperandNameNode {
         package: None,
         id: token.span,
+    })
+}
+
+fn parse_array_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let beginning = expect(s, TokenKind::SquareL, Some("array literal"))?;
+
+    let length = if let Some(Ok(of_kind!(TokenKind::Ellipsis))) = s.peek() {
+        s.next(); // advance
+
+        None
+    } else {
+        Some(Box::new(parse_expression(s)?))
+    };
+
+    expect(s, TokenKind::SquareR, Some("array literal"))?;
+
+    let element = parse_type(s)?;
+
+    expect(s, TokenKind::CurlyL, Some("array literal"))?;
+
+    let mut values = vec![];
+
+    let mut first = true;
+    while !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::CurlyR)))) {
+        if first {
+            first = false;
+        } else {
+            expect(s, TokenKind::Comma, Some("element list"))?;
+        }
+
+        // elements can be either alone or with an integer literal key, but we
+        // don't know unless we see an Int followed by a Colon - since we cannot
+        // peek 2 tokens ahead, we use a BacktrackingContext
+        let mut context = BacktrackingContext::new(s);
+        let b = context.stream();
+
+        let key = if let Some(Ok(of_kind!(TokenKind::Int(candidate)))) = b.next() {
+            // might be a key, but only if followed by :
+            if let Some(Ok(of_kind!(TokenKind::Colon))) = b.next() {
+                // confirmed! we can commit and go back to the main stream s
+                context.commit()?;
+
+                Some(usize::try_from(candidate).ok().unwrap_or(usize::MAX))
+            } else {
+                // nope, there's no key
+                // (we cannot re-use `candidate` as the value, we need to parse
+                // again, because it might be a more complex expression like
+                // the `2` in `2 + 3`)
+                None
+            }
+        } else {
+            None
+        };
+
+        let value = parse_expression(s)?;
+        // ^ FIXME: doesn't support nested literals like {{0, 1}, {1, 2}}
+
+        values.push((key, value));
+    }
+
+    if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
+        s.next(); // skip optional trailing comma
+    }
+
+    expect(s, TokenKind::CurlyR, Some("array literal"))?;
+
+    Ok(LiteralNode::Array {
+        length,
+        element,
+        values,
+        location: s.location_since(&beginning),
     })
 }
 
@@ -71,6 +142,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             }
             .into()
         }
+        Some(of_kind!(TokenKind::SquareL)) => parse_array_literal(s)?.into(),
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance
             let inner = parse_expression(s)?;

@@ -112,7 +112,7 @@ pub struct FunctionParamDeclNode<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprNode<'a> {
     Name(OperandNameNode<'a>),
-    Literal(LiteralNode),
+    Literal(LiteralNode<'a>),
     Call(CallNode<'a>),
     Indexing(IndexingNode<'a>),
     // TODO: more primary expressions...
@@ -169,8 +169,8 @@ impl<'a> From<OperandNameNode<'a>> for ExprNode<'a> {
     }
 }
 
-impl From<LiteralNode> for ExprNode<'_> {
-    fn from(node: LiteralNode) -> Self {
+impl<'a> From<LiteralNode<'a>> for ExprNode<'a> {
+    fn from(node: LiteralNode<'a>) -> Self {
         Self::Literal(node)
     }
 }
@@ -194,11 +194,33 @@ pub struct OperandNameNode<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum LiteralNode {
-    Int { value: u64, location: Location },
-    Float { value: f64, location: Location },
-    Rune { value: char, location: Location },
-    String { value: String, location: Location },
+pub enum LiteralNode<'a> {
+    Int {
+        value: u64,
+        location: Location,
+    },
+    Float {
+        value: f64,
+        location: Location,
+    },
+    Rune {
+        value: char,
+        location: Location,
+    },
+    String {
+        value: String,
+        location: Location,
+    },
+    // all below should in theory be one Composite { r#type, value }, but this
+    // is simpler and works for now; nevertheless, it does not support arbitrary
+    // type literals (where `LiteralType` is `TypeName [TypeArgs]`, per spec)
+    Array {
+        length: Option<Box<ExprNode<'a>>>, // None if [...]int
+        element: TypeNode<'a>,
+        values: Vec<(Option<usize>, ExprNode<'a>)>, // FIXME: support nested {}s
+        location: Location,
+    },
+    // Struct, Slice, Map
 }
 
 #[derive(Clone, Debug, PartialEq)]
