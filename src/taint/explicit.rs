@@ -210,7 +210,13 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             .collect(),
     };
 
-    visit_raw_assignment(ctx, node.kind, &node.lhs, &rhs_backtraces, &node.location);
+    visit_raw_assignment(
+        ctx,
+        node.kind,
+        &node.lhs,
+        rhs_backtraces.into_iter(),
+        &node.location,
+    );
 }
 
 // for assignment-like cases more generic than an actual assignment node
@@ -218,7 +224,7 @@ pub fn visit_raw_assignment<'a>(
     ctx: &mut AnalysisContext<'a>,
     kind: AssignmentKind,
     lhs_exprs: &[ExprNode<'a>],
-    rhs_backtraces: &[Option<LabelBacktrace<'a>>],
+    rhs_backtraces: impl ExactSizeIterator<Item = Option<LabelBacktrace<'a>>>,
     location: &Location,
 ) {
     if lhs_exprs.len() != rhs_backtraces.len() {
@@ -231,13 +237,8 @@ pub fn visit_raw_assignment<'a>(
         return;
     }
 
-    for (lhs, rhs_backtrace) in lhs_exprs.iter().zip(rhs_backtraces.iter()) {
-        lhs.assign(
-            ctx,
-            rhs_backtrace.as_ref(),
-            kind == AssignmentKind::Simple,
-            location,
-        );
+    for (lhs, rhs_backtrace) in lhs_exprs.iter().zip(rhs_backtraces) {
+        lhs.assign(ctx, rhs_backtrace, kind == AssignmentKind::Simple, location);
     }
 }
 
@@ -266,7 +267,7 @@ trait LeftValue<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<&LabelBacktrace<'a>>,
+        rhs: Option<LabelBacktrace<'a>>,
         simple: bool,
         location: &Location,
     );
@@ -279,7 +280,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<&LabelBacktrace<'a>>,
+        rhs: Option<LabelBacktrace<'a>>,
         simple: bool,
         location: &Location,
     ) {
@@ -303,7 +304,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<&LabelBacktrace<'a>>,
+        rhs: Option<LabelBacktrace<'a>>,
         simple: bool,
         location: &Location,
     ) {
@@ -320,7 +321,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
             return;
         }
 
-        let mut children = vec![rhs, ctx.branch_backtrace()];
+        let mut children = vec![rhs.as_ref(), ctx.branch_backtrace()];
 
         let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
 
@@ -354,20 +355,72 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<&LabelBacktrace<'a>>,
-        _simple: bool,
+        rhs: Option<LabelBacktrace<'a>>,
+        simple: bool,
         location: &Location,
     ) {
-        // TODO: more fine-grained labeling of arrays; for example, if all
-        // accesses are constant (~ literals, e.g. arr[2]), then remember a
-        // mapping index-label. otherwise, for every assignment like arr[x]
-        // (where we can't know x at compile-time), save in the array's symbol
-        // label that label, and then on read union that general/overall label
-        // with the one from the mapping (assuming it's a constant, otherwise
-        // union all the possible mapped values)
+        let index_bt = exprs::visit_single_expr(ctx, &self.index);
 
-        // never simple because we never want to override the entire array based
-        // on just one entry
-        self.expr.assign(ctx, rhs, false, location);
+        let name = match self.expr.as_ref() {
+            ExprNode::Name(name) => name,
+            ExprNode::Indexing(inner) => {
+                // e.g., `arr[2][3] = secret` -- we can't keep track of so many
+                // levels, but we can respect the `arr[2]` part and try to only
+                // affect that index; in practice, this means ignoring the `[3]`
+                // and just recursing to the innermost indexing operation
+
+                // caveat: even though we ignore the `[3]` for fine-grained
+                // array analysis purposes, we still need to consider its label
+                // and merge it with the recursion result, e.g. `arr[2][secret]`
+                let combined = LabelBacktrace::combine_options(
+                    rhs,
+                    index_bt,
+                    LabelBacktraceKind::Expression,
+                    ctx.pin(self.location.clone()),
+                );
+
+                // (simple is false because we never want to overwrite the
+                // entire `arr[2]` since this only concerns part of it: `[3]`)
+                return inner.assign(ctx, combined, false, location);
+            }
+            _ => {
+                // TODO: support more kinds of expressions here
+
+                ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
+                    location: self.location.clone(),
+                });
+
+                return;
+            }
+        };
+
+        let Some(backtrace) = LabelBacktrace::fold(
+            [rhs.as_ref(), index_bt.as_ref(), ctx.branch_backtrace()]
+                .into_iter()
+                .flatten(),
+            LabelBacktraceKind::Assignment,
+            None,
+            ctx.pin(location.clone()),
+        ) else {
+            return;
+        };
+
+        let Some(symbol) = exprs::resolve_operand_name(ctx, name) else {
+            // no symbol found, but error already reported
+            return;
+        };
+
+        let index = exprs::try_resolve_constant_integer(&self.index)
+            .map(usize::try_from)
+            .and_then(Result::ok);
+
+        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
+
+        symbol.borrow_mut().array_set(
+            index,
+            backtrace,
+            simple && in_current_scope,
+            ctx.pin(location.clone()),
+        );
     }
 }

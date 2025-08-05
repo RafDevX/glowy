@@ -472,6 +472,21 @@ impl<'a> LabelBacktrace<'a> {
         .unwrap() // safe because if self exists, label is not Bottom
     }
 
+    /// Unions if both are Some, otherwise returns the only Some, if any.
+    pub(crate) fn combine_options(
+        a: Option<Self>,
+        b: Option<Self>,
+        with_kind: LabelBacktraceKind,
+        at_location: Pinned<Location>,
+    ) -> Option<Self> {
+        match (&a, &b) {
+            (None, None) => None,
+            (Some(_), None) => a,
+            (None, Some(_)) => b,
+            (Some(x), Some(y)) => Some(x.union(y, with_kind, at_location)),
+        }
+    }
+
     /// Realizes synthetic placeholders in the hierarchy to concrete backtraces.
     pub(crate) fn realize(
         &self,

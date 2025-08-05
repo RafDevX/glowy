@@ -133,6 +133,28 @@ fn visit_for_range<'a>(
 
     let rhs_backtraces = exprs::visit_expr(ctx, range_expr);
 
+    // branch backtrace must come before assignment since it'll only take place
+    // if the for loop actually iterates (i.e., range expr is non-empty); e.g.
+    // ```go
+    // secretArr := [0]int{}
+    // x := 7
+    // for x = range secretArr {}
+    // // if x still == 7, secretArr is empty
+    // ```
+    let pushed = if let Some(branch_backtrace) = LabelBacktrace::fold(
+        rhs_backtraces.iter().filter_map(Option::as_ref),
+        LabelBacktraceKind::Branch,
+        None,
+        ctx.pin(header_location.clone()),
+    ) {
+        // necessary because body only executes if range_expr is not empty
+        ctx.push_branch_backtrace(branch_backtrace);
+
+        true
+    } else {
+        false
+    };
+
     if let ForRangeNode::Decl { lhs, .. } = range {
         explicit::visit_raw_binding_decl_spec(
             ctx,
@@ -148,27 +170,13 @@ fn visit_for_range<'a>(
             ctx,
             AssignmentKind::Simple,
             lhs,
-            &rhs_backtraces,
+            rhs_backtraces.into_iter(),
             header_location,
         );
     }
 
     // TODO: `range ch` must update the channel's label wrt to the existing
     // branch label, since it will be depleted only in that condition
-
-    let pushed = if let Some(branch_backtrace) = LabelBacktrace::fold(
-        rhs_backtraces.iter().filter_map(Option::as_ref),
-        LabelBacktraceKind::Branch,
-        None,
-        ctx.pin(header_location.clone()),
-    ) {
-        // necessary because body only executes if range_expr is not empty
-        ctx.push_branch_backtrace(branch_backtrace);
-
-        true
-    } else {
-        false
-    };
 
     // vvv this will create another scope for the for body, which is intended
     super::visit_block(ctx, body);

@@ -183,6 +183,11 @@ pub enum AnalysisErrorKind<'a> {
         /// The immutable symbol.
         symbol: Span<'a>,
     },
+    /// Illegal or unsupported expression used as base for indexing.
+    InvalidIndexingBase {
+        /// Where the indexing was found.
+        location: Location,
+    },
     /// Invalid or unsupported expression used as channel in a send statement.
     IllegalChannelExpression {
         /// Where the illegal expression was found.
@@ -229,6 +234,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::MultiComplexAssignment { .. }
             | Self::InvalidLeftValue { .. }
             | Self::ImmutableLeftValue { .. }
+            | Self::InvalidIndexingBase { .. }
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
             | Self::UnexpectedFallthrough { .. }

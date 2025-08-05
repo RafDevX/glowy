@@ -1,5 +1,5 @@
 use parser::{
-    ast::{ExprNode, IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind},
+    ast::{BinaryOpKind, ExprNode, IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind},
     Location,
 };
 
@@ -36,14 +36,12 @@ pub fn visit_expr<'a>(
             let left = visit_single_expr(ctx, left);
             let right = visit_single_expr(ctx, right);
 
-            let backtrace = match (&left, &right) {
-                (None, None) => None,
-                (Some(_), None) => left,
-                (None, Some(_)) => right,
-                (Some(l), Some(r)) => {
-                    Some(l.union(r, LabelBacktraceKind::Expression, ctx.pin(location.clone())))
-                }
-            };
+            let backtrace = LabelBacktrace::combine_options(
+                left,
+                right,
+                LabelBacktraceKind::Expression,
+                ctx.pin(location.clone()),
+            );
 
             vec![backtrace]
         }
@@ -171,19 +169,48 @@ pub fn visit_indexing<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &IndexingNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    let expr = visit_single_expr(ctx, &node.expr);
-    let index = visit_single_expr(ctx, &node.index);
+    let name = match node.expr.as_ref() {
+        ExprNode::Name(name) => name,
+        ExprNode::Indexing(inner) => {
+            // e.g., `arr[2][3]` -- we can't keep track of so many levels, but
+            // we can respect the `arr[2]` part and try to get information on
+            // that specific index; in practice, this means ignoring the `[3]`
+            // and just recursing to the innermost indexing operation
 
-    match (&expr, &index) {
-        (None, None) => None,
-        (Some(_), None) => expr,
-        (None, Some(_)) => index,
-        (Some(e), Some(i)) => Some(e.union(
-            i,
-            LabelBacktraceKind::Expression,
-            ctx.pin(node.location.clone()),
-        )),
-    }
+            // caveat: even though we ignore the `[3]` for fine-grained array
+            // analysis purposes, we still need to consider its label and merge
+            // it with the recursion result, e.g. for `arr[2][secret]`
+
+            return LabelBacktrace::combine_options(
+                visit_indexing(ctx, inner),
+                visit_single_expr(ctx, &node.index),
+                LabelBacktraceKind::Expression,
+                ctx.pin(node.location.clone()),
+            );
+        }
+        _ => {
+            // TODO: support more kinds of expressions here
+
+            ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
+                location: node.location.clone(),
+            });
+
+            return None;
+        }
+    };
+
+    let Some(symbol) = resolve_operand_name(ctx, name) else {
+        // no symbol found, but error already reported
+        return None;
+    };
+
+    let index = try_resolve_constant_integer(&node.index)
+        .map(usize::try_from)
+        .and_then(Result::ok);
+
+    let borrowed = symbol.borrow();
+
+    borrowed.array_get(index, ctx.pin(node.location.clone()))
 }
 
 pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
@@ -209,4 +236,39 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
             LiteralNode::String { location, .. } => location.clone(),
         },
     }
+}
+
+// basic support for literal-only composition, e.g. `2 + 3` is recognized as 5
+pub fn try_resolve_constant_integer(node: &ExprNode<'_>) -> Option<u64> {
+    let result = match node {
+        ExprNode::Literal(LiteralNode::Int { value, .. }) => *value,
+        ExprNode::UnaryOp {
+            kind: UnaryOpKind::Identity,
+            operand,
+            ..
+        } => try_resolve_constant_integer(operand)?,
+        ExprNode::BinaryOp {
+            kind, left, right, ..
+        } => {
+            let l = try_resolve_constant_integer(left)?;
+            let r = try_resolve_constant_integer(right)?;
+
+            match kind {
+                BinaryOpKind::Sum => l.saturating_add(r),
+                BinaryOpKind::Diff => l.saturating_sub(r),
+                BinaryOpKind::Product => l.saturating_mul(r),
+                BinaryOpKind::Quotient if r != 0 => l.saturating_div(r),
+                BinaryOpKind::Remainder => l % r,
+                BinaryOpKind::ShiftLeft => l << r,
+                BinaryOpKind::ShiftRight => l >> r,
+                BinaryOpKind::BitwiseOr => l | r,
+                BinaryOpKind::BitwiseAnd => l & r,
+                BinaryOpKind::BitwiseXor => l ^ r,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+
+    Some(result)
 }

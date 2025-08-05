@@ -41,12 +41,18 @@
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
 
-use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    fmt,
+    path::PathBuf,
+    rc::Rc,
+};
 
-use parser::{ast::FunctionSignatureNode, Span};
+use parser::{ast::FunctionSignatureNode, Location, Span};
 
 use crate::{
-    labels::{FunctionRef, LabelBacktrace},
+    labels::{FunctionRef, LabelBacktrace, LabelBacktraceKind},
     FullPackagePath, Pinned,
 };
 
@@ -419,6 +425,8 @@ pub struct Symbol<'a> {
     label_backtrace: Option<LabelBacktrace<'a>>,
     /// If this symbol points to a function, its details relevant to analysis
     func_metadata: Option<FunctionMetadataRef<'a>>,
+    /// If an array, index-specific labels, to union with the overall backtrace
+    array_mapping: HashMap<usize, LabelBacktrace<'a>>,
 }
 
 impl<'a> Symbol<'a> {
@@ -432,6 +440,7 @@ impl<'a> Symbol<'a> {
             mutable,
             label_backtrace,
             func_metadata: None,
+            array_mapping: HashMap::new(),
         }
     }
 
@@ -478,6 +487,55 @@ impl<'a> Symbol<'a> {
 
     pub fn set_func_metadata(&mut self, func_metadata: FunctionMetadataRef<'a>) {
         self.func_metadata = Some(func_metadata);
+    }
+
+    pub fn array_get(
+        &self,
+        index: Option<usize>,
+        at_location: Pinned<Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        let mut children = vec![];
+        children.extend(self.label_backtrace());
+
+        if let Some(i) = index {
+            children.extend(self.array_mapping.get(&i));
+        } else {
+            // since we don't know the concrete index, we must take the union of
+            // all possibilities, i.e., all entries of array_mapping
+            children.extend(self.array_mapping.values());
+        };
+
+        LabelBacktrace::fold(children, LabelBacktraceKind::Expression, None, at_location)
+    }
+
+    pub fn array_set(
+        &mut self,
+        index: Option<usize>,
+        backtrace: LabelBacktrace<'a>,
+        overwrite: bool,
+        at_location: Pinned<Location>,
+    ) {
+        if let Some(i) = index {
+            match self.array_mapping.entry(i) {
+                Entry::Occupied(mut e) if !overwrite => {
+                    e.insert(e.get().union(
+                        &backtrace,
+                        LabelBacktraceKind::Assignment,
+                        at_location,
+                    ));
+                }
+                _ => {
+                    self.array_mapping.insert(i, backtrace);
+                }
+            };
+        } else {
+            self.label_backtrace = LabelBacktrace::combine_options(
+                self.label_backtrace.take(),
+                Some(backtrace),
+                LabelBacktraceKind::Assignment,
+                at_location,
+            );
+        }
     }
 }
 
