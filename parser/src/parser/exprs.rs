@@ -1,7 +1,10 @@
 use self::postfix::parse_postfix_if_exists;
 use super::{expect, PResult};
 use crate::{
-    ast::{ExprNode, LiteralNode, OperandNameNode},
+    ast::{
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
+        OperandNameNode,
+    },
     parser::{of_kind, types::parse_type, BacktrackingContext},
     token::{Token, TokenKind},
     ParsingError, TokenStream,
@@ -49,7 +52,32 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
 
     let element = parse_type(s)?;
 
-    expect(s, TokenKind::CurlyL, Some("array/slice literal"))?;
+    let values = parse_composite_literal_element_list(s)?;
+
+    let location = s.location_since(&beginning);
+
+    let literal = if slice {
+        LiteralNode::Slice {
+            element,
+            values,
+            location,
+        }
+    } else {
+        LiteralNode::Array {
+            length,
+            element,
+            values,
+            location,
+        }
+    };
+
+    Ok(literal)
+}
+
+fn parse_composite_literal_element_list<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, CompositeLiteralElementListNode<'a, usize>> {
+    expect(s, TokenKind::CurlyL, Some("composite literal"))?;
 
     let mut values = vec![];
 
@@ -59,6 +87,11 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
             first = false;
         } else {
             expect(s, TokenKind::Comma, Some("element list"))?;
+
+            // if this was just a trailing comma, we need to bail
+            if let Some(Ok(of_kind!(TokenKind::CurlyR))) = s.peek() {
+                break;
+            }
         }
 
         // elements can be either alone or with an integer literal key, but we
@@ -85,36 +118,18 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
             None
         };
 
-        let value = parse_expression(s)?;
-        // ^ FIXME: doesn't support nested literals like {{0, 1}, {1, 2}}
+        let value = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+            CompositeLiteralElementNode::Nested(parse_composite_literal_element_list(s)?)
+        } else {
+            CompositeLiteralElementNode::Expr(parse_expression(s)?)
+        };
 
         values.push((key, value));
     }
 
-    if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
-        s.next(); // skip optional trailing comma
-    }
+    expect(s, TokenKind::CurlyR, Some("composite literal"))?;
 
-    expect(s, TokenKind::CurlyR, Some("array/slice literal"))?;
-
-    let location = s.location_since(&beginning);
-
-    let literal = if slice {
-        LiteralNode::Slice {
-            element,
-            values,
-            location,
-        }
-    } else {
-        LiteralNode::Array {
-            length,
-            element,
-            values,
-            location,
-        }
-    };
-
-    Ok(literal)
+    Ok(values)
 }
 
 pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {

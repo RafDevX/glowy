@@ -220,15 +220,24 @@ pub enum LiteralNode<'a> {
     Array {
         length: Option<Box<ExprNode<'a>>>, // None if [...]int
         element: TypeNode<'a>,
-        values: Vec<(Option<usize>, ExprNode<'a>)>, // FIXME: support nested {}s
+        values: CompositeLiteralElementListNode<'a, usize>,
         location: Location,
     },
     Slice {
         element: TypeNode<'a>,
-        values: Vec<(Option<usize>, ExprNode<'a>)>, // FIXME: support nested {}s
+        values: CompositeLiteralElementListNode<'a, usize>,
         location: Location,
     },
     // Struct, Map
+}
+
+pub type CompositeLiteralElementListNode<'a, K, N = K> =
+    Vec<(Option<K>, CompositeLiteralElementNode<'a, N>)>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CompositeLiteralElementNode<'a, K, N = K> {
+    Expr(ExprNode<'a>),
+    Nested(Vec<(Option<K>, CompositeLiteralElementNode<'a, N>)>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
