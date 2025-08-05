@@ -223,7 +223,12 @@ pub enum LiteralNode<'a> {
         values: Vec<(Option<usize>, ExprNode<'a>)>, // FIXME: support nested {}s
         location: Location,
     },
-    // Struct, Slice, Map
+    Slice {
+        element: TypeNode<'a>,
+        values: Vec<(Option<usize>, ExprNode<'a>)>, // FIXME: support nested {}s
+        location: Location,
+    },
+    // Struct, Map
 }
 
 #[derive(Clone, Debug, PartialEq)]

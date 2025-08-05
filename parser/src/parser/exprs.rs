@@ -32,22 +32,24 @@ fn parse_operand_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, OperandNameNod
     })
 }
 
-fn parse_array_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
-    let beginning = expect(s, TokenKind::SquareL, Some("array literal"))?;
+fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let beginning = expect(s, TokenKind::SquareL, Some("array/slice literal"))?;
 
-    let length = if let Some(Ok(of_kind!(TokenKind::Ellipsis))) = s.peek() {
-        s.next(); // advance
+    let (slice, length) = match s.peek().cloned().transpose()? {
+        Some(of_kind!(TokenKind::Ellipsis)) => {
+            s.next(); // advance
 
-        None
-    } else {
-        Some(Box::new(parse_expression(s)?))
+            (false, None)
+        }
+        Some(of_kind!(TokenKind::SquareR)) => (true, None),
+        _ => (false, Some(Box::new(parse_expression(s)?))),
     };
 
-    expect(s, TokenKind::SquareR, Some("array literal"))?;
+    expect(s, TokenKind::SquareR, Some("array/slice literal"))?;
 
     let element = parse_type(s)?;
 
-    expect(s, TokenKind::CurlyL, Some("array literal"))?;
+    expect(s, TokenKind::CurlyL, Some("array/slice literal"))?;
 
     let mut values = vec![];
 
@@ -93,14 +95,26 @@ fn parse_array_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'
         s.next(); // skip optional trailing comma
     }
 
-    expect(s, TokenKind::CurlyR, Some("array literal"))?;
+    expect(s, TokenKind::CurlyR, Some("array/slice literal"))?;
 
-    Ok(LiteralNode::Array {
-        length,
-        element,
-        values,
-        location: s.location_since(&beginning),
-    })
+    let location = s.location_since(&beginning);
+
+    let literal = if slice {
+        LiteralNode::Slice {
+            element,
+            values,
+            location,
+        }
+    } else {
+        LiteralNode::Array {
+            length,
+            element,
+            values,
+            location,
+        }
+    };
+
+    Ok(literal)
 }
 
 pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
@@ -142,7 +156,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             }
             .into()
         }
-        Some(of_kind!(TokenKind::SquareL)) => parse_array_literal(s)?.into(),
+        Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_literal(s)?.into(),
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance
             let inner = parse_expression(s)?;
