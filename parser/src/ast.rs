@@ -68,6 +68,9 @@ pub enum TypeNode<'a> {
         length: Box<ExprNode<'a>>,
         element: Box<TypeNode<'a>>,
     },
+    Slice {
+        element: Box<TypeNode<'a>>,
+    },
     // TODO: Literal
 }
 

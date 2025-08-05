@@ -84,16 +84,25 @@ pub fn parse_channel_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'
     Ok(TypeNode::Channel { r#type, direction })
 }
 
-fn parse_array_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
-    expect(s, TokenKind::SquareL, Some("array type"))?;
+fn parse_array_or_slice_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+    expect(s, TokenKind::SquareL, Some("arrays/slice type"))?;
 
-    let length = Box::new(parse_expression(s)?);
+    let length = if let Some(Ok(of_kind!(TokenKind::SquareR))) = s.peek() {
+        // slice
+        None
+    } else {
+        Some(Box::new(parse_expression(s)?))
+    };
 
-    expect(s, TokenKind::SquareR, Some("array type"))?;
+    expect(s, TokenKind::SquareR, Some("array/slice type"))?;
 
     let element = Box::new(parse_type(s)?);
 
-    Ok(TypeNode::Array { length, element })
+    if let Some(length) = length {
+        Ok(TypeNode::Array { length, element })
+    } else {
+        Ok(TypeNode::Slice { element })
+    }
 }
 
 pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
@@ -104,7 +113,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
             expect(s, TokenKind::ParenR, Some("parenthesized type"))?;
             Ok(inner)
         }
-        Some(of_kind!(TokenKind::SquareL)) => parse_array_type(s),
+        Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
         Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
         found => Err(ParsingError::UnexpectedConstruct {
