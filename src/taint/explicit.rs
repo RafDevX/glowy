@@ -54,7 +54,9 @@ fn visit_binding_decl_spec<'a>(
     let backtraces = match node.exprs.as_slice() {
         // vvv case where `var a, b = f()` with `f` returning multiple values
         // (note: `const` cannot do this - we check `mutable` as a heuristic)
-        [ExprNode::Call(call)] if node.ids.len() > 1 && mutable => funcs::visit_call(ctx, call),
+        [ExprNode::Call(call)] if node.ids.len() > 1 && mutable => {
+            Vec::from(funcs::visit_call(ctx, call))
+        }
         _ => node
             .exprs
             .iter()
@@ -202,7 +204,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
     let rhs_backtraces = match node.rhs.as_slice() {
         // vvv case where `a, b = f()` with `f` returning multiple values
-        [ExprNode::Call(call)] if node.lhs.len() > 1 => funcs::visit_call(ctx, call),
+        [ExprNode::Call(call)] if node.lhs.len() > 1 => Vec::from(funcs::visit_call(ctx, call)),
         _ => node
             .rhs
             .iter()

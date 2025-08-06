@@ -9,24 +9,49 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
-    Pinned,
 };
 
-pub fn visit_expr<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    node: &ExprNode<'a>,
-) -> Vec<Option<LabelBacktrace<'a>>> {
+pub enum ExprLabel<'a> {
+    Void,
+    Single(Option<LabelBacktrace<'a>>),
+    Multi(Vec<Option<LabelBacktrace<'a>>>),
+    MultiWithPrimary {
+        primary: Option<LabelBacktrace<'a>>,
+        secondary: Vec<Option<LabelBacktrace<'a>>>,
+        // ^ secondary may be discarded if only a single value is accepted
+    },
+}
+
+impl<'a> From<ExprLabel<'a>> for Vec<Option<LabelBacktrace<'a>>> {
+    fn from(e: ExprLabel<'a>) -> Self {
+        match e {
+            ExprLabel::Void => vec![],
+            ExprLabel::Single(bt) => vec![bt],
+            ExprLabel::Multi(all) => all,
+            ExprLabel::MultiWithPrimary {
+                primary,
+                mut secondary,
+            } => {
+                secondary.insert(0, primary);
+
+                secondary
+            }
+        }
+    }
+}
+
+pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> ExprLabel<'a> {
     match node {
-        ExprNode::Name(name) => vec![visit_operand_name(ctx, name)],
-        ExprNode::Literal(_) => vec![None],
+        ExprNode::Name(name) => ExprLabel::Single(visit_operand_name(ctx, name)),
+        ExprNode::Literal(_) => ExprLabel::Single(None),
         ExprNode::Call(call) => funcs::visit_call(ctx, call),
-        ExprNode::Indexing(indexing) => vec![visit_indexing(ctx, indexing)],
+        ExprNode::Indexing(indexing) => ExprLabel::Single(visit_indexing(ctx, indexing)),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
             location,
-        } => vec![channels::visit_receive(ctx, operand, location)],
-        ExprNode::UnaryOp { operand, .. } => vec![visit_single_expr(ctx, operand)],
+        } => ExprLabel::Single(channels::visit_receive(ctx, operand, location)),
+        ExprNode::UnaryOp { operand, .. } => ExprLabel::Single(visit_single_expr(ctx, operand)),
         ExprNode::BinaryOp {
             left,
             right,
@@ -43,7 +68,7 @@ pub fn visit_expr<'a>(
                 ctx.pin(location.clone()),
             );
 
-            vec![backtrace]
+            ExprLabel::Single(backtrace)
         }
     }
 }
@@ -52,62 +77,34 @@ pub fn visit_single_expr<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &ExprNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    let mut iter = visit_expr(ctx, node).into_iter();
+    match visit_expr(ctx, node) {
+        ExprLabel::Void => {
+            let location = get_expr_location(node);
 
-    let first = iter.next();
-    let second = iter.next();
-
-    if first.is_some() && second.is_none() {
-        #[allow(clippy::unnecessary_unwrap)]
-        let single = first.unwrap();
-        // ^ clippy would rather us use something more idiomatic like
-        // `if let (Some(single), None) = (&first, &second)`, but that would
-        // require us always cloning single (since first must be a ref or
-        // otherwise it can't be used in else-branch below). We want to prevent
-        // cloning since the if-branch should be much more common than the else,
-        // so unwrapping here seems fine. We also must assign to a `single`
-        // variable before returning `single` since attributes on expressions
-        // are experimental (and not on statements), and we need to add the
-        // clippy allow attribute for it to leave us be
-
-        single
-    } else {
-        // we merge all of them into a single backtrace to proceed
-
-        let children: Vec<_> = [first, second]
-            .into_iter()
-            .flatten()
-            .chain(iter)
-            .flatten()
-            .collect();
-
-        let location = children
-            .iter()
-            .map(LabelBacktrace::location)
-            .map(Pinned::inner) // assumes all children are in same file!!
-            .cloned()
-            .reduce(|acc, loc| {
-                let start = acc.start.min(loc.start);
-                let end = acc.end.max(loc.end);
-
-                start..end
+            ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
+                location: location.clone(),
             });
 
-        if let Some(location) = location {
+            None
+        }
+        ExprLabel::Single(bt) => bt,
+        ExprLabel::Multi(all) => {
+            let location = get_expr_location(node);
+
             ctx.report_error(AnalysisErrorKind::UnexpectedMultiValueExpression {
                 location: location.clone(),
             });
 
+            // in order to keep going, we just join all the labels
+            // together, even though this is not correct Go
             LabelBacktrace::fold(
-                &children,
+                all.iter().flatten(),
                 LabelBacktraceKind::Expression,
                 None,
                 ctx.pin(location),
             )
-        } else {
-            // only happens if children are empty, where `fold` would return None anyway
-            None
         }
+        ExprLabel::MultiWithPrimary { primary, .. } => primary,
     }
 }
 
@@ -165,7 +162,7 @@ pub fn resolve_operand_name<'a>(
     symbol
 }
 
-pub fn visit_indexing<'a>(
+fn visit_indexing<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &IndexingNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {

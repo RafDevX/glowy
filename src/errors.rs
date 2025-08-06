@@ -207,6 +207,11 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
+    /// Usage of an expression with no value when a single-value was expected.
+    UnexpectedVoidExpression {
+        /// Where the expression was found.
+        location: Location,
+    },
     /// Usage of a multi-value expression when a single-value was expected.
     UnexpectedMultiValueExpression {
         /// Where the expression was found.
@@ -238,6 +243,7 @@ impl<'a> AnalysisErrorKind<'a> {
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
             | Self::UnexpectedFallthrough { .. }
+            | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
         }

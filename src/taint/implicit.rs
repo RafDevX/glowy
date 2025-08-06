@@ -131,7 +131,7 @@ fn visit_for_range<'a>(
         ForRangeNode::None { range_expr } => range_expr,
     };
 
-    let rhs_backtraces = exprs::visit_expr(ctx, range_expr);
+    let rhs_backtraces = Vec::from(exprs::visit_expr(ctx, range_expr));
 
     // branch backtrace must come before assignment since it'll only take place
     // if the for loop actually iterates (i.e., range expr is non-empty); e.g.

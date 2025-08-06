@@ -11,7 +11,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
     symbols::{FunctionMetadata, FunctionMetadataRef, Symbol},
-    taint::exprs,
+    taint::exprs::{self, ExprLabel},
 };
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
@@ -113,7 +113,7 @@ fn calculate_outcome<'a>(
     // below applies and that function call's outcome is the final outcome
     // (case 2 from https://go.dev/ref/spec#Return_statements)
     if let [ExprNode::Call(call)] = exprs {
-        return visit_call(ctx, call);
+        return visit_call(ctx, call).into();
     }
 
     let mut outcome = vec![];
@@ -153,12 +153,9 @@ fn calculate_outcome<'a>(
     outcome
 }
 
-pub fn visit_call<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    node: &CallNode<'a>,
-) -> Vec<Option<LabelBacktrace<'a>>> {
+pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ExprLabel<'a> {
     let Some(metadata) = func_metadata_from_call_expr(ctx, &node.func) else {
-        return vec![]; // error already reported, or builtin
+        return ExprLabel::Void; // error already reported, or builtin
     };
     let borrowed = metadata.borrow();
     let params = &borrowed.signature().params;
@@ -173,7 +170,7 @@ pub fn visit_call<'a>(
                 location: node.location.clone(),
             });
 
-            return vec![];
+            return ExprLabel::Void;
         }
     }
 
@@ -236,7 +233,15 @@ pub fn visit_call<'a>(
         result.push(realized.unwrap_or_else(|| component.clone()));
     }
 
-    result
+    if result.is_empty() {
+        ExprLabel::Void
+    } else if result.len() == 1 {
+        // don't like the unwrap, but can't do this with pattern matching while
+        // taking ownership if single and leaving Vec intact if multi
+        ExprLabel::Single(result.into_iter().next().unwrap())
+    } else {
+        ExprLabel::Multi(result)
+    }
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
