@@ -11,55 +11,85 @@ use crate::{
     symbols::SymbolRef,
 };
 
+#[derive(Debug)]
 pub enum ExprLabel<'a> {
     Void,
-    Single(Option<LabelBacktrace<'a>>),
+    Simple(Option<LabelBacktrace<'a>>),
     Multi(Vec<Option<LabelBacktrace<'a>>>),
     MultiWithPrimary {
         primary: Option<LabelBacktrace<'a>>,
         secondary: Vec<Option<LabelBacktrace<'a>>>,
         // ^ secondary may be discarded if only a single value is accepted
     },
+    ArrayIndices(HashMap<usize, LabelBacktrace<'a>>),
 }
 
-impl<'a> From<ExprLabel<'a>> for Vec<Option<LabelBacktrace<'a>>> {
-    fn from(e: ExprLabel<'a>) -> Self {
-        match e {
-            ExprLabel::Void => vec![],
-            ExprLabel::Single(bt) => vec![bt],
-            ExprLabel::Multi(all) => all,
-            ExprLabel::MultiWithPrimary {
-                primary,
-                mut secondary,
-            } => {
-                secondary.insert(0, primary);
+/// Represents an exact number of values, without any special formats.
+// sadly we cannot use the `subenum` crate to make this less verbose;
+// see: https://github.com/paholg/subenum/issues/48
+#[derive(Debug)]
+pub enum OrdinaryExprLabel<'a> {
+    Void,
+    Simple(Option<LabelBacktrace<'a>>),
+    Multi(Vec<Option<LabelBacktrace<'a>>>),
+}
 
-                secondary
-            }
+impl<'a> From<OrdinaryExprLabel<'a>> for Vec<Option<LabelBacktrace<'a>>> {
+    fn from(ordinary: OrdinaryExprLabel<'a>) -> Self {
+        match ordinary {
+            OrdinaryExprLabel::Void => vec![],
+            OrdinaryExprLabel::Simple(bt) => vec![bt],
+            OrdinaryExprLabel::Multi(all) => all,
+        }
+    }
+}
+
+impl<'a> From<OrdinaryExprLabel<'a>> for ExprLabel<'a> {
+    fn from(ordinary: OrdinaryExprLabel<'a>) -> Self {
+        match ordinary {
+            OrdinaryExprLabel::Void => Self::Void,
+            OrdinaryExprLabel::Simple(bt) => Self::Simple(bt),
+            OrdinaryExprLabel::Multi(all) => Self::Multi(all),
+        }
+    }
+}
+
+/// Represents exactly one value.
+// sadly we cannot use the `subenum` crate to make this less verbose;
+// see: https://github.com/paholg/subenum/issues/48
+#[derive(Debug)]
+pub enum SingleExprLabel<'a> {
+    Simple(Option<LabelBacktrace<'a>>),
+}
+
+impl<'a> From<SingleExprLabel<'a>> for Option<LabelBacktrace<'a>> {
+    fn from(single: SingleExprLabel<'a>) -> Self {
+        match single {
+            SingleExprLabel::Simple(bt) => bt,
         }
     }
 }
 
 pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> ExprLabel<'a> {
     match node {
-        ExprNode::Name(name) => ExprLabel::Single(visit_operand_name(ctx, name)),
-        ExprNode::Literal(_) => ExprLabel::Single(None),
-        ExprNode::Call(call) => funcs::visit_call(ctx, call),
-        ExprNode::Indexing(indexing) => ExprLabel::Single(visit_indexing(ctx, indexing)),
+        ExprNode::Name(name) => ExprLabel::Simple(visit_operand_name(ctx, name)),
+        ExprNode::Literal(lit) => visit_literal(ctx, lit),
+        ExprNode::Call(call) => funcs::visit_call(ctx, call).into(),
+        ExprNode::Indexing(indexing) => ExprLabel::Simple(visit_indexing(ctx, indexing)),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
             location,
-        } => ExprLabel::Single(channels::visit_receive(ctx, operand, location)),
-        ExprNode::UnaryOp { operand, .. } => ExprLabel::Single(visit_single_expr(ctx, operand)),
+        } => ExprLabel::Simple(channels::visit_receive(ctx, operand, location)),
+        ExprNode::UnaryOp { operand, .. } => ExprLabel::Simple(visit_simple_expr(ctx, operand)),
         ExprNode::BinaryOp {
             left,
             right,
             location,
             ..
         } => {
-            let left = visit_single_expr(ctx, left);
-            let right = visit_single_expr(ctx, right);
+            let left = visit_simple_expr(ctx, left);
+            let right = visit_simple_expr(ctx, right);
 
             let backtrace = LabelBacktrace::combine_options(
                 left,
@@ -68,7 +98,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Exp
                 ctx.pin(location.clone()),
             );
 
-            ExprLabel::Single(backtrace)
+            ExprLabel::Simple(backtrace)
         }
     }
 }
@@ -76,18 +106,19 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Exp
 pub fn visit_single_expr<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &ExprNode<'a>,
-) -> Option<LabelBacktrace<'a>> {
+) -> SingleExprLabel<'a> {
     match visit_expr(ctx, node) {
-        ExprLabel::Void => {
-            let location = get_expr_location(node);
+        // already a single value
+        ExprLabel::Simple(bt) => SingleExprLabel::Simple(bt),
 
+        // not a single value, need to convert and maybe error
+        ExprLabel::Void => {
             ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
-                location: location.clone(),
+                location: get_expr_location(node),
             });
 
-            None
+            SingleExprLabel::Simple(None)
         }
-        ExprLabel::Single(bt) => bt,
         ExprLabel::Multi(all) => {
             let location = get_expr_location(node);
 
@@ -97,15 +128,22 @@ pub fn visit_single_expr<'a>(
 
             // in order to keep going, we just join all the labels
             // together, even though this is not correct Go
-            LabelBacktrace::fold(
+            SingleExprLabel::Simple(LabelBacktrace::fold(
                 all.iter().flatten(),
                 LabelBacktraceKind::Expression,
                 None,
                 ctx.pin(location),
-            )
+            ))
         }
-        ExprLabel::MultiWithPrimary { primary, .. } => primary,
+        ExprLabel::MultiWithPrimary { primary, .. } => SingleExprLabel::Simple(primary),
     }
+}
+
+pub fn visit_simple_expr<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &ExprNode<'a>,
+) -> Option<LabelBacktrace<'a>> {
+    visit_single_expr(ctx, node).into()
 }
 
 pub fn visit_operand_name<'a>(
@@ -162,6 +200,15 @@ pub fn resolve_operand_name<'a>(
     symbol
 }
 
+fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> ExprLabel<'a> {
+    match node {
+        LiteralNode::Int { .. }
+        | LiteralNode::Float { .. }
+        | LiteralNode::Rune { .. }
+        | LiteralNode::String { .. } => ExprLabel::Simple(None),
+    }
+}
+
 fn visit_indexing<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &IndexingNode<'a>,
@@ -180,7 +227,7 @@ fn visit_indexing<'a>(
 
             return LabelBacktrace::combine_options(
                 visit_indexing(ctx, inner),
-                visit_single_expr(ctx, &node.index),
+                visit_simple_expr(ctx, &node.index),
                 LabelBacktraceKind::Expression,
                 ctx.pin(node.location.clone()),
             );

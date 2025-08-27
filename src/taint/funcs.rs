@@ -11,7 +11,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
     symbols::{FunctionMetadata, FunctionMetadataRef, Symbol},
-    taint::exprs::{self, ExprLabel},
+    taint::exprs::{self, OrdinaryExprLabel},
 };
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
@@ -136,7 +136,7 @@ fn calculate_outcome<'a>(
     };
 
     for expr in &exprs {
-        let expr_backtrace = exprs::visit_single_expr(ctx, expr);
+        let expr_backtrace = exprs::visit_simple_expr(ctx, expr);
 
         let backtrace = LabelBacktrace::fold(
             [expr_backtrace.as_ref(), ctx.branch_backtrace()]
@@ -153,9 +153,9 @@ fn calculate_outcome<'a>(
     outcome
 }
 
-pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ExprLabel<'a> {
+pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> OrdinaryExprLabel<'a> {
     let Some(metadata) = func_metadata_from_call_expr(ctx, &node.func) else {
-        return ExprLabel::Void; // error already reported, or builtin
+        return OrdinaryExprLabel::Void; // error already reported, or builtin
     };
     let borrowed = metadata.borrow();
     let params = &borrowed.signature().params;
@@ -170,7 +170,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Exp
                 location: node.location.clone(),
             });
 
-            return ExprLabel::Void;
+            return OrdinaryExprLabel::Void;
         }
     }
 
@@ -212,7 +212,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Exp
             let concrete = if variadic {
                 let children: Vec<_> = node.args[index..]
                     .iter()
-                    .filter_map(|arg| exprs::visit_single_expr(ctx, arg))
+                    .filter_map(|arg| exprs::visit_simple_expr(ctx, arg))
                     .collect();
 
                 LabelBacktrace::fold(
@@ -224,7 +224,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Exp
             } else {
                 let arg = node.args.get(index).expect("already checked arg count");
 
-                exprs::visit_single_expr(ctx, arg)
+                exprs::visit_simple_expr(ctx, arg)
             };
 
             realized = Some(backtrace.realize(borrowed.func_ref(), index, concrete.as_ref()));
@@ -234,13 +234,13 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Exp
     }
 
     if result.is_empty() {
-        ExprLabel::Void
+        OrdinaryExprLabel::Void
     } else if result.len() == 1 {
         // don't like the unwrap, but can't do this with pattern matching while
         // taking ownership if single and leaving Vec intact if multi
-        ExprLabel::Single(result.into_iter().next().unwrap())
+        OrdinaryExprLabel::Simple(result.into_iter().next().unwrap())
     } else {
-        ExprLabel::Multi(result)
+        OrdinaryExprLabel::Multi(result)
     }
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with

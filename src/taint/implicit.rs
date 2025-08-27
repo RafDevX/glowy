@@ -12,7 +12,10 @@ use crate::{
     context::{AnalysisContext, DeferTarget},
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
-    taint::{explicit, exprs},
+    taint::{
+        explicit,
+        exprs::{self, SingleExprLabel},
+    },
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -25,7 +28,7 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
         super::visit_statement(ctx, statement);
     }
 
-    let pushed = if let Some(expr_backtrace) = exprs::visit_single_expr(ctx, &node.cond) {
+    let pushed = if let Some(expr_backtrace) = exprs::visit_simple_expr(ctx, &node.cond) {
         ctx.push_branch_backtrace(expr_backtrace.into_single_child(
             LabelBacktraceKind::Branch,
             None,
@@ -88,7 +91,7 @@ fn visit_for_clause<'a>(
     }
 
     let pushed = if let Some(cond) = &clause.cond {
-        if let Some(cond_backtrace) = exprs::visit_single_expr(ctx, cond) {
+        if let Some(cond_backtrace) = exprs::visit_simple_expr(ctx, cond) {
             ctx.push_branch_backtrace(cond_backtrace.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
@@ -131,7 +134,9 @@ fn visit_for_range<'a>(
         ForRangeNode::None { range_expr } => range_expr,
     };
 
-    let rhs_backtraces = Vec::from(exprs::visit_expr(ctx, range_expr));
+    // FIXME: this is incorrect; need to decide 1 or 2 values based on table in
+    // spec; see https://go.dev/ref/spec#For_range
+    let rhs_backtraces = vec![exprs::visit_simple_expr(ctx, range_expr)];
 
     // branch backtrace must come before assignment since it'll only take place
     // if the for loop actually iterates (i.e., range expr is non-empty); e.g.
@@ -170,7 +175,7 @@ fn visit_for_range<'a>(
             ctx,
             AssignmentKind::Simple,
             lhs,
-            rhs_backtraces.into_iter(),
+            rhs_backtraces.into_iter().map(SingleExprLabel::Simple), // FIXME: not really this
             header_location,
         );
     }
@@ -236,7 +241,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
     let mut n_pushes = 0;
 
     if let Some(expr) = &node.expr {
-        if let Some(bt) = exprs::visit_single_expr(ctx, expr) {
+        if let Some(bt) = exprs::visit_simple_expr(ctx, expr) {
             ctx.push_branch_backtrace(bt.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
@@ -251,7 +256,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         let children: Vec<_> = clause
             .exprs
             .iter()
-            .filter_map(|expr| exprs::visit_single_expr(ctx, expr))
+            .filter_map(|expr| exprs::visit_simple_expr(ctx, expr))
             .collect();
 
         let folded = LabelBacktrace::fold(
@@ -304,7 +309,7 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
         super::visit_statement(ctx, stmt);
     }
 
-    let pushed = if let Some(bt) = exprs::visit_single_expr(ctx, &node.expr) {
+    let pushed = if let Some(bt) = exprs::visit_simple_expr(ctx, &node.expr) {
         if let Some(id) = &node.decl {
             ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id.clone()), true, Some(bt.clone())));
         }

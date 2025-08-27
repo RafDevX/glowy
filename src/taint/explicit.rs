@@ -14,7 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
-    taint::funcs,
+    taint::{exprs::SingleExprLabel, funcs},
 };
 
 pub fn visit_binding_decl<'a>(
@@ -60,7 +60,7 @@ fn visit_binding_decl_spec<'a>(
         _ => node
             .exprs
             .iter()
-            .map(|expr| exprs::visit_single_expr(ctx, expr))
+            .map(|expr| exprs::visit_simple_expr(ctx, expr))
             .collect(),
     };
 
@@ -204,7 +204,9 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
     let rhs_backtraces = match node.rhs.as_slice() {
         // vvv case where `a, b = f()` with `f` returning multiple values
-        [ExprNode::Call(call)] if node.lhs.len() > 1 => Vec::from(funcs::visit_call(ctx, call)),
+        [call @ ExprNode::Call(_)] if node.lhs.len() > 1 => {
+            vec![exprs::visit_single_expr(ctx, call)]
+        }
         _ => node
             .rhs
             .iter()
@@ -226,21 +228,21 @@ pub fn visit_raw_assignment<'a>(
     ctx: &mut AnalysisContext<'a>,
     kind: AssignmentKind,
     lhs_exprs: &[ExprNode<'a>],
-    rhs_backtraces: impl ExactSizeIterator<Item = Option<LabelBacktrace<'a>>>,
+    rhs_values: impl ExactSizeIterator<Item = SingleExprLabel<'a>>,
     location: &Location,
 ) {
-    if lhs_exprs.len() != rhs_backtraces.len() {
+    if lhs_exprs.len() != rhs_values.len() {
         ctx.report_error(AnalysisErrorKind::UnevenAssignment {
             location: location.clone(),
             left: lhs_exprs.len(),
-            right: rhs_backtraces.len(),
+            right: rhs_values.len(),
         });
 
         return;
     }
 
-    for (lhs, rhs_backtrace) in lhs_exprs.iter().zip(rhs_backtraces) {
-        lhs.assign(ctx, rhs_backtrace, kind == AssignmentKind::Simple, location);
+    for (lhs, rhs) in lhs_exprs.iter().zip(rhs_values) {
+        lhs.assign(ctx, rhs, kind == AssignmentKind::Simple, location);
     }
 }
 
@@ -269,7 +271,7 @@ trait LeftValue<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<LabelBacktrace<'a>>,
+        rhs: SingleExprLabel<'a>,
         simple: bool,
         location: &Location,
     );
@@ -282,7 +284,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<LabelBacktrace<'a>>,
+        rhs: SingleExprLabel<'a>,
         simple: bool,
         location: &Location,
     ) {
@@ -306,7 +308,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<LabelBacktrace<'a>>,
+        rhs: SingleExprLabel<'a>,
         simple: bool,
         location: &Location,
     ) {
@@ -323,11 +325,15 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
             return;
         }
 
-        let mut children = vec![rhs.as_ref(), ctx.branch_backtrace()];
-
         let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
 
         let mut borrowed = symbol.borrow_mut();
+
+        let rhs_backtrace = match rhs {
+            SingleExprLabel::Simple(bt) => bt,
+        };
+
+        let mut children = vec![rhs_backtrace.as_ref(), ctx.branch_backtrace()];
 
         if !simple || !in_current_scope {
             // for complex assignments like `x += y` we need to keep x's label,
@@ -357,11 +363,14 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: Option<LabelBacktrace<'a>>,
+        rhs: SingleExprLabel<'a>,
         simple: bool,
         location: &Location,
     ) {
-        let index_bt = exprs::visit_single_expr(ctx, &self.index);
+        // we don't do anything special here, so we just want the raw backtrace
+        let rhs = rhs.into();
+
+        let index_bt = exprs::visit_simple_expr(ctx, &self.index);
 
         let name = match self.expr.as_ref() {
             ExprNode::Name(name) => name,
@@ -383,7 +392,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
 
                 // (simple is false because we never want to overwrite the
                 // entire `arr[2]` since this only concerns part of it: `[3]`)
-                return inner.assign(ctx, combined, false, location);
+                return inner.assign(ctx, SingleExprLabel::Simple(combined), false, location);
             }
             _ => {
                 // TODO: support more kinds of expressions here

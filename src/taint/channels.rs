@@ -19,7 +19,7 @@ pub fn visit_receive<'a>(
     // otherwise "has a value been read" or "has the channel been depleted" can
     // be used to exfiltrate information
 
-    exprs::visit_single_expr(ctx, operand).map(|child| {
+    exprs::visit_simple_expr(ctx, operand).map(|child| {
         child.into_single_child(LabelBacktraceKind::Receive, None, ctx.pin(location.clone()))
     })
 }
@@ -43,7 +43,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
     };
 
     let borrowed = symbol.borrow();
-    let expr_backtrace = exprs::visit_single_expr(ctx, &node.expr);
+    let expr_backtrace = exprs::visit_simple_expr(ctx, &node.expr);
 
     let backtrace = LabelBacktrace::fold(
         [
