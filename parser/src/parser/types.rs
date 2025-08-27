@@ -130,7 +130,7 @@ pub fn parse_types_until<'a>(
     let mut types = vec![];
 
     let mut first = true;
-    while !s.peek().cloned().transpose()?.as_ref().map_or(true, &stop) {
+    while !s.peek().cloned().transpose()?.as_ref().is_none_or(&stop) {
         if first {
             first = false;
         } else {

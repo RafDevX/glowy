@@ -237,7 +237,7 @@ pub fn parse_statements_until<'a>(
 ) -> PResult<'a, Vec<StatementNode<'a>>> {
     let mut stmts = vec![];
 
-    while !s.peek().cloned().transpose()?.as_ref().map_or(true, &stop) {
+    while !s.peek().cloned().transpose()?.as_ref().is_none_or(&stop) {
         stmts.push(parse_statement(s, true)?);
 
         // spec allows omitting semicolon before closing } and )
