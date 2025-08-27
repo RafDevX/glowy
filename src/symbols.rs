@@ -537,6 +537,19 @@ impl<'a> Symbol<'a> {
             );
         }
     }
+
+    pub fn clear_array_mapping(&mut self) {
+        self.array_mapping.clear();
+    }
+
+    pub fn extend_array_mapping(&mut self, map: HashMap<usize, LabelBacktrace<'a>>) {
+        for (key, bt) in map {
+            self.array_mapping
+                .entry(key)
+                .and_modify(|existing| *existing = bt.with_child(existing))
+                .or_insert(bt);
+        }
+    }
 }
 
 // AnalysisContext's stack of current function definitions needs to temporarily

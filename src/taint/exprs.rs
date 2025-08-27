@@ -1,5 +1,10 @@
+use std::collections::HashMap;
+
 use parser::{
-    ast::{BinaryOpKind, ExprNode, IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind},
+    ast::{
+        BinaryOpKind, CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode,
+        IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind,
+    },
     Location,
 };
 
@@ -9,6 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
+    Pinned,
 };
 
 #[derive(Debug)]
@@ -60,12 +66,21 @@ impl<'a> From<OrdinaryExprLabel<'a>> for ExprLabel<'a> {
 #[derive(Debug)]
 pub enum SingleExprLabel<'a> {
     Simple(Option<LabelBacktrace<'a>>),
+    ArrayIndices {
+        map: HashMap<usize, LabelBacktrace<'a>>,
+        // don't really like Location here, but there isn't a good alternative
+        // (need to be able to fold into one backtrace if required)
+        location: Pinned<Location>,
+    },
 }
 
 impl<'a> From<SingleExprLabel<'a>> for Option<LabelBacktrace<'a>> {
     fn from(single: SingleExprLabel<'a>) -> Self {
         match single {
             SingleExprLabel::Simple(bt) => bt,
+            SingleExprLabel::ArrayIndices { map, location } => {
+                LabelBacktrace::fold(map.values(), LabelBacktraceKind::Expression, None, location)
+            }
         }
     }
 }
@@ -110,6 +125,10 @@ pub fn visit_single_expr<'a>(
     match visit_expr(ctx, node) {
         // already a single value
         ExprLabel::Simple(bt) => SingleExprLabel::Simple(bt),
+        ExprLabel::ArrayIndices(map) => SingleExprLabel::ArrayIndices {
+            map,
+            location: ctx.pin(get_expr_location(node)),
+        },
 
         // not a single value, need to convert and maybe error
         ExprLabel::Void => {
@@ -206,6 +225,68 @@ fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> E
         | LiteralNode::Float { .. }
         | LiteralNode::Rune { .. }
         | LiteralNode::String { .. } => ExprLabel::Simple(None),
+        LiteralNode::Array {
+            values, location, ..
+        }
+        | LiteralNode::Slice {
+            values, location, ..
+        } => {
+            // Array length must be a constant so we don't need to visit it to
+            // trigger side-effects (there aren't any); we can focus on values
+            visit_array_literal(ctx, values, location)
+        }
+    }
+}
+
+// for analysis purposes, slices are treated as arrays
+fn visit_array_literal<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    values: &CompositeLiteralElementListNode<'a, usize>,
+    location: &Location,
+) -> ExprLabel<'a> {
+    let mut map = HashMap::new();
+
+    let mut next_default_key = 0;
+    for (opt_key, el) in values {
+        if let Some(bt) = visit_array_literal_element(ctx, el, location) {
+            let key = opt_key.as_ref().copied().unwrap_or(next_default_key);
+            next_default_key = key + 1;
+
+            map.insert(key, bt);
+        }
+    }
+
+    ExprLabel::ArrayIndices(map)
+}
+
+// we only support 1 level of depth, so here we just recursively fold up these
+// higher dimensions into one single level
+fn visit_array_literal_element<'a, K>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CompositeLiteralElementNode<'a, K>,
+    location: &Location,
+) -> Option<LabelBacktrace<'a>> {
+    match &node {
+        CompositeLiteralElementNode::Expr(expr) => visit_simple_expr(ctx, expr),
+        CompositeLiteralElementNode::Nested(items) => {
+            let children: Vec<_> = items
+                .iter()
+                .map(|(_, v)| v)
+                .filter_map(|el| visit_array_literal_element(ctx, el, location))
+                .collect();
+
+            if children.is_empty() {
+                // quicker escape to avoid clones et al. if they're unnecessary
+                return None;
+            }
+
+            LabelBacktrace::fold(
+                children.iter(),
+                LabelBacktraceKind::Expression,
+                None,
+                ctx.pin(location.clone()),
+            )
+        }
     }
 }
 
@@ -278,6 +359,8 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
             LiteralNode::Float { location, .. } => location.clone(),
             LiteralNode::Rune { location, .. } => location.clone(),
             LiteralNode::String { location, .. } => location.clone(),
+            LiteralNode::Array { location, .. } => location.clone(),
+            LiteralNode::Slice { location, .. } => location.clone(),
         },
     }
 }

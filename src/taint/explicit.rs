@@ -331,6 +331,17 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
 
         let rhs_backtrace = match rhs {
             SingleExprLabel::Simple(bt) => bt,
+            SingleExprLabel::ArrayIndices { map, .. } => {
+                if simple && in_current_scope {
+                    // if we're overwriting (see comment below), then we need to
+                    // clear before extending
+                    borrowed.clear_array_mapping();
+                }
+
+                borrowed.extend_array_mapping(map);
+
+                None
+            }
         };
 
         let mut children = vec![rhs_backtrace.as_ref(), ctx.branch_backtrace()];
