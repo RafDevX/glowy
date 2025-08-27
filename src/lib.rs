@@ -109,7 +109,7 @@ impl<'a> Pinned<Span<'a>> {
     }
 }
 
-impl<'a> Ord for Pinned<Span<'a>> {
+impl Ord for Pinned<Span<'_>> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.virtual_file_path
             .cmp(&other.virtual_file_path)

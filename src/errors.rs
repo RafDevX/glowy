@@ -219,7 +219,7 @@ pub enum AnalysisErrorKind<'a> {
     },
 }
 
-impl<'a> AnalysisErrorKind<'a> {
+impl AnalysisErrorKind<'_> {
     /// Returns a general category to which the error kind belongs.
     pub fn category(&self) -> AnalysisErrorCategory {
         match self {

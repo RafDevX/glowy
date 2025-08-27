@@ -47,7 +47,7 @@ pub enum LabelTag<'a> {
     },
 }
 
-impl<'a> fmt::Display for LabelTag<'a> {
+impl fmt::Display for LabelTag<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Concrete(tag) => write!(f, "{tag}"),
@@ -137,7 +137,7 @@ pub enum FunctionRef<'a> {
     Anonymous(*const bool), // FIXME: Anonymous(*const FunctionLiteralNode),
 }
 
-impl<'a> fmt::Display for FunctionRef<'a> {
+impl fmt::Display for FunctionRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Named(name) => name.content().fmt(f),
@@ -264,7 +264,7 @@ impl<'a> Label<'a> {
     }
 }
 
-impl<'a> PartialOrd for Label<'a> {
+impl PartialOrd for Label<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         if self == other {
             return Some(cmp::Ordering::Equal);
@@ -288,7 +288,7 @@ impl<'a> PartialOrd for Label<'a> {
     }
 }
 
-impl<'a> fmt::Display for Label<'a> {
+impl fmt::Display for Label<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Label::Tags(tags) => {
