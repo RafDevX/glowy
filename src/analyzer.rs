@@ -307,13 +307,13 @@ impl Analyzer {
 
 // https://go.dev/ref/mod#go-mod-file-ident (not an exhaustive check)
 fn valid_module_path(candidate: &str) -> bool {
-    return !candidate.is_empty()
+    !candidate.is_empty()
         && candidate.is_ascii()
         && !candidate.starts_with('/')
         && !candidate.ends_with('/')
         && candidate
             .split('/')
-            .all(|el| !el.is_empty() && !el.starts_with('.') && !el.ends_with('.'));
+            .all(|el| !el.is_empty() && !el.starts_with('.') && !el.ends_with('.'))
 }
 
 fn compute_package_path(module_base: &str, virtual_file_path: &path::Path) -> FullPackagePath {
