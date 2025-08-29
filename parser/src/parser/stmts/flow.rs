@@ -506,7 +506,7 @@ mod tests {
     use crate::{
         ast::{
             AssignmentKind, AssignmentNode, BinaryOpKind, BlockNode, CallNode, ExprNode,
-            LiteralNode, OperandNameNode, ShortVarDeclNode, StatementNode, TypeNode,
+            LiteralNode, OperandNameNode, OrderedF64, ShortVarDeclNode, StatementNode, TypeNode,
             TypeSwitchCaseClause, UnaryOpKind,
         },
         lexer::Lexer,
@@ -1016,7 +1016,7 @@ mod tests {
                                 })),
                                 StatementNode::Return {
                                     exprs: vec![ExprNode::Literal(LiteralNode::Float {
-                                        value: 12.1,
+                                        value: OrderedF64(12.1),
                                         location: 287..291
                                     })],
                                     location: 280..291

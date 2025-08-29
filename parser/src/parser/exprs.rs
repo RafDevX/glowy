@@ -3,7 +3,7 @@ use super::{expect, PResult};
 use crate::{
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
-        OperandNameNode,
+        OperandNameNode, OrderedF64,
     },
     parser::{of_kind, types::parse_type, BacktrackingContext},
     token::{Token, TokenKind},
@@ -148,7 +148,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             s.next(); // advance
 
             LiteralNode::Float {
-                value,
+                value: OrderedF64(value),
                 location: token.span.location(),
             }
             .into()

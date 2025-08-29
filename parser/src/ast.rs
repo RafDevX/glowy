@@ -1,3 +1,5 @@
+use std::cmp;
+
 use crate::{Annotation, Location, Span};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -203,7 +205,7 @@ pub enum LiteralNode<'a> {
         location: Location,
     },
     Float {
-        value: f64,
+        value: OrderedF64,
         location: Location,
     },
     Rune {
@@ -229,6 +231,24 @@ pub enum LiteralNode<'a> {
         location: Location,
     },
     // Struct, Map
+}
+
+/// Wrapper for f64 to support Eq and Ord
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OrderedF64(pub f64);
+
+impl Eq for OrderedF64 {}
+
+impl Ord for OrderedF64 {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for OrderedF64 {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 pub type CompositeLiteralElementListNode<'a, K, N = K> =
