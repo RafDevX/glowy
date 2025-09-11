@@ -41,20 +41,11 @@
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
 
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    fmt,
-    path::PathBuf,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
 
-use parser::{ast::FunctionSignatureNode, Location, Span};
+use parser::Span;
 
-use crate::{
-    labels::{FunctionRef, LabelBacktrace, LabelBacktraceKind},
-    FullPackagePath, Pinned,
-};
+use crate::{values::ValueRef, FullPackagePath, Pinned};
 
 #[derive(Debug)]
 pub struct SymbolTable<'a> {
@@ -410,9 +401,10 @@ impl fmt::Debug for Scope<'_> {
     }
 }
 
-// Scopes cannot own Symbols directly because multiple scopes may need to refer
-// to the same symbol (e.g., a closure can refer to variables in the outer scope
-// and both functions, inner and outer, share a reference to the same symbol)
+// Scopes cannot own Symbols directly because it would make the borrow checker
+// very sad if symtab returned (non-Rc'd) &Symbol's, since to access them it's
+// necessary to runtime-borrow from a ScopeRef and then that & reference points
+// to the runtime-borrow that will be dropped before the symtab function returns
 pub type SymbolRef<'a> = Rc<RefCell<Symbol<'a>>>;
 
 #[derive(Debug)]
@@ -421,39 +413,25 @@ pub struct Symbol<'a> {
     declared_name: Pinned<Span<'a>>,
     /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`)
     mutable: bool,
-    /// The accumulated label for this symbol, with tracked history
-    label_backtrace: Option<LabelBacktrace<'a>>,
-    /// If this symbol points to a function, its details relevant to analysis
-    func_metadata: Option<FunctionMetadataRef<'a>>,
-    /// If an array, index-specific labels, to union with the overall backtrace
-    array_mapping: HashMap<usize, LabelBacktrace<'a>>,
+    /// This symbol's current value, including its accumulated security label
+    value: ValueRef<'a>,
 }
 
 impl<'a> Symbol<'a> {
-    fn new(
-        declared_name: Pinned<Span<'a>>,
-        mutable: bool,
-        label_backtrace: Option<LabelBacktrace<'a>>,
-    ) -> Self {
+    fn new(declared_name: Pinned<Span<'a>>, mutable: bool, value: ValueRef<'a>) -> Self {
         Self {
             declared_name,
             mutable,
-            label_backtrace,
-            func_metadata: None,
-            array_mapping: HashMap::new(),
+            value,
         }
     }
 
     pub fn new_ref(
         declared_name: Pinned<Span<'a>>,
         mutable: bool,
-        label_backtrace: Option<LabelBacktrace<'a>>,
+        value: ValueRef<'a>,
     ) -> SymbolRef<'a> {
-        Rc::new(RefCell::new(Self::new(
-            declared_name,
-            mutable,
-            label_backtrace,
-        )))
+        Rc::new(RefCell::new(Self::new(declared_name, mutable, value)))
     }
 
     fn new_predeclared_ref(name: &'static str) -> SymbolRef<'a> {
@@ -461,7 +439,7 @@ impl<'a> Symbol<'a> {
             // vv not very pretty, but it should never matter anyway
             Pinned::new(PathBuf::new(), Span::new(name, 0, 0)),
             false,
-            None,
+            ValueRef::from(None),
         )
     }
 
@@ -473,126 +451,11 @@ impl<'a> Symbol<'a> {
         self.mutable
     }
 
-    pub fn label_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
-        self.label_backtrace.as_ref()
+    pub fn value(&self) -> ValueRef<'a> {
+        self.value.clone()
     }
 
-    pub fn set_label_backtrace(&mut self, label_backtrace: Option<LabelBacktrace<'a>>) {
-        self.label_backtrace = label_backtrace;
-    }
-
-    pub fn func_metadata(&self) -> Option<FunctionMetadataRef<'a>> {
-        self.func_metadata.clone() // cheap to clone ref
-    }
-
-    pub fn set_func_metadata(&mut self, func_metadata: FunctionMetadataRef<'a>) {
-        self.func_metadata = Some(func_metadata);
-    }
-
-    pub fn array_get(
-        &self,
-        index: Option<usize>,
-        at_location: Pinned<Location>,
-    ) -> Option<LabelBacktrace<'a>> {
-        let mut children = vec![];
-        children.extend(self.label_backtrace());
-
-        if let Some(i) = index {
-            children.extend(self.array_mapping.get(&i));
-        } else {
-            // since we don't know the concrete index, we must take the union of
-            // all possibilities, i.e., all entries of array_mapping
-            children.extend(self.array_mapping.values());
-        };
-
-        LabelBacktrace::fold(children, LabelBacktraceKind::Expression, None, at_location)
-    }
-
-    pub fn array_set(
-        &mut self,
-        index: Option<usize>,
-        backtrace: LabelBacktrace<'a>,
-        overwrite: bool,
-        at_location: Pinned<Location>,
-    ) {
-        if let Some(i) = index {
-            match self.array_mapping.entry(i) {
-                Entry::Occupied(mut e) if !overwrite => {
-                    e.insert(e.get().union(
-                        &backtrace,
-                        LabelBacktraceKind::Assignment,
-                        at_location,
-                    ));
-                }
-                _ => {
-                    self.array_mapping.insert(i, backtrace);
-                }
-            };
-        } else {
-            self.label_backtrace = LabelBacktrace::combine_options(
-                self.label_backtrace.take(),
-                Some(backtrace),
-                LabelBacktraceKind::Assignment,
-                at_location,
-            );
-        }
-    }
-
-    pub fn clear_array_mapping(&mut self) {
-        self.array_mapping.clear();
-    }
-
-    pub fn extend_array_mapping(&mut self, map: HashMap<usize, LabelBacktrace<'a>>) {
-        for (key, bt) in map {
-            self.array_mapping
-                .entry(key)
-                .and_modify(|existing| *existing = bt.with_child(existing))
-                .or_insert(bt);
-        }
-    }
-}
-
-// AnalysisContext's stack of current function definitions needs to temporarily
-// reference metadata, and multiple symbols can point to the same metadata
-// (e.g., `f = <lit>; g = f`)
-pub type FunctionMetadataRef<'a> = Rc<RefCell<FunctionMetadata<'a>>>;
-
-#[derive(Debug)]
-pub struct FunctionMetadata<'a> {
-    func_ref: FunctionRef<'a>, // for realization subst to work, must know decl
-    signature: FunctionSignatureNode<'a>,
-    outcome: Vec<Option<LabelBacktrace<'a>>>,
-}
-
-impl<'a> FunctionMetadata<'a> {
-    pub fn new(func_ref: FunctionRef<'a>, signature: &FunctionSignatureNode<'a>) -> Self {
-        Self {
-            func_ref,
-            signature: signature.clone(),
-            outcome: Vec::new(),
-        }
-    }
-
-    pub fn new_ref(
-        func_ref: FunctionRef<'a>,
-        signature: &FunctionSignatureNode<'a>,
-    ) -> FunctionMetadataRef<'a> {
-        Rc::new(RefCell::new(Self::new(func_ref, signature)))
-    }
-
-    pub fn func_ref(&self) -> &FunctionRef<'a> {
-        &self.func_ref
-    }
-
-    pub fn signature(&self) -> &FunctionSignatureNode<'a> {
-        &self.signature
-    }
-
-    pub fn outcome(&self) -> &Vec<Option<LabelBacktrace<'a>>> {
-        &self.outcome
-    }
-
-    pub fn set_outcome(&mut self, outcome: Vec<Option<LabelBacktrace<'a>>>) {
-        self.outcome = outcome;
+    pub fn set_value(&mut self, value: ValueRef<'a>) {
+        self.value = value
     }
 }

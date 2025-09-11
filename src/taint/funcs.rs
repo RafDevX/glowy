@@ -9,21 +9,31 @@ use parser::{
 use crate::{
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
-    symbols::{FunctionMetadata, FunctionMetadataRef, Symbol},
-    taint::exprs::{self, OrdinaryExprLabel},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
+    symbols::Symbol,
+    taint::exprs,
+    values::{
+        BacktraceContainer, FunctionRef, FunctionValue, SelfAwareBacktraceContainer, Value,
+        ValueRef,
+    },
 };
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
     let func_name = ctx.pin(node.name.clone());
 
-    let symbol = Symbol::new_ref(func_name.clone(), false, None);
+    let func_ref = FunctionRef::Named(func_name.clone());
+
+    let value = ValueRef::from(Value::Function(FunctionValue::new(
+        func_ref.clone(),
+        node.signature.clone(),
+        None, // TODO: support annotations
+    )));
+
+    let symbol = Symbol::new_ref(func_name.clone(), false, value.clone());
 
     ctx.declare_new_symbol(symbol.clone());
 
     ctx.symtab_mut().select_next_child_scope(); // push
-
-    let func_ref = FunctionRef::Named(func_name.clone());
 
     let mut param_index = 0;
 
@@ -51,7 +61,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
             ctx.declare_new_symbol(Symbol::new_ref(
                 ctx.pin(id.clone()),
                 true,
-                Some(param_backtrace),
+                ValueRef::from(Some(param_backtrace)),
             ));
 
             param_index += 1;
@@ -69,10 +79,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         }
     }
 
-    let metadata = FunctionMetadata::new_ref(func_ref, &node.signature);
-    symbol.borrow_mut().set_func_metadata(metadata.clone());
-
-    ctx.push_function(metadata);
+    ctx.push_function(value);
     ctx.increase_branch_scope_depth();
 
     super::visit_statements(ctx, &node.body);
@@ -88,7 +95,7 @@ pub fn visit_return<'a>(
     exprs: &[ExprNode<'a>],
     location: &Location,
 ) {
-    let Some(func) = ctx.current_function() else {
+    let Some(mut value) = ctx.current_function() else {
         ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
             location: location.clone(),
         });
@@ -96,9 +103,27 @@ pub fn visit_return<'a>(
         return;
     };
 
-    let outcome = calculate_outcome(ctx, func.borrow().signature(), exprs, location);
+    let Some(func) = value.as_function() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
+            location: location.clone(),
+        });
 
-    func.borrow_mut().set_outcome(outcome);
+        return;
+    };
+
+    let outcome = calculate_outcome(ctx, func.signature(), exprs, location);
+
+    drop(func);
+
+    let Some(mut func) = value.as_function_mut() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
+            location: location.clone(),
+        });
+
+        return;
+    };
+
+    func.set_outcome(outcome);
 
     ctx.defer_branch_backtrace(DeferTarget::Function, location.clone());
 }
@@ -108,12 +133,12 @@ fn calculate_outcome<'a>(
     signature: &FunctionSignatureNode<'a>,
     exprs: &[ExprNode<'a>],
     location: &Location,
-) -> Vec<Option<LabelBacktrace<'a>>> {
+) -> Vec<ValueRef<'a>> {
     // if there's a single expression with a single function call, then nothing
     // below applies and that function call's outcome is the final outcome
     // (case 2 from https://go.dev/ref/spec#Return_statements)
     if let [ExprNode::Call(call)] = exprs {
-        return visit_call(ctx, call).into();
+        return visit_call(ctx, call);
     }
 
     let mut outcome = vec![];
@@ -136,15 +161,13 @@ fn calculate_outcome<'a>(
     };
 
     for expr in &exprs {
-        let expr_backtrace = exprs::visit_simple_expr(ctx, expr);
+        let expr_backtrace = exprs::visit_single_expr(ctx, expr);
 
-        let backtrace = LabelBacktrace::fold(
-            [expr_backtrace.as_ref(), ctx.branch_backtrace()]
-                .into_iter()
-                .flatten(),
+        let backtrace = expr_backtrace.nest_backtrace(
             LabelBacktraceKind::Return,
             None,
             ctx.pin(location.clone()),
+            ctx.branch_backtrace().into_iter().cloned(),
         );
 
         outcome.push(backtrace);
@@ -153,30 +176,61 @@ fn calculate_outcome<'a>(
     outcome
 }
 
-pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> OrdinaryExprLabel<'a> {
-    let Some(metadata) = func_metadata_from_call_expr(ctx, &node.func) else {
-        return OrdinaryExprLabel::Void; // error already reported, or builtin
+pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec<ValueRef<'a>> {
+    let value = exprs::visit_single_expr(ctx, &node.func);
+
+    let Some(func) = value.as_function() else {
+        ctx.report_error(AnalysisErrorKind::IllegalCallExpression {
+            location: node.location.clone(),
+        });
+
+        return vec![];
     };
-    let borrowed = metadata.borrow();
-    let params = &borrowed.signature().params;
 
-    if node.args.len() != params.len() {
-        let variadic = params.last().map(|p| p.variadic).unwrap_or(false);
+    // note that f(a, b int) actually has 1 parameter with 2 identifiers, so
+    // we can't compare args.len() with params.len() directly; we need to
+    // process them first
 
-        if !(variadic && node.args.len() > params.len()) {
+    // vvv cannot actually do this because if/else would have diff types,
+    // vvv so we must create it manually instead...
+    //
+    // let iter = params
+    //     .iter()
+    //     .flat_map(|param| {
+    //         if param.ids.is_empty() {
+    //             iter::once((param.variadic, None))
+    //         } else {
+    //             param.ids.iter().map(|id| (param.variadic, Some(id)))
+    //         }
+    //     })
+    //     .enumerate();
+
+    let mut ids = Vec::new();
+    for param in &func.signature().params {
+        if param.ids.is_empty() {
+            ids.push((None, param.variadic));
+        } else {
+            ids.extend(param.ids.iter().map(|id| (Some(id), param.variadic)));
+        }
+    }
+
+    if node.args.len() != ids.len() {
+        let variadic = ids.last().map(|(_, variadic)| *variadic).unwrap_or(false);
+
+        if !(variadic && node.args.len() > ids.len()) {
             ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                expected: params.len(),
+                expected: ids.len(),
                 found: node.args.len(),
                 location: node.location.clone(),
             });
 
-            return OrdinaryExprLabel::Void;
+            return vec![];
         }
     }
 
     let mut result = vec![];
 
-    'components: for component in borrowed.outcome() {
+    'components: for component in func.outcome() {
         let mut realized = None;
 
         // vvv cannot actually do this because if/else would have diff types,
@@ -193,26 +247,27 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Ord
         //     })
         //     .enumerate();
 
-        let mut ids = Vec::new();
-        for param in params {
-            if param.ids.is_empty() {
-                ids.push((None, param.variadic));
+        for (index, (id, variadic)) in ids.iter().copied().enumerate() {
+            let base = if let Some(value) = realized {
+                // this is not the first iteration; continue where we left off
+                value
             } else {
-                ids.extend(param.ids.iter().map(|id| (Some(id), param.variadic)));
-            }
-        }
+                // this is the first iteration; start from the outcome component
+                component.clone()
+            };
 
-        for (index, (id, variadic)) in ids.into_iter().enumerate() {
-            let Some(backtrace) = realized.as_ref().unwrap_or(component) else {
-                result.push(None);
+            if base.is_bottom() {
+                // no sense in continuing, we'll never evolve from this state
+
+                result.push(base);
 
                 continue 'components;
-            };
+            }
 
             let concrete = if variadic {
                 let children: Vec<_> = node.args[index..]
                     .iter()
-                    .filter_map(|arg| exprs::visit_simple_expr(ctx, arg))
+                    .filter_map(|arg| exprs::get_expr_backtrace(ctx, arg))
                     .collect();
 
                 LabelBacktrace::fold(
@@ -224,45 +279,30 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Ord
             } else {
                 let arg = node.args.get(index).expect("already checked arg count");
 
-                exprs::visit_simple_expr(ctx, arg)
+                exprs::get_expr_backtrace(ctx, arg)
             };
 
-            realized = Some(backtrace.realize(borrowed.func_ref(), index, concrete.as_ref()));
+            realized = Some(base.realize(func.r#ref(), index, concrete.as_ref()));
         }
 
         result.push(realized.unwrap_or_else(|| component.clone()));
     }
 
-    if result.is_empty() {
-        OrdinaryExprLabel::Void
-    } else if result.len() == 1 {
-        // don't like the unwrap, but can't do this with pattern matching while
-        // taking ownership if single and leaving Vec intact if multi
-        OrdinaryExprLabel::Simple(result.into_iter().next().unwrap())
-    } else {
-        OrdinaryExprLabel::Multi(result)
+    // need to nest the function's backtrace into the result because the
+    // function itself was accessed
+    if let Some(bt) = func.backtrace() {
+        for realized in &mut result {
+            *realized = realized.nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                ctx.pin(node.location.clone()),
+                [bt.clone()],
+            )
+        }
     }
+
+    result
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
-}
-
-/// Already reports error if [`None`] is returned.
-fn func_metadata_from_call_expr<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    node: &ExprNode<'a>,
-) -> Option<FunctionMetadataRef<'a>> {
-    match node {
-        ExprNode::Name(operand) => {
-            if let Some(symbol) = exprs::resolve_operand_name(ctx, operand) {
-                symbol.borrow().func_metadata()
-            } else {
-                None
-            }
-        }
-        ExprNode::Literal(lit) => todo!(),
-        ExprNode::Call(call) => todo!(),
-        ExprNode::Indexing(indexing) => todo!(),
-        ExprNode::UnaryOp { .. } | ExprNode::BinaryOp { .. } => None,
-    }
 }

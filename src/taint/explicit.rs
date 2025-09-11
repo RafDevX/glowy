@@ -14,7 +14,8 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
-    taint::{exprs::SingleExprLabel, funcs},
+    taint::funcs,
+    values::{BacktraceContainer, SelfAwareBacktraceContainer, ValueRef},
 };
 
 pub fn visit_binding_decl<'a>(
@@ -43,7 +44,7 @@ fn visit_binding_decl_spec<'a>(
         // (branch label is irrelevant in this case)
 
         for name in &node.ids {
-            let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, None);
+            let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, ValueRef::from(None));
 
             ctx.declare_new_symbol(symbol);
         }
@@ -51,23 +52,21 @@ fn visit_binding_decl_spec<'a>(
         return;
     }
 
-    let backtraces = match node.exprs.as_slice() {
+    let values = match node.exprs.as_slice() {
         // vvv case where `var a, b = f()` with `f` returning multiple values
         // (note: `const` cannot do this - we check `mutable` as a heuristic)
-        [ExprNode::Call(call)] if node.ids.len() > 1 && mutable => {
-            Vec::from(funcs::visit_call(ctx, call))
-        }
+        [ExprNode::Call(call)] if node.ids.len() > 1 && mutable => funcs::visit_call(ctx, call),
         _ => node
             .exprs
             .iter()
-            .map(|expr| exprs::visit_simple_expr(ctx, expr))
+            .map(|expr| exprs::visit_single_expr(ctx, expr))
             .collect(),
     };
 
     visit_raw_binding_decl_spec(
         ctx,
         &node.ids,
-        &backtraces,
+        values.into_iter(),
         mutable,
         short,
         location,
@@ -79,17 +78,17 @@ fn visit_binding_decl_spec<'a>(
 pub fn visit_raw_binding_decl_spec<'a>(
     ctx: &mut AnalysisContext<'a>,
     ids: &[Span<'a>],
-    backtraces: &[Option<LabelBacktrace<'a>>],
+    rhs_values: impl ExactSizeIterator<Item = ValueRef<'a>>,
     mutable: bool,
     short: bool, // allows redeclaration in some circumstances
     location: &Location,
     annotation: &Option<Box<Annotation<'a>>>,
 ) {
-    if ids.len() != backtraces.len() {
+    if ids.len() != rhs_values.len() {
         ctx.report_error(AnalysisErrorKind::UnevenBindingDeclSpec {
             location: location.clone(),
             left: ids.len(),
-            right: backtraces.len(),
+            right: rhs_values.len(),
         });
 
         return;
@@ -98,13 +97,13 @@ pub fn visit_raw_binding_decl_spec<'a>(
     let mut redeclarations = vec![];
     let mut any_new = false;
 
-    for (name, expr_backtrace) in ids.iter().zip(backtraces.iter()) {
+    for (name, rhs) in ids.iter().zip(rhs_values) {
         if name.content() == "_" {
             // blank identifier, so we don't really need to do anything else
             // except visiting the expression to process e.g. function calls
             // (needed to detect insecure flows wrt integrity, for example),
             // but this was necessarily already done or we wouldn't have the
-            // corresponding `expr_backtrace`
+            // corresponding value
 
             continue;
         }
@@ -124,20 +123,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             // TODO: `match` other scopes
         };
 
-        let backtrace = LabelBacktrace::fold(
-            [
-                explicit_backtrace.as_ref(),
-                expr_backtrace.as_ref(),
-                ctx.branch_backtrace(),
-            ]
-            .into_iter()
-            .flatten(),
-            LabelBacktraceKind::Assignment,
-            Some(name.content()),
-            ctx.pin(location.clone()),
-        );
-
-        let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, backtrace);
+        let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, ValueRef::from(None));
 
         if short {
             // declare manually to hold errors until we're sure
@@ -164,6 +150,23 @@ pub fn visit_raw_binding_decl_spec<'a>(
             // just report any errors
             ctx.declare_new_symbol(symbol);
         }
+
+        // now that symbol is declared, we can assign a value to it
+
+        // fake node so we can use LeftValue trait
+        let node = OperandNameNode {
+            package: None,
+            id: name.clone(),
+        };
+
+        node.assign(
+            ctx,
+            LabelBacktraceKind::DeclarationInitialization,
+            rhs,
+            true,
+            explicit_backtrace.as_ref(),
+            location,
+        );
     }
 
     if !redeclarations.is_empty() && !any_new {
@@ -219,6 +222,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         node.kind,
         &node.lhs,
         rhs_backtraces.into_iter(),
+        None, // TODO: support annotations in assignments
         &node.location,
     );
 }
@@ -228,7 +232,8 @@ pub fn visit_raw_assignment<'a>(
     ctx: &mut AnalysisContext<'a>,
     kind: AssignmentKind,
     lhs_exprs: &[ExprNode<'a>],
-    rhs_values: impl ExactSizeIterator<Item = SingleExprLabel<'a>>,
+    rhs_values: impl ExactSizeIterator<Item = ValueRef<'a>>,
+    explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
     location: &Location,
 ) {
     if lhs_exprs.len() != rhs_values.len() {
@@ -242,7 +247,14 @@ pub fn visit_raw_assignment<'a>(
     }
 
     for (lhs, rhs) in lhs_exprs.iter().zip(rhs_values) {
-        lhs.assign(ctx, rhs, kind == AssignmentKind::Simple, location);
+        lhs.assign(
+            ctx,
+            LabelBacktraceKind::Assignment,
+            rhs,
+            kind == AssignmentKind::Simple,
+            explicit_backtrace,
+            location,
+        );
     }
 }
 
@@ -267,12 +279,14 @@ pub fn visit_incdec<'a>(
     );
 }
 
-trait LeftValue<'a> {
+pub trait LeftValue<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: SingleExprLabel<'a>,
+        backtrace_kind: LabelBacktraceKind, // usually Assignment, unless...
+        rhs: ValueRef<'a>,
         simple: bool,
+        explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
         location: &Location,
     );
 }
@@ -284,8 +298,10 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: SingleExprLabel<'a>,
+        backtrace_kind: LabelBacktraceKind,
+        rhs: ValueRef<'a>,
         simple: bool,
+        explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
         let inner: &dyn LeftValue = match self {
@@ -300,7 +316,14 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
             }
         };
 
-        inner.assign(ctx, rhs, simple, location)
+        inner.assign(
+            ctx,
+            backtrace_kind,
+            rhs,
+            simple,
+            explicit_backtrace,
+            location,
+        )
     }
 }
 
@@ -308,8 +331,10 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: SingleExprLabel<'a>,
+        backtrace_kind: LabelBacktraceKind,
+        rhs: ValueRef<'a>,
         simple: bool,
+        explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
         let Some(symbol) = exprs::resolve_operand_name(ctx, self) else {
@@ -329,24 +354,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
 
         let mut borrowed = symbol.borrow_mut();
 
-        let rhs_backtrace = match rhs {
-            SingleExprLabel::Simple(bt) => bt,
-            SingleExprLabel::ArrayIndices { map, .. } => {
-                if simple && in_current_scope {
-                    // if we're overwriting (see comment below), then we need to
-                    // clear before extending
-                    borrowed.clear_array_mapping();
-                }
-
-                borrowed.extend_array_mapping(map);
-
-                None
-            }
-        };
-
-        let mut children = vec![rhs_backtrace.as_ref(), ctx.branch_backtrace()];
-
-        if !simple || !in_current_scope {
+        let value = if simple && in_current_scope {
             // for complex assignments like `x += y` we need to keep x's label,
             // but for simple assignments like `x = y` we can usually overwrite
             // it and drop the previous x label, except if x was not declared in
@@ -356,17 +364,31 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
             // forget x's previous label either
             // FIXME: try to improve symtab alt branch support to avoid this
 
-            children.push(borrowed.label_backtrace());
-        }
+            rhs.nest_backtrace(
+                backtrace_kind,
+                Some(self.id.content()), // symbol.declared_name()?
+                ctx.pin(location.clone()),
+                explicit_backtrace
+                    .into_iter()
+                    .chain(ctx.branch_backtrace())
+                    .cloned(),
+            )
+        } else {
+            let rhs_backtrace = rhs.backtrace_at_location(ctx.pin(location.clone()));
 
-        let backtrace = LabelBacktrace::fold(
-            children.into_iter().flatten(),
-            LabelBacktraceKind::Assignment,
-            Some(self.id.content()), // symbol.declared_name()?
-            ctx.pin(location.clone()),
-        );
+            borrowed.value().nest_backtrace(
+                backtrace_kind,
+                Some(self.id.content()), // symbol.declared_name()?
+                ctx.pin(location.clone()),
+                explicit_backtrace
+                    .into_iter()
+                    .cloned()
+                    .chain(rhs_backtrace)
+                    .chain(ctx.branch_backtrace().cloned()),
+            )
+        };
 
-        borrowed.set_label_backtrace(backtrace);
+        borrowed.set_value(value);
     }
 }
 
@@ -374,75 +396,61 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        rhs: SingleExprLabel<'a>,
+        backtrace_kind: LabelBacktraceKind,
+        rhs: ValueRef<'a>,
         simple: bool,
+        explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        // we don't do anything special here, so we just want the raw backtrace
-        let rhs = rhs.into();
+        let mut base = exprs::visit_single_expr(ctx, &self.expr);
 
-        let index_bt = exprs::visit_simple_expr(ctx, &self.index);
+        let Some(mut composite) = base.as_composite_mut() else {
+            ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
+                location: self.location.clone(),
+            });
 
-        let name = match self.expr.as_ref() {
-            ExprNode::Name(name) => name,
-            ExprNode::Indexing(inner) => {
-                // e.g., `arr[2][3] = secret` -- we can't keep track of so many
-                // levels, but we can respect the `arr[2]` part and try to only
-                // affect that index; in practice, this means ignoring the `[3]`
-                // and just recursing to the innermost indexing operation
-
-                // caveat: even though we ignore the `[3]` for fine-grained
-                // array analysis purposes, we still need to consider its label
-                // and merge it with the recursion result, e.g. `arr[2][secret]`
-                let combined = LabelBacktrace::combine_options(
-                    rhs,
-                    index_bt,
-                    LabelBacktraceKind::Expression,
-                    ctx.pin(self.location.clone()),
-                );
-
-                // (simple is false because we never want to overwrite the
-                // entire `arr[2]` since this only concerns part of it: `[3]`)
-                return inner.assign(ctx, SingleExprLabel::Simple(combined), false, location);
-            }
-            _ => {
-                // TODO: support more kinds of expressions here
-
-                ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
-                    location: self.location.clone(),
-                });
-
-                return;
-            }
+            return;
         };
 
-        let Some(backtrace) = LabelBacktrace::fold(
-            [rhs.as_ref(), index_bt.as_ref(), ctx.branch_backtrace()]
-                .into_iter()
-                .flatten(),
-            LabelBacktraceKind::Assignment,
+        let value = rhs.nest_backtrace(
+            backtrace_kind,
             None,
             ctx.pin(location.clone()),
-        ) else {
-            return;
-        };
+            explicit_backtrace
+                .cloned()
+                .into_iter()
+                .chain(ctx.branch_backtrace().cloned()),
+        );
 
-        let Some(symbol) = exprs::resolve_operand_name(ctx, name) else {
-            // no symbol found, but error already reported
-            return;
-        };
+        exprs::visit_single_expr(ctx, &self.index); // trigger side effects
 
         let index = exprs::try_resolve_constant_integer(&self.index)
             .map(usize::try_from)
             .and_then(Result::ok);
 
-        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
+        let overwrite = simple && root_indexing_in_current_scope(ctx, self);
 
-        symbol.borrow_mut().array_set(
-            index,
-            backtrace,
-            simple && in_current_scope,
-            ctx.pin(location.clone()),
-        );
+        if let Some(index) = index {
+            composite.set_const(index, value, overwrite, ctx.pin(location.clone()));
+        } else {
+            composite.set_dyn(value, ctx.pin(location.clone()));
+        }
+    }
+}
+
+fn root_indexing_in_current_scope<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &IndexingNode<'a>,
+) -> bool {
+    match &*node.expr {
+        ExprNode::Name(operand) => {
+            if let Some(symbol) = exprs::resolve_operand_name(ctx, operand) {
+                ctx.symtab().is_symbol_in_current_scope(symbol)
+            } else {
+                false
+            }
+        }
+        ExprNode::Indexing(inner) => root_indexing_in_current_scope(ctx, inner),
+        _ => false, // too complex to determine; err on the side of caution
     }
 }

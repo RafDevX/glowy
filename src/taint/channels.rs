@@ -6,57 +6,41 @@ use parser::{
 use super::exprs;
 use crate::{
     context::AnalysisContext,
-    errors::AnalysisErrorKind,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::LabelBacktraceKind,
+    taint::explicit::LeftValue,
+    values::{SelfAwareBacktraceContainer, ValueRef},
 };
 
 pub fn visit_receive<'a>(
     ctx: &mut AnalysisContext<'a>,
     operand: &ExprNode<'a>,
     location: &Location,
-) -> Option<LabelBacktrace<'a>> {
+) -> ValueRef<'a> {
     // TODO: must update channel's label to match branch label, because
     // otherwise "has a value been read" or "has the channel been depleted" can
     // be used to exfiltrate information
 
-    exprs::visit_simple_expr(ctx, operand).map(|child| {
-        child.into_single_child(LabelBacktraceKind::Receive, None, ctx.pin(location.clone()))
-    })
+    exprs::visit_single_expr(ctx, operand).nest_backtrace(
+        LabelBacktraceKind::Receive,
+        None,
+        ctx.pin(location.clone()),
+        vec![],
+    )
 }
 
 pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
-    // TODO: deal with annotation
+    // vvv TODO: deal with annotation
+    let explicit_backtrace = None;
 
-    let ExprNode::Name(name) = &node.channel else {
-        // TODO: support more indirect kinds of channel expressions
+    let base = exprs::visit_single_expr(ctx, &node.expr);
 
-        ctx.report_error(AnalysisErrorKind::IllegalChannelExpression {
-            location: exprs::get_expr_location(&node.channel),
-        });
-
-        return;
-    };
-
-    let Some(symbol) = exprs::resolve_operand_name(ctx, name) else {
-        // error already reported
-        return;
-    };
-
-    let borrowed = symbol.borrow();
-    let expr_backtrace = exprs::visit_simple_expr(ctx, &node.expr);
-
-    let backtrace = LabelBacktrace::fold(
-        [
-            borrowed.label_backtrace(),
-            expr_backtrace.as_ref(),
-            ctx.branch_backtrace(),
-        ]
-        .into_iter()
-        .flatten(),
+    // we take send as syntactic sugar for a complex assignment
+    node.expr.assign(
+        ctx,
         LabelBacktraceKind::Send,
-        Some(name.id.content()),
-        ctx.pin(node.location.clone()),
+        base,
+        false, // don't overwrite ever
+        explicit_backtrace,
+        &node.location,
     );
-
-    symbol.borrow_mut().set_label_backtrace(backtrace);
 }

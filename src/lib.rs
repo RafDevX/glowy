@@ -40,6 +40,7 @@ mod files;
 pub mod labels;
 mod symbols;
 mod taint;
+mod values;
 
 type FullPackagePath = String; // e.g. example.com/org/something/auth
                                // ^ note that auth is not necessarily the package name!
@@ -60,6 +61,8 @@ pub struct Pinned<T: Clone + fmt::Debug + PartialEq> {
     virtual_file_path: PathBuf,
     inner: T,
 }
+
+impl<T: Eq + Clone + fmt::Debug> Eq for Pinned<T> {}
 
 impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
     fn new(virtual_file_path: PathBuf, inner: T) -> Self {
@@ -123,8 +126,6 @@ impl PartialOrd for Pinned<Span<'_>> {
         Some(self.cmp(other))
     }
 }
-
-impl Eq for Pinned<Span<'_>> {}
 
 impl PartialOrd for Pinned<Location> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {

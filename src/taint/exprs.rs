@@ -14,97 +14,32 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
-    Pinned,
+    values::{BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, Value, ValueRef},
 };
 
-#[derive(Debug)]
-pub enum ExprLabel<'a> {
-    Void,
-    Simple(Option<LabelBacktrace<'a>>),
-    Multi(Vec<Option<LabelBacktrace<'a>>>),
-    MultiWithPrimary {
-        primary: Option<LabelBacktrace<'a>>,
-        secondary: Vec<Option<LabelBacktrace<'a>>>,
-        // ^ secondary may be discarded if only a single value is accepted
-    },
-    ArrayIndices(HashMap<usize, LabelBacktrace<'a>>),
-}
-
-/// Represents an exact number of values, without any special formats.
-// sadly we cannot use the `subenum` crate to make this less verbose;
-// see: https://github.com/paholg/subenum/issues/48
-#[derive(Debug)]
-pub enum OrdinaryExprLabel<'a> {
-    Void,
-    Simple(Option<LabelBacktrace<'a>>),
-    Multi(Vec<Option<LabelBacktrace<'a>>>),
-}
-
-impl<'a> From<OrdinaryExprLabel<'a>> for Vec<Option<LabelBacktrace<'a>>> {
-    fn from(ordinary: OrdinaryExprLabel<'a>) -> Self {
-        match ordinary {
-            OrdinaryExprLabel::Void => vec![],
-            OrdinaryExprLabel::Simple(bt) => vec![bt],
-            OrdinaryExprLabel::Multi(all) => all,
-        }
-    }
-}
-
-impl<'a> From<OrdinaryExprLabel<'a>> for ExprLabel<'a> {
-    fn from(ordinary: OrdinaryExprLabel<'a>) -> Self {
-        match ordinary {
-            OrdinaryExprLabel::Void => Self::Void,
-            OrdinaryExprLabel::Simple(bt) => Self::Simple(bt),
-            OrdinaryExprLabel::Multi(all) => Self::Multi(all),
-        }
-    }
-}
-
-/// Represents exactly one value.
-// sadly we cannot use the `subenum` crate to make this less verbose;
-// see: https://github.com/paholg/subenum/issues/48
-#[derive(Debug)]
-pub enum SingleExprLabel<'a> {
-    Simple(Option<LabelBacktrace<'a>>),
-    ArrayIndices {
-        map: HashMap<usize, LabelBacktrace<'a>>,
-        // don't really like Location here, but there isn't a good alternative
-        // (need to be able to fold into one backtrace if required)
-        location: Pinned<Location>,
-    },
-}
-
-impl<'a> From<SingleExprLabel<'a>> for Option<LabelBacktrace<'a>> {
-    fn from(single: SingleExprLabel<'a>) -> Self {
-        match single {
-            SingleExprLabel::Simple(bt) => bt,
-            SingleExprLabel::ArrayIndices { map, location } => {
-                LabelBacktrace::fold(map.values(), LabelBacktraceKind::Expression, None, location)
-            }
-        }
-    }
-}
-
-pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> ExprLabel<'a> {
-    match node {
-        ExprNode::Name(name) => ExprLabel::Simple(visit_operand_name(ctx, name)),
+pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec<ValueRef<'a>> {
+    let single = match node {
+        ExprNode::Name(name) => visit_operand_name(ctx, name),
         ExprNode::Literal(lit) => visit_literal(ctx, lit),
-        ExprNode::Call(call) => funcs::visit_call(ctx, call).into(),
-        ExprNode::Indexing(indexing) => ExprLabel::Simple(visit_indexing(ctx, indexing)),
+        ExprNode::Call(call) => return funcs::visit_call(ctx, call),
+        ExprNode::Indexing(indexing) => visit_indexing(ctx, indexing),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
             location,
-        } => ExprLabel::Simple(channels::visit_receive(ctx, operand, location)),
-        ExprNode::UnaryOp { operand, .. } => ExprLabel::Simple(visit_simple_expr(ctx, operand)),
+        } => channels::visit_receive(ctx, operand, location),
+        ExprNode::UnaryOp { operand, .. } => visit_single_expr(ctx, operand),
         ExprNode::BinaryOp {
             left,
             right,
             location,
             ..
         } => {
-            let left = visit_simple_expr(ctx, left);
-            let right = visit_simple_expr(ctx, right);
+            let left_location = ctx.pin(get_expr_location(left));
+            let right_location = ctx.pin(get_expr_location(right));
+
+            let left = visit_single_expr(ctx, left).backtrace_at_location(left_location);
+            let right = visit_single_expr(ctx, right).backtrace_at_location(right_location);
 
             let backtrace = LabelBacktrace::combine_options(
                 left,
@@ -113,79 +48,57 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Exp
                 ctx.pin(location.clone()),
             );
 
-            ExprLabel::Simple(backtrace)
+            ValueRef::from(backtrace)
         }
-    }
+    };
+
+    vec![single]
 }
 
-pub fn visit_single_expr<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    node: &ExprNode<'a>,
-) -> SingleExprLabel<'a> {
-    match visit_expr(ctx, node) {
-        // already a single value
-        ExprLabel::Simple(bt) => SingleExprLabel::Simple(bt),
-        ExprLabel::ArrayIndices(map) => SingleExprLabel::ArrayIndices {
-            map,
-            location: ctx.pin(get_expr_location(node)),
-        },
+pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> ValueRef<'a> {
+    let mut result = visit_expr(ctx, node);
 
-        // not a single value, need to convert and maybe error
-        ExprLabel::Void => {
-            ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
-                location: get_expr_location(node),
-            });
-
-            SingleExprLabel::Simple(None)
-        }
-        ExprLabel::Multi(all) => {
-            let location = get_expr_location(node);
-
-            ctx.report_error(AnalysisErrorKind::UnexpectedMultiValueExpression {
-                location: location.clone(),
-            });
-
-            // in order to keep going, we just join all the labels
-            // together, even though this is not correct Go
-            SingleExprLabel::Simple(LabelBacktrace::fold(
-                all.iter().flatten(),
-                LabelBacktraceKind::Expression,
-                None,
-                ctx.pin(location),
-            ))
-        }
-        ExprLabel::MultiWithPrimary { primary, .. } => SingleExprLabel::Simple(primary),
+    if result.is_empty() {
+        ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
+            location: get_expr_location(node),
+        });
+    } else if result.len() > 1 {
+        ctx.report_error(AnalysisErrorKind::UnexpectedMultiValueExpression {
+            location: get_expr_location(node),
+        });
+    } else {
+        return result.pop().unwrap(); // already checked
     }
+
+    ValueRef::from(None)
 }
 
-pub fn visit_simple_expr<'a>(
+pub fn get_expr_backtrace<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &ExprNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    visit_single_expr(ctx, node).into()
+    let location = ctx.pin(get_expr_location(node));
+
+    visit_single_expr(ctx, node).backtrace_at_location(location)
 }
 
 pub fn visit_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &OperandNameNode<'a>,
-) -> Option<LabelBacktrace<'a>> {
-    let symbol = resolve_operand_name(ctx, node);
+) -> ValueRef<'a> {
+    let Some(symbol) = resolve_operand_name(ctx, node) else {
+        // error already reported
+        return ValueRef::from(None);
+    };
 
-    if let Some(symbol) = symbol {
-        symbol
-            .borrow()
-            .label_backtrace()
-            .cloned()
-            .map(|symbol_backtrace| {
-                symbol_backtrace.into_single_child(
-                    LabelBacktraceKind::Expression,
-                    Some(node.id.content()),
-                    ctx.pin(node.id.location()),
-                )
-            })
-    } else {
-        None
-    }
+    let borrowed = symbol.borrow();
+
+    borrowed.value().nest_backtrace(
+        LabelBacktraceKind::Expression,
+        Some(node.id.content()),
+        ctx.pin(node.id.location()),
+        [],
+    )
 }
 
 /// Reports error for unknown qualifier and unknown symbol, if applicable
@@ -219,21 +132,25 @@ pub fn resolve_operand_name<'a>(
     symbol
 }
 
-fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> ExprLabel<'a> {
+fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> ValueRef<'a> {
     match node {
         LiteralNode::Int { .. }
         | LiteralNode::Float { .. }
         | LiteralNode::Rune { .. }
-        | LiteralNode::String { .. } => ExprLabel::Simple(None),
+        | LiteralNode::String { .. } => ValueRef::from(None),
         LiteralNode::Array {
             values, location, ..
-        }
-        | LiteralNode::Slice {
+        } => ValueRef::from(Value::Array(CompositeValue::from(visit_array_literal(
+            ctx, values, location,
+        )))),
+        LiteralNode::Slice {
             values, location, ..
         } => {
             // Array length must be a constant so we don't need to visit it to
             // trigger side-effects (there aren't any); we can focus on values
-            visit_array_literal(ctx, values, location)
+            ValueRef::from(Value::Slice(CompositeValue::from(visit_array_literal(
+                ctx, values, location,
+            ))))
         }
     }
 }
@@ -243,99 +160,84 @@ fn visit_array_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     values: &CompositeLiteralElementListNode<'a, usize>,
     location: &Location,
-) -> ExprLabel<'a> {
+) -> HashMap<usize, ValueRef<'a>> {
     let mut map = HashMap::new();
 
     let mut next_default_key = 0;
     for (opt_key, el) in values {
-        if let Some(bt) = visit_array_literal_element(ctx, el, location) {
-            let key = opt_key.as_ref().copied().unwrap_or(next_default_key);
-            next_default_key = key + 1;
+        let key = opt_key.as_ref().copied().unwrap_or(next_default_key);
+        next_default_key = key + 1;
 
-            map.insert(key, bt);
+        let value = visit_array_literal_element(ctx, el, location);
+
+        if value.is_bottom() {
+            // we don't need to bloat the HashMap with None backtraces
+            continue;
         }
+
+        map.insert(key, value);
     }
 
-    ExprLabel::ArrayIndices(map)
+    map
 }
 
-// we only support 1 level of depth, so here we just recursively fold up these
-// higher dimensions into one single level
 fn visit_array_literal_element<'a, K>(
     ctx: &mut AnalysisContext<'a>,
     node: &CompositeLiteralElementNode<'a, K>,
     location: &Location,
-) -> Option<LabelBacktrace<'a>> {
+) -> ValueRef<'a> {
     match &node {
-        CompositeLiteralElementNode::Expr(expr) => visit_simple_expr(ctx, expr),
+        CompositeLiteralElementNode::Expr(expr) => visit_single_expr(ctx, expr),
         CompositeLiteralElementNode::Nested(items) => {
-            let children: Vec<_> = items
+            let mut values: Vec<_> = items
                 .iter()
                 .map(|(_, v)| v)
-                .filter_map(|el| visit_array_literal_element(ctx, el, location))
+                .map(|el| visit_array_literal_element(ctx, el, location))
+                .filter(|v| !v.is_bottom())
                 .collect();
 
-            if children.is_empty() {
+            if values.is_empty() {
                 // quicker escape to avoid clones et al. if they're unnecessary
-                return None;
-            }
+                ValueRef::from(None)
+            } else if values.len() == 1 {
+                values.pop().unwrap()
+            } else {
+                let backtraces: Vec<_> = values
+                    .iter()
+                    .filter_map(|v| v.backtrace_at_location(ctx.pin(location.clone())))
+                    .collect();
 
-            LabelBacktrace::fold(
-                children.iter(),
-                LabelBacktraceKind::Expression,
-                None,
-                ctx.pin(location.clone()),
-            )
+                ValueRef::from(LabelBacktrace::fold(
+                    &backtraces,
+                    LabelBacktraceKind::Expression,
+                    None,
+                    ctx.pin(location.clone()),
+                ))
+            }
         }
     }
 }
 
-fn visit_indexing<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    node: &IndexingNode<'a>,
-) -> Option<LabelBacktrace<'a>> {
-    let name = match node.expr.as_ref() {
-        ExprNode::Name(name) => name,
-        ExprNode::Indexing(inner) => {
-            // e.g., `arr[2][3]` -- we can't keep track of so many levels, but
-            // we can respect the `arr[2]` part and try to get information on
-            // that specific index; in practice, this means ignoring the `[3]`
-            // and just recursing to the innermost indexing operation
+fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
+    let base = visit_single_expr(ctx, &node.expr);
 
-            // caveat: even though we ignore the `[3]` for fine-grained array
-            // analysis purposes, we still need to consider its label and merge
-            // it with the recursion result, e.g. for `arr[2][secret]`
+    let Some(composite) = base.as_composite() else {
+        ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
+            location: node.location.clone(),
+        });
 
-            return LabelBacktrace::combine_options(
-                visit_indexing(ctx, inner),
-                visit_simple_expr(ctx, &node.index),
-                LabelBacktraceKind::Expression,
-                ctx.pin(node.location.clone()),
-            );
-        }
-        _ => {
-            // TODO: support more kinds of expressions here
-
-            ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
-                location: node.location.clone(),
-            });
-
-            return None;
-        }
-    };
-
-    let Some(symbol) = resolve_operand_name(ctx, name) else {
-        // no symbol found, but error already reported
-        return None;
+        return ValueRef::from(None);
     };
 
     let index = try_resolve_constant_integer(&node.index)
         .map(usize::try_from)
         .and_then(Result::ok);
 
-    let borrowed = symbol.borrow();
-
-    borrowed.array_get(index, ctx.pin(node.location.clone()))
+    if let Some(index) = index {
+        composite.get_const(index, ctx.pin(node.location.clone()))
+    } else {
+        composite.get_dyn(ctx.pin(node.location.clone()))
+    }
 }
 
 pub fn get_expr_location(node: &ExprNode<'_>) -> Location {

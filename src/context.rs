@@ -5,7 +5,8 @@ use parser::Location;
 use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{LabelBacktrace, LabelBacktraceKind},
-    symbols::{FunctionMetadataRef, SymbolRef, SymbolTable},
+    symbols::{SymbolRef, SymbolTable},
+    values::ValueRef,
     Pinned,
 };
 
@@ -20,7 +21,7 @@ pub struct AnalysisContext<'a> {
     errors: Vec<AnalysisError<'a>>,
 
     /// Current stack of functions being declared
-    funcs: Vec<FunctionMetadataRef<'a>>,
+    funcs: Vec<ValueRef<'a>>,
 
     /// Stack of (independent but always a child of previous) branch backtraces
     branch_backtraces: Vec<LabelBacktrace<'a>>,
@@ -92,11 +93,17 @@ impl<'a> AnalysisContext<'a> {
         self.current_file = Some(virtual_path);
     }
 
-    pub fn current_function(&self) -> Option<FunctionMetadataRef<'a>> {
-        self.funcs.last().cloned() // cloning is cheap
+    pub fn current_function(&self) -> Option<ValueRef<'a>> {
+        // FIXME: ideally, would .and_then(|v| v.as_function()) here so that we
+        // could return Option<Ref<FunctionValue<'a>>>, but borrow checker hates
+        // that because we'd return a reference to a temporary value (v) -- it
+        // cannot tell that all values are stored in symbols anyway so it's ok,
+        // meaning that we must offload this function-checking to the invoker
+
+        self.funcs.last().cloned()
     }
 
-    pub fn push_function(&mut self, func: FunctionMetadataRef<'a>) {
+    pub fn push_function(&mut self, func: ValueRef<'a>) {
         self.funcs.push(func);
     }
 

@@ -17,7 +17,7 @@ use std::{cmp, collections::BTreeSet, fmt, iter};
 
 use parser::{Location, Span};
 
-use crate::Pinned;
+use crate::{values::FunctionRef, Pinned};
 
 /// Represents an individual tag within a label.
 ///
@@ -116,35 +116,6 @@ impl PartialEq for LabelTag<'_> {
 }
 
 impl Eq for LabelTag<'_> {}
-
-/// Represents an unambiguous reference to a function declaration.
-///
-/// This is useful to guarantee uniqueness of a [`LabelTag::Synthetic`] when
-/// paired with a function parameter index.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FunctionRef<'a> {
-    /// A normal function with a native declared name.
-    ///
-    /// This is a unique identifier because of the embedded location information
-    /// offered by [`Pinned`] and [`Span`].
-    Named(Pinned<Span<'a>>),
-    /// An anonymous function literal.
-    ///
-    /// As an internal identifier, a pointer to the AST node is used to
-    /// guarantee uniqueness. This is evidently not deterministic across
-    /// different program executions, but in general synthetic tags are not
-    /// exposed anyway, so they should not be relied on for observability.
-    Anonymous(*const bool), // FIXME: Anonymous(*const FunctionLiteralNode),
-}
-
-impl fmt::Display for FunctionRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Named(name) => name.content().fmt(f),
-            Self::Anonymous(ptr) => write!(f, "lit@{:x}", (*ptr as usize) & 0xffff),
-        }
-    }
-}
 
 /// Represents the security typing associated with some piece of data.
 ///
@@ -322,7 +293,7 @@ impl fmt::Display for Label<'_> {
 ///     has label `{blue, violet}`, a second child can never have label
 ///     `{blue, yellow}` -- it will instead be trimmed to just `{yellow}` to
 ///     simplify the whole chain and limit hierarchy size).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LabelBacktrace<'a> {
     /// What operation caused this label attribution.
     kind: LabelBacktraceKind,
@@ -585,6 +556,8 @@ pub enum LabelBacktraceKind {
     ExplicitAnnotation,
     /// Assignment of some tainted expression to a variable.
     Assignment,
+    /// Bootstrapping label from initialization expression in declaration.
+    DeclarationInitialization,
     /// Compounded label derived from the parts of a composite expression.
     Expression,
     /// Aggregate label implicitly inherited from surrounding control flows.

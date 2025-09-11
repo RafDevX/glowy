@@ -12,10 +12,8 @@ use crate::{
     context::{AnalysisContext, DeferTarget},
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
-    taint::{
-        explicit,
-        exprs::{self, SingleExprLabel},
-    },
+    taint::{explicit, exprs},
+    values::BacktraceContainer,
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -28,7 +26,7 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
         super::visit_statement(ctx, statement);
     }
 
-    let pushed = if let Some(expr_backtrace) = exprs::visit_simple_expr(ctx, &node.cond) {
+    let pushed = if let Some(expr_backtrace) = exprs::get_expr_backtrace(ctx, &node.cond) {
         ctx.push_branch_backtrace(expr_backtrace.into_single_child(
             LabelBacktraceKind::Branch,
             None,
@@ -91,7 +89,7 @@ fn visit_for_clause<'a>(
     }
 
     let pushed = if let Some(cond) = &clause.cond {
-        if let Some(cond_backtrace) = exprs::visit_simple_expr(ctx, cond) {
+        if let Some(cond_backtrace) = exprs::get_expr_backtrace(ctx, cond) {
             ctx.push_branch_backtrace(cond_backtrace.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
@@ -136,7 +134,9 @@ fn visit_for_range<'a>(
 
     // FIXME: this is incorrect; need to decide 1 or 2 values based on table in
     // spec; see https://go.dev/ref/spec#For_range
-    let rhs_backtraces = vec![exprs::visit_simple_expr(ctx, range_expr)];
+    let rhs_value = exprs::visit_single_expr(ctx, range_expr);
+    let rhs_location = ctx.pin(exprs::get_expr_location(range_expr));
+    let rhs_backtrace = rhs_value.backtrace_at_location(rhs_location);
 
     // branch backtrace must come before assignment since it'll only take place
     // if the for loop actually iterates (i.e., range expr is non-empty); e.g.
@@ -147,7 +147,7 @@ fn visit_for_range<'a>(
     // // if x still == 7, secretArr is empty
     // ```
     let pushed = if let Some(branch_backtrace) = LabelBacktrace::fold(
-        rhs_backtraces.iter().filter_map(Option::as_ref),
+        rhs_backtrace.as_ref(),
         LabelBacktraceKind::Branch,
         None,
         ctx.pin(header_location.clone()),
@@ -164,7 +164,7 @@ fn visit_for_range<'a>(
         explicit::visit_raw_binding_decl_spec(
             ctx,
             lhs,
-            &rhs_backtraces,
+            [rhs_value].into_iter(), // FIXME: not really this
             true,
             true,
             header_location,
@@ -175,7 +175,8 @@ fn visit_for_range<'a>(
             ctx,
             AssignmentKind::Simple,
             lhs,
-            rhs_backtraces.into_iter().map(SingleExprLabel::Simple), // FIXME: not really this
+            [rhs_value].into_iter(), // FIXME: not really this
+            None,
             header_location,
         );
     }
@@ -241,7 +242,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
     let mut n_pushes = 0;
 
     if let Some(expr) = &node.expr {
-        if let Some(bt) = exprs::visit_simple_expr(ctx, expr) {
+        if let Some(bt) = exprs::get_expr_backtrace(ctx, expr) {
             ctx.push_branch_backtrace(bt.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
@@ -256,7 +257,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         let children: Vec<_> = clause
             .exprs
             .iter()
-            .filter_map(|expr| exprs::visit_simple_expr(ctx, expr))
+            .filter_map(|expr| exprs::get_expr_backtrace(ctx, expr))
             .collect();
 
         let folded = LabelBacktrace::fold(
@@ -309,15 +310,18 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
         super::visit_statement(ctx, stmt);
     }
 
-    let pushed = if let Some(bt) = exprs::visit_simple_expr(ctx, &node.expr) {
-        if let Some(id) = &node.decl {
-            ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id.clone()), true, Some(bt.clone())));
-        }
+    let value = exprs::visit_single_expr(ctx, &node.expr);
 
+    if let Some(id) = &node.decl {
+        ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id.clone()), true, value.clone()));
+    }
+
+    let expr_location = ctx.pin(exprs::get_expr_location(&node.expr));
+    let pushed = if let Some(bt) = value.backtrace_at_location(expr_location.clone()) {
         ctx.push_branch_backtrace(bt.into_single_child(
             LabelBacktraceKind::Branch,
             None,
-            ctx.pin(exprs::get_expr_location(&node.expr)),
+            expr_location,
         ));
 
         true

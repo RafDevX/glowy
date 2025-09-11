@@ -4,7 +4,8 @@
 use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
 
 use crate::{
-    context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol, FullPackagePath,
+    context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol, values::ValueRef,
+    FullPackagePath,
 };
 
 pub fn visit_source_file<'a>(
@@ -70,7 +71,7 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
 ) {
     for id in &node.ids {
-        let symbol = Symbol::new_ref(ctx.pin(id.clone()), mutable, None);
+        let symbol = Symbol::new_ref(ctx.pin(id.clone()), mutable, ValueRef::from(None));
 
         ctx.declare_new_symbol(symbol);
     }
@@ -84,7 +85,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         return;
     }
 
-    let symbol = Symbol::new_ref(ctx.pin(node.name.clone()), false, None);
+    let symbol = Symbol::new_ref(ctx.pin(node.name.clone()), false, ValueRef::from(None));
 
     ctx.declare_new_symbol(symbol);
 }
