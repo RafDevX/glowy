@@ -220,7 +220,7 @@ fn get_for_range_values<'a>(
     // TODO: support channels
 
     // see table at https://go.dev/ref/spec#For_range
-    let result = if let Some(composite) = value.as_composite() {
+    if let Some(composite) = value.as_composite() {
         // 1st value key/index, 2nd value coll[k]
 
         let index_bt = composite.backtrace_at_location(location.clone());
@@ -254,9 +254,7 @@ fn get_for_range_values<'a>(
         let bt = value.backtrace_at_location(location.clone());
 
         vec![ValueRef::from(bt.clone()), ValueRef::from(bt)]
-    };
-
-    result // thanks borrow checker, very cool
+    }
 }
 
 pub fn visit_continue_break<'a>(
