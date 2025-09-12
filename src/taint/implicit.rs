@@ -2,8 +2,9 @@ use std::borrow::Cow;
 
 use parser::{
     ast::{
-        AssignmentKind, BlockNode, ElseNode, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode,
-        ForRangeNode, IfNode, StatementNode, SwitchNode, TypeSwitchNode,
+        AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,
+        ForHeaderNode, ForNode, ForRangeNode, IfNode, LiteralNode, StatementNode, SwitchNode,
+        TypeSwitchNode,
     },
     Location, Span,
 };
@@ -13,7 +14,8 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::{explicit, exprs},
-    values::BacktraceContainer,
+    values::{BacktraceContainer, ValueRef},
+    Pinned,
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -126,17 +128,31 @@ fn visit_for_range<'a>(
     body: &BlockNode<'a>,
     header_location: &Location,
 ) {
-    let range_expr = match range {
-        ForRangeNode::Decl { range_expr, .. } => range_expr,
-        ForRangeNode::Assignment { range_expr, .. } => range_expr,
-        ForRangeNode::None { range_expr } => range_expr,
+    let (lhs_len, range_expr) = match range {
+        ForRangeNode::Decl {
+            lhs, range_expr, ..
+        } => (lhs.len(), range_expr),
+        ForRangeNode::Assignment {
+            lhs, range_expr, ..
+        } => (lhs.len(), range_expr),
+        ForRangeNode::None { range_expr } => (0, range_expr),
     };
 
-    // FIXME: this is incorrect; need to decide 1 or 2 values based on table in
-    // spec; see https://go.dev/ref/spec#For_range
-    let rhs_value = exprs::visit_single_expr(ctx, range_expr);
     let rhs_location = ctx.pin(exprs::get_expr_location(range_expr));
-    let rhs_backtrace = rhs_value.backtrace_at_location(rhs_location);
+    let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
+    rhs_values.truncate(lhs_len);
+
+    let children: Vec<_> = rhs_values
+        .iter()
+        .filter_map(|v| v.backtrace_at_location(rhs_location.clone()))
+        .collect();
+
+    let rhs_backtrace = LabelBacktrace::fold(
+        children.iter(),
+        LabelBacktraceKind::Expression,
+        None,
+        rhs_location,
+    );
 
     // branch backtrace must come before assignment since it'll only take place
     // if the for loop actually iterates (i.e., range expr is non-empty); e.g.
@@ -164,7 +180,7 @@ fn visit_for_range<'a>(
         explicit::visit_raw_binding_decl_spec(
             ctx,
             lhs,
-            [rhs_value].into_iter(), // FIXME: not really this
+            rhs_values.into_iter(),
             true,
             true,
             header_location,
@@ -175,7 +191,7 @@ fn visit_for_range<'a>(
             ctx,
             AssignmentKind::Simple,
             lhs,
-            [rhs_value].into_iter(), // FIXME: not really this
+            rhs_values.into_iter(),
             None,
             header_location,
         );
@@ -190,6 +206,57 @@ fn visit_for_range<'a>(
     if pushed {
         ctx.pop_branch_backtrace();
     }
+}
+
+// always visits range_expr, to trigger side effects
+fn get_for_range_values<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    range_expr: &ExprNode<'a>,
+    location: Pinned<Location>,
+) -> Vec<ValueRef<'a>> {
+    // visit range_expr, even if just to trigger side effects
+    let value = exprs::visit_single_expr(ctx, range_expr);
+
+    // TODO: support channels
+
+    // see table at https://go.dev/ref/spec#For_range
+    let result = if let Some(composite) = value.as_composite() {
+        // 1st value key/index, 2nd value coll[k]
+
+        let index_bt = composite.backtrace_at_location(location.clone());
+
+        vec![ValueRef::from(index_bt), composite.get_dyn(location)]
+    } else if let Some(func) = value.as_function() {
+        let param_type = func
+            .signature()
+            .params
+            .first()
+            .filter(|param| param.ids.len() == 1)
+            .map(|param| &param.r#type);
+
+        // if let Some(TypeNode::Function(r#yield)) = param_type {
+        //     todo!()
+        // }
+
+        todo!()
+    } else if let ExprNode::Literal(LiteralNode::Int { .. }) = range_expr {
+        // this does not catch all the ints (see below), but it does catch some
+        // of them (directly passed integer literals)
+
+        vec![ValueRef::from(None)] // (literals necessarily have no label)
+    } else {
+        // the only options remaining (if this is a valid Go program) is either
+        // a string or a (non-literal) integer, but we can't know which this is,
+        // so we assume it's a string (2 values vs 1 offers more flexibility,
+        // and the 1st value would coincide)
+
+        // 1st value index, 2nd value code point
+        let bt = value.backtrace_at_location(location.clone());
+
+        vec![ValueRef::from(bt.clone()), ValueRef::from(bt)]
+    };
+
+    result // thanks borrow checker, very cool
 }
 
 pub fn visit_continue_break<'a>(
