@@ -707,7 +707,7 @@ impl<'a> Lexer<'a> {
         // the first char (already peeked) is included in the final span
 
         let (span, node) = self.accumulate_while(None, move |ch, state, _| {
-            if let Some(&TokenOptionsTree { options, .. }) = state {
+            if let &mut Some(&TokenOptionsTree { options, .. }) = state {
                 for (key, branch) in options {
                     if ch == *key {
                         *state = Some(branch);

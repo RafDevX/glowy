@@ -16,11 +16,11 @@ codespan-reporting = "0.11.1"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["Rafael Oliveira", "Diogo Correia"]
 repository = "https://github.com/RafDevX/glowy"
 license = "MIT"
-rust-version = "1.82"
+rust-version = "1.86"
 
 [dependencies]
 codespan-reporting.workspace = true
