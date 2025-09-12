@@ -73,6 +73,9 @@ pub enum TypeNode<'a> {
     Slice {
         element: Box<TypeNode<'a>>,
     },
+    Function {
+        signature: Box<FunctionSignatureNode<'a>>,
+    },
     // TODO: Literal
 }
 

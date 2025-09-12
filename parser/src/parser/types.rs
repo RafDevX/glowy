@@ -2,6 +2,7 @@ use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
     ParsingError, TokenStream,
     ast::{ChannelDirection, TypeNode},
+    parser::decls,
     token::{Token, TokenKind},
 };
 
@@ -105,6 +106,14 @@ fn parse_array_or_slice_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNod
     }
 }
 
+fn parse_function_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+    expect(s, TokenKind::Func, Some("function type"))?;
+
+    let signature = Box::new(decls::funcs::parse_signature(s)?);
+
+    Ok(TypeNode::Function { signature })
+}
+
 pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::ParenL)) => {
@@ -113,6 +122,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
             expect(s, TokenKind::ParenR, Some("parenthesized type"))?;
             Ok(inner)
         }
+        Some(of_kind!(TokenKind::Func)) => parse_function_type(s),
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
         Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
@@ -148,7 +158,10 @@ mod tests {
     use super::*;
     use crate::{
         Span,
-        ast::{BinaryOpKind, ExprNode, LiteralNode, OperandNameNode},
+        ast::{
+            BinaryOpKind, ExprNode, FunctionParamDeclNode, FunctionResultNode,
+            FunctionSignatureNode, LiteralNode, OperandNameNode,
+        },
         lexer::Lexer,
     };
 
@@ -240,6 +253,98 @@ mod tests {
                 })
             },
             parse("[3][4][2 * N + 1]pkg.member[T]").unwrap()
+        )
+    }
+
+    #[test]
+    fn functions() {
+        assert_eq!(
+            TypeNode::Function {
+                signature: Box::new(FunctionSignatureNode {
+                    params: vec![
+                        FunctionParamDeclNode {
+                            ids: vec![Span::new("a", 5, 1)],
+                            variadic: false,
+                            r#type: TypeNode::Name {
+                                package: None,
+                                id: Span::new("int", 7, 1),
+                                args: vec![]
+                            }
+                        },
+                        FunctionParamDeclNode {
+                            ids: vec![Span::new("f", 12, 1), Span::new("g", 15, 1)],
+                            variadic: false,
+                            r#type: TypeNode::Function {
+                                signature: Box::new(FunctionSignatureNode {
+                                    params: vec![],
+                                    result: Some(FunctionResultNode::Params(vec![
+                                        FunctionParamDeclNode {
+                                            ids: vec![Span::new("x", 25, 1)],
+                                            variadic: false,
+                                            r#type: TypeNode::Name {
+                                                package: None,
+                                                id: Span::new("int", 27, 1),
+                                                args: vec![]
+                                            }
+                                        },
+                                        FunctionParamDeclNode {
+                                            ids: vec![Span::new("y", 32, 1)],
+                                            variadic: false,
+                                            r#type: TypeNode::Name {
+                                                package: Some(Span::new("p", 34, 1)),
+                                                id: Span::new("A", 36, 1),
+                                                args: vec![TypeNode::Name {
+                                                    package: None,
+                                                    id: Span::new("T", 38, 1),
+                                                    args: vec![]
+                                                }]
+                                            }
+                                        },
+                                    ]))
+                                })
+                            }
+                        },
+                        FunctionParamDeclNode {
+                            ids: vec![],
+                            variadic: true,
+                            r#type: TypeNode::Function {
+                                signature: Box::new(FunctionSignatureNode {
+                                    params: vec![FunctionParamDeclNode {
+                                        ids: vec![Span::new("x", 51, 1)],
+                                        variadic: false,
+                                        r#type: TypeNode::Name {
+                                            package: None,
+                                            id: Span::new("float32", 53, 1),
+                                            args: vec![]
+                                        }
+                                    }],
+                                    result: Some(FunctionResultNode::Single(TypeNode::Name {
+                                        package: None,
+                                        id: Span::new("bool", 62, 1),
+                                        args: vec![]
+                                    }))
+                                })
+                            }
+                        }
+                    ],
+                    result: Some(FunctionResultNode::Single(TypeNode::Function {
+                        signature: Box::new(FunctionSignatureNode {
+                            params: vec![FunctionParamDeclNode {
+                                ids: vec![Span::new("result", 73, 1)],
+                                variadic: false,
+                                r#type: TypeNode::Name {
+                                    package: None,
+                                    id: Span::new("int", 80, 1),
+                                    args: vec![]
+                                }
+                            }],
+                            result: None,
+                        })
+                    }))
+                })
+            },
+            parse("func(a int, f, g func() (x int, y p.A[T]), ...func(x float32) bool) func(result int)")
+                .unwrap()
         )
     }
 }

@@ -1,7 +1,11 @@
 use crate::{
     ParsingError, TokenStream,
     ast::{FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode},
-    parser::{PResult, expect, of_kind, stmts::parse_block, types::parse_type},
+    parser::{
+        PResult, expect, of_kind,
+        stmts::{self, parse_block},
+        types::parse_type,
+    },
     token::{Token, TokenKind},
 };
 
@@ -78,11 +82,12 @@ fn parse_params<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<FunctionParamDec
     Ok(params)
 }
 
-fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSignatureNode<'a>> {
+pub fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSignatureNode<'a>> {
     let params = parse_params(s)?;
 
     let result = match s.peek().cloned().transpose()? {
-        Some(of_kind!(TokenKind::CurlyL)) => None,
+        None => None,
+        Some(of_kind!(kind)) if stmts::terminal_token(&kind) => None,
         Some(of_kind!(TokenKind::ParenL)) => Some(FunctionResultNode::Params(parse_params(s)?)),
         _ => Some(FunctionResultNode::Single(parse_type(s)?)),
     };

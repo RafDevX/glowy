@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub mod bindings;
-mod funcs;
+pub mod funcs;
 
 pub fn try_parse_top_level_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Option<DeclNode<'a>>> {
     match s.peek().cloned().transpose()? {

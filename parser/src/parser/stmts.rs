@@ -264,7 +264,7 @@ pub fn parse_block<'a>(s: &mut TokenStream<'a>) -> PResult<'a, BlockNode<'a>> {
 }
 
 // may terminate a statement
-fn terminal_token(kind: &TokenKind) -> bool {
+pub fn terminal_token(kind: &TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::SemiColon // i++; <---
