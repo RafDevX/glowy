@@ -1,18 +1,17 @@
 use crate::{
+    ParsingError, TokenStream,
     ast::{
         ElseNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode,
         ForRangeNode, IfNode, StatementNode, SwitchNode, TypeSwitchCaseClause, TypeSwitchNode,
     },
     parser::{
-        expect,
+        PResult, expect,
         exprs::{parse_expression, parse_expressions_list_while, parse_primary_expression},
         of_kind,
         stmts::{parse_block, parse_statement, parse_statements_until, terminal_token},
         types::parse_types_until,
-        PResult,
     },
     token::{Token, TokenKind},
-    ParsingError, TokenStream,
 };
 
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {
@@ -504,6 +503,7 @@ pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Statem
 mod tests {
     use super::*;
     use crate::{
+        Span,
         ast::{
             AssignmentKind, AssignmentNode, BinaryOpKind, BlockNode, CallNode, ExprNode,
             LiteralNode, OperandNameNode, OrderedF64, ShortVarDeclNode, StatementNode, TypeNode,
@@ -511,7 +511,6 @@ mod tests {
         },
         lexer::Lexer,
         parser::stmts::parse_block,
-        Span,
     };
 
     fn parse(input: &str) -> PResult<'_, BlockNode<'_>> {

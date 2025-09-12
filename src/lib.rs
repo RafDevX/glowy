@@ -43,8 +43,8 @@ mod taint;
 mod values;
 
 type FullPackagePath = String; // e.g. example.com/org/something/auth
-                               // ^ note that auth is not necessarily the package name!
-                               // must check package clause for files in auth/
+// ^ note that auth is not necessarily the package name!
+// must check package clause for files in auth/
 
 /// Source file content snippet bound to a specific location.
 ///

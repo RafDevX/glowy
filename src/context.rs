@@ -3,11 +3,11 @@ use std::{fmt, path::Path};
 use parser::Location;
 
 use crate::{
+    Pinned,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::{SymbolRef, SymbolTable},
     values::ValueRef,
-    Pinned,
 };
 
 pub struct AnalysisContext<'a> {

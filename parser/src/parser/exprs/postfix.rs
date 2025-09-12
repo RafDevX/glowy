@@ -1,9 +1,9 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
-    ast::{CallNode, ExprNode, IndexingNode},
-    parser::{expect, of_kind, types::parse_channel_type, PResult},
-    token::{Token, TokenKind},
     TokenStream,
+    ast::{CallNode, ExprNode, IndexingNode},
+    parser::{PResult, expect, of_kind, types::parse_channel_type},
+    token::{Token, TokenKind},
 };
 
 pub fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, CallNode<'a>> {
@@ -93,12 +93,12 @@ pub fn parse_postfix_if_exists<'a>(
 mod tests {
     use super::*;
     use crate::{
+        Span,
         ast::{
             BinaryOpKind, ChannelDirection, LiteralNode, OperandNameNode, TypeNode, UnaryOpKind,
         },
         lexer::Lexer,
         parser::exprs::parse_expression,
-        Span,
     };
 
     fn parse(input: &str) -> PResult<'_, ExprNode<'_>> {

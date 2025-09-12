@@ -17,7 +17,7 @@ use std::{cmp, collections::BTreeSet, fmt, iter};
 
 use parser::{Location, Span};
 
-use crate::{values::FunctionRef, Pinned};
+use crate::{Pinned, values::FunctionRef};
 
 /// Represents an individual tag within a label.
 ///

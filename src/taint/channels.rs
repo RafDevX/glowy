@@ -1,6 +1,6 @@
 use parser::{
-    ast::{ExprNode, SendNode},
     Location,
+    ast::{ExprNode, SendNode},
 };
 
 use super::exprs;

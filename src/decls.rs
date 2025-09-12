@@ -4,8 +4,8 @@
 use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
 
 use crate::{
-    context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol, values::ValueRef,
-    FullPackagePath,
+    FullPackagePath, context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol,
+    values::ValueRef,
 };
 
 pub fn visit_source_file<'a>(

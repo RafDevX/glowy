@@ -45,7 +45,7 @@ use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
 
 use parser::Span;
 
-use crate::{values::ValueRef, FullPackagePath, Pinned};
+use crate::{FullPackagePath, Pinned, values::ValueRef};
 
 #[derive(Debug)]
 pub struct SymbolTable<'a> {

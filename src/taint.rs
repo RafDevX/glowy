@@ -1,16 +1,16 @@
 use parser::{
+    Location, Span,
     ast::{
         AssignmentNode, BlockNode, DeclNode, ExprNode, ExprSwitchNode, ForNode, FunctionDeclNode,
         IfNode, ImportSpecNode, SendNode, ShortVarDeclNode, SourceFileNode, StatementNode,
         SwitchNode, TypeSwitchNode,
     },
-    Location, Span,
 };
 
 use crate::{
+    FullPackagePath,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    FullPackagePath,
 };
 
 mod channels;

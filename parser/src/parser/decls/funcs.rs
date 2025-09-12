@@ -1,8 +1,8 @@
 use crate::{
-    ast::{FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode},
-    parser::{expect, of_kind, stmts::parse_block, types::parse_type, PResult},
-    token::{Token, TokenKind},
     ParsingError, TokenStream,
+    ast::{FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode},
+    parser::{PResult, expect, of_kind, stmts::parse_block, types::parse_type},
+    token::{Token, TokenKind},
 };
 
 fn parse_param_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionParamDeclNode<'a>> {

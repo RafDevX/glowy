@@ -1,7 +1,7 @@
 use crate::{
+    Span,
     lexer::LexingError,
     token::{Token, TokenKind},
-    Span,
 };
 
 #[derive(Clone, Debug)]

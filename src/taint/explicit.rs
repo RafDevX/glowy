@@ -1,11 +1,11 @@
 use std::cmp;
 
 use parser::{
+    Annotation, Location, Span,
     ast::{
         AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, IndexingNode, LiteralNode,
         OperandNameNode, ShortVarDeclNode,
     },
-    Annotation, Location, Span,
 };
 
 use super::exprs;

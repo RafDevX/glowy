@@ -1,8 +1,8 @@
 use crate::{
-    ast::{BindingDeclSpecNode, DeclNode},
-    parser::{expect, exprs::parse_expressions_list_while, of_kind, types::parse_type, PResult},
-    token::{Annotation, Token, TokenKind},
     Location, ParsingError, TokenStream,
+    ast::{BindingDeclSpecNode, DeclNode},
+    parser::{PResult, expect, exprs::parse_expressions_list_while, of_kind, types::parse_type},
+    token::{Annotation, Token, TokenKind},
 };
 
 // bindings is our term for constants and variables,
@@ -100,7 +100,7 @@ fn parse_spec<'a>(
                     expected: TokenKind::Comma,
                     found: None,
                     context: Some("list of identifiers"),
-                })
+                });
             }
         };
 
@@ -141,7 +141,7 @@ fn parse_specs_list<'a>(
                 return Err(ParsingError::UnexpectedConstruct {
                     expected: kind.spec_construct(),
                     found,
-                })
+                });
             }
         };
     }
@@ -162,7 +162,7 @@ fn parse_binding_decl<'a>(s: &mut TokenStream<'a>, kind: BindingKind) -> PResult
             return Err(ParsingError::UnexpectedConstruct {
                 expected: kind.spec_construct(),
                 found,
-            })
+            });
         }
     };
 

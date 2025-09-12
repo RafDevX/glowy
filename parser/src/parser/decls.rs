@@ -1,11 +1,11 @@
 use bindings::{parse_const_decl, parse_var_decl};
 use funcs::parse_function_decl;
 
-use super::{of_kind, PResult};
+use super::{PResult, of_kind};
 use crate::{
+    ParsingError, TokenStream,
     ast::DeclNode,
     token::{Token, TokenKind},
-    ParsingError, TokenStream,
 };
 
 pub mod bindings;

@@ -1,8 +1,8 @@
-use super::{expect, of_kind, PResult};
+use super::{PResult, expect, of_kind};
 use crate::{
+    ParsingError, TokenStream,
     ast::{ImportNode, ImportSpecNode},
     token::{Token, TokenKind},
-    ParsingError, TokenStream,
 };
 
 fn parse_spec<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ImportSpecNode<'a>> {
@@ -58,7 +58,7 @@ fn parse_specs_list<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<ImportSpecNo
                 return Err(ParsingError::UnexpectedConstruct {
                     expected: "an import specification",
                     found,
-                })
+                });
             }
         };
     }
@@ -81,7 +81,7 @@ pub fn try_parse_import<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Option<Impor
                 return Err(ParsingError::UnexpectedConstruct {
                     expected: "an import specification",
                     found,
-                })
+                });
             }
         };
 

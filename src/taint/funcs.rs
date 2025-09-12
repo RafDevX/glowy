@@ -1,9 +1,9 @@
 use parser::{
+    Location, Span,
     ast::{
         CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
         OperandNameNode,
     },
-    Location, Span,
 };
 
 use crate::{

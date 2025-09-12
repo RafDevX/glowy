@@ -1,8 +1,8 @@
-use super::{expect, exprs::parse_expression, of_kind, PResult};
+use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
+    ParsingError, TokenStream,
     ast::{ChannelDirection, TypeNode},
     token::{Token, TokenKind},
-    ParsingError, TokenStream,
 };
 
 fn parse_type_args<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeNode<'a>>> {
@@ -147,9 +147,9 @@ pub fn parse_types_until<'a>(
 mod tests {
     use super::*;
     use crate::{
+        Span,
         ast::{BinaryOpKind, ExprNode, LiteralNode, OperandNameNode},
         lexer::Lexer,
-        Span,
     };
 
     fn parse(input: &str) -> PResult<'_, TypeNode<'_>> {

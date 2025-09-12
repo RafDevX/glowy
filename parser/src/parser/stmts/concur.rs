@@ -1,8 +1,8 @@
 use crate::{
-    ast::StatementNode,
-    parser::{expect, exprs::parse_expression, PResult},
-    token::TokenKind,
     TokenStream,
+    ast::StatementNode,
+    parser::{PResult, expect, exprs::parse_expression},
+    token::TokenKind,
 };
 
 pub fn parse_go_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {

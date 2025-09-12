@@ -1,8 +1,8 @@
 use crate::{
+    TokenStream,
     ast::{BinaryOpKind, ExprNode, UnaryOpKind},
     parser::PResult,
     token::TokenKind,
-    TokenStream,
 };
 
 // adapted from https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
@@ -135,9 +135,9 @@ impl TryFrom<TokenKind> for BinaryOpKind {
 mod tests {
     use super::*;
     use crate::{
+        Span,
         ast::{LiteralNode, OperandNameNode},
         lexer::Lexer,
-        Span,
     };
 
     fn parse(input: &str) -> PResult<'_, ExprNode<'_>> {

@@ -1,21 +1,21 @@
 use std::borrow::Cow;
 
 use parser::{
+    Location, Span,
     ast::{
         AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,
         ForHeaderNode, ForNode, ForRangeNode, IfNode, LiteralNode, StatementNode, SwitchNode,
         TypeSwitchNode,
     },
-    Location, Span,
 };
 
 use crate::{
+    Pinned,
     context::{AnalysisContext, DeferTarget},
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::{explicit, exprs},
     values::{BacktraceContainer, ValueRef},
-    Pinned,
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {

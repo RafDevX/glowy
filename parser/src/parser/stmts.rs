@@ -6,19 +6,19 @@ use self::{
     },
 };
 use super::{
+    PResult,
     decls::bindings::{parse_const_decl, parse_var_decl},
     expect,
     exprs::{parse_expression, parse_expressions_list, parse_expressions_list_while},
-    PResult,
 };
 use crate::{
+    ParsingError, TokenStream,
     ast::{
         AssignmentKind, AssignmentNode, BlockNode, ExprNode, SendNode, ShortVarDeclNode,
         StatementNode,
     },
-    parser::{of_kind, BacktrackingContext},
+    parser::{BacktrackingContext, of_kind},
     token::{Token, TokenKind},
-    ParsingError, TokenStream,
 };
 
 mod concur;
@@ -303,9 +303,9 @@ impl TryFrom<TokenKind> for AssignmentKind {
 mod tests {
     use super::*;
     use crate::{
+        Span,
         ast::{BinaryOpKind, LiteralNode, OperandNameNode, UnaryOpKind},
         lexer::Lexer,
-        Span,
     };
 
     fn parse(input: &str) -> PResult<'_, BlockNode<'_>> {

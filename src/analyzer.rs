@@ -6,10 +6,11 @@ use std::{
 };
 
 use crate::{
+    FullPackagePath, SourceFile,
     context::{AnalysisContext, AnalysisStage},
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
-    taint, FullPackagePath, SourceFile,
+    taint,
 };
 
 /// Primary orchestrator and conductor of the analysis process.

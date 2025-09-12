@@ -1,4 +1,4 @@
-use crate::{lexer::Lexer, token::Token, Annotation, Location};
+use crate::{Annotation, Location, lexer::Lexer, token::Token};
 
 // this is almost equivalent to std::iter::Peekable<Lexer<'a>>,
 // but sadly we can't use a type alias because we need a few

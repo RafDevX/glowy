@@ -1,18 +1,18 @@
 use std::{
     cell::{Ref, RefCell, RefMut},
     cmp,
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt,
     hash::Hash,
     iter,
     rc::Rc,
 };
 
-use parser::{ast::FunctionSignatureNode, Location, Span};
+use parser::{Location, Span, ast::FunctionSignatureNode};
 
 use crate::{
-    labels::{LabelBacktrace, LabelBacktraceKind},
     Pinned,
+    labels::{LabelBacktrace, LabelBacktraceKind},
 };
 
 // wrapper struct (vs. type alias) allows impl'ing despite orphan rule

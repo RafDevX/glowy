@@ -8,7 +8,7 @@ use codespan_reporting::{
         termcolor::{ColorChoice, StandardStream},
     },
 };
-use parser::{parse, Diagnostics, ErrorDiagnosticInfo};
+use parser::{Diagnostics, ErrorDiagnosticInfo, parse};
 
 fn main() {
     let path = env::args().nth(1);
@@ -39,12 +39,16 @@ fn show_error(path: &Option<String>, input: &str, info: ErrorDiagnosticInfo) {
     let diagnostic = Diagnostic::error()
         .with_code(info.code)
         .with_message(info.overview)
-        .with_labels(vec![Label::primary((), location).with_message(info.details)])
-        .with_notes(vec![concat!(
-            "help: if you're sure your Go syntax is correct, ",
-            "this parser may not support that construct"
-        )
-        .to_owned()]);
+        .with_labels(vec![
+            Label::primary((), location).with_message(info.details),
+        ])
+        .with_notes(vec![
+            concat!(
+                "help: if you're sure your Go syntax is correct, ",
+                "this parser may not support that construct"
+            )
+            .to_owned(),
+        ]);
 
     let writer = StandardStream::stderr(ColorChoice::Auto);
     let config = term::Config::default();

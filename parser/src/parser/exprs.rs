@@ -1,13 +1,13 @@
 use self::postfix::parse_postfix_if_exists;
-use super::{expect, PResult};
+use super::{PResult, expect};
 use crate::{
+    ParsingError, TokenStream,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
         OperandNameNode, OrderedF64,
     },
-    parser::{of_kind, types::parse_type, BacktrackingContext},
+    parser::{BacktrackingContext, of_kind, types::parse_type},
     token::{Token, TokenKind},
-    ParsingError, TokenStream,
 };
 
 mod ops;
@@ -183,7 +183,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             return Err(ParsingError::UnexpectedConstruct {
                 expected: "a primary expression",
                 found,
-            })
+            });
         }
     };
 

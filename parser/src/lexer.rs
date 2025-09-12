@@ -8,9 +8,9 @@ use finl_unicode::categories::CharacterCategories;
 use regex::Regex;
 
 use crate::{
+    Span,
     errors::{Diagnostics, ErrorDiagnosticInfo},
     token::{Annotation, Token, TokenKind},
-    Span,
 };
 
 #[derive(Clone, Debug, PartialEq)]

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use parser::{
+    Location,
     ast::{
         BinaryOpKind, CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode,
         IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind,
     },
-    Location,
 };
 
 use super::{channels, funcs};
