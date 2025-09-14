@@ -4,8 +4,8 @@ use parser::{
     Location, Span,
     ast::{
         AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,
-        ForHeaderNode, ForNode, ForRangeNode, IfNode, LiteralNode, StatementNode, SwitchNode,
-        TypeSwitchNode,
+        ForHeaderNode, ForNode, ForRangeNode, FunctionResultNode, IfNode, LiteralNode,
+        StatementNode, SwitchNode, TypeNode, TypeSwitchNode,
     },
 };
 
@@ -227,18 +227,38 @@ fn get_for_range_values<'a>(
 
         vec![ValueRef::from(index_bt), composite.get_dyn(location)]
     } else if let Some(func) = value.as_function() {
-        let param_type = func
+        let yield_type = func
             .signature()
             .params
             .first()
             .filter(|param| param.ids.len() == 1)
             .map(|param| &param.r#type);
 
-        // if let Some(TypeNode::Function(r#yield)) = param_type {
-        //     todo!()
-        // }
+        if let Some(TypeNode::Function { signature }) = yield_type {
+            if let Some(FunctionResultNode::Single(TypeNode::Name {
+                package: None,
+                id: yield_result,
+                ..
+            })) = &signature.result
+            {
+                if yield_result.content() == "bool" {
+                    let n_values: usize = signature.params.iter().map(|p| p.ids.len()).sum();
 
-        todo!()
+                    if n_values == 0 {
+                        // note: this is wrong, we should return an empty Vec,
+                        // but that would lead to an incorrect branch backtrace
+                        // being set, which is worse -- branch must depend on
+                        // the label of `value`, since a function might have
+                        // side effects
+                        return vec![ValueRef::from(value.backtrace_at_location(location))];
+                    } else if n_values == 1 || n_values == 2 {
+                        // FIXME: don't know how to propagate this as a sink
+                    }
+                }
+            }
+        }
+
+        vec![]
     } else if let ExprNode::Literal(LiteralNode::Int { .. }) = range_expr {
         // this does not catch all the ints (see below), but it does catch some
         // of them (directly passed integer literals)
