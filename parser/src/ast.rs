@@ -225,15 +225,21 @@ pub enum LiteralNode<'a> {
     Array {
         length: Option<Box<ExprNode<'a>>>, // None if [...]int
         element: TypeNode<'a>,
-        values: CompositeLiteralElementListNode<'a, usize>,
+        values: CompositeLiteralElementListNode<'a>,
         location: Location,
     },
     Slice {
         element: TypeNode<'a>,
-        values: CompositeLiteralElementListNode<'a, usize>,
+        values: CompositeLiteralElementListNode<'a>,
         location: Location,
     },
-    // Struct, Map
+    Map {
+        key: TypeNode<'a>,
+        element: TypeNode<'a>,
+        values: CompositeLiteralElementListNode<'a>,
+        location: Location,
+    },
+    // Struct
 }
 
 /// Wrapper for f64 to support Eq and Ord
@@ -254,13 +260,13 @@ impl PartialOrd for OrderedF64 {
     }
 }
 
-pub type CompositeLiteralElementListNode<'a, K, N = K> =
-    Vec<(Option<K>, CompositeLiteralElementNode<'a, N>)>;
+pub type CompositeLiteralElementListNode<'a> =
+    Vec<(Option<ExprNode<'a>>, CompositeLiteralElementNode<'a>)>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CompositeLiteralElementNode<'a, K, N = K> {
+pub enum CompositeLiteralElementNode<'a> {
     Expr(ExprNode<'a>),
-    Nested(Vec<(Option<K>, CompositeLiteralElementNode<'a, N>)>),
+    Nested(CompositeLiteralElementListNode<'a>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

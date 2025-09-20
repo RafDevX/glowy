@@ -6,7 +6,7 @@ use crate::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
         OperandNameNode, OrderedF64,
     },
-    parser::{BacktrackingContext, of_kind, types::parse_type},
+    parser::{of_kind, types::parse_type},
     token::{Token, TokenKind},
 };
 
@@ -52,7 +52,7 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
 
     let element = parse_type(s)?;
 
-    let values = parse_composite_literal_element_list(s)?;
+    let values = parse_composite_literal_element_list(s, true)?;
 
     let location = s.location_since(&beginning);
 
@@ -74,9 +74,32 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
     Ok(literal)
 }
 
+fn parse_map_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let beginning = expect(s, TokenKind::Map, Some("map literal"))?;
+    expect(s, TokenKind::SquareL, Some("map literal"))?;
+
+    let key = parse_type(s)?;
+
+    expect(s, TokenKind::SquareR, Some("map literal"))?;
+
+    let element = parse_type(s)?;
+
+    let values = parse_composite_literal_element_list(s, false)?;
+
+    let location = s.location_since(&beginning);
+
+    Ok(LiteralNode::Map {
+        key,
+        element,
+        values,
+        location,
+    })
+}
+
 fn parse_composite_literal_element_list<'a>(
     s: &mut TokenStream<'a>,
-) -> PResult<'a, CompositeLiteralElementListNode<'a, usize>> {
+    optional_keys: bool,
+) -> PResult<'a, CompositeLiteralElementListNode<'a>> {
     expect(s, TokenKind::CurlyL, Some("composite literal"))?;
 
     let mut values = vec![];
@@ -94,34 +117,48 @@ fn parse_composite_literal_element_list<'a>(
             }
         }
 
-        // elements can be either alone or with an integer literal key, but we
-        // don't know unless we see an Int followed by a Colon - since we cannot
-        // peek 2 tokens ahead, we use a BacktrackingContext
-        let mut context = BacktrackingContext::new(s);
-        let b = context.stream();
+        if optional_keys {
+            if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+                // no key, just nested
+                let value = parse_composite_literal_element_list(s, optional_keys)?;
 
-        let key = if let Some(Ok(of_kind!(TokenKind::Int(candidate)))) = b.next() {
-            // might be a key, but only if followed by :
-            if let Some(Ok(of_kind!(TokenKind::Colon))) = b.next() {
-                // confirmed! we can commit and go back to the main stream s
-                context.commit()?;
+                values.push((None, CompositeLiteralElementNode::Nested(value)));
 
-                Some(usize::try_from(candidate).ok().unwrap_or(usize::MAX))
-            } else {
-                // nope, there's no key
-                // (we cannot re-use `candidate` as the value, we need to parse
-                // again, because it might be a more complex expression like
-                // the `2` in `2 + 3`)
-                None
+                continue;
             }
-        } else {
-            None
-        };
+        }
 
-        let value = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
-            CompositeLiteralElementNode::Nested(parse_composite_literal_element_list(s)?)
+        // take an expression, initially assumed as a value candidate
+        let value = parse_expression(s)?;
+
+        let (key, value) = if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
+            // nope, it wasn't a value -- it was a key!
+            let key = value;
+
+            // advance
+            s.next();
+
+            // parse the actual value
+            let value = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+                CompositeLiteralElementNode::Nested(parse_composite_literal_element_list(
+                    s,
+                    optional_keys,
+                )?)
+            } else {
+                CompositeLiteralElementNode::Expr(parse_expression(s)?)
+            };
+
+            (Some(key), value)
         } else {
-            CompositeLiteralElementNode::Expr(parse_expression(s)?)
+            // confirmed! it was actually the value, there's no key
+
+            if !optional_keys {
+                // but this case isn't actually allowed, so we need to error...
+                expect(s, TokenKind::Colon, Some("composite literal"))?;
+                // ^ this will intentionally error
+            }
+
+            (None, CompositeLiteralElementNode::Expr(value))
         };
 
         values.push((key, value));
@@ -172,6 +209,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             .into()
         }
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_literal(s)?.into(),
+        Some(of_kind!(TokenKind::Map)) => parse_map_literal(s)?.into(),
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance
             let inner = parse_expression(s)?;
