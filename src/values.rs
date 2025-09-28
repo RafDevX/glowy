@@ -8,7 +8,10 @@ use std::{
     rc::Rc,
 };
 
-use parser::{Location, Span, ast::FunctionSignatureNode};
+use parser::{
+    Location, Span,
+    ast::{BinaryOpKind, ExprNode, FunctionSignatureNode, LiteralNode, UnaryOpKind},
+};
 
 use crate::{
     Pinned,
@@ -39,17 +42,23 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_composite(&self) -> Option<Ref<CompositeValue<'a, usize>>> {
+    pub fn as_composite(&self) -> Option<Ref<dyn CompositeValueAdapter<'a>>> {
         Ref::filter_map(self.0.borrow(), |value| match value {
-            Value::Array(composite) | Value::Slice(composite) => Some(composite),
+            Value::Array(composite) | Value::Slice(composite) => {
+                Some(composite as &dyn CompositeValueAdapter<'a>)
+            }
+            Value::Map(composite) => Some(composite),
             _ => None,
         })
         .ok()
     }
 
-    pub fn as_composite_mut(&mut self) -> Option<RefMut<CompositeValue<'a, usize>>> {
+    pub fn as_composite_mut(&mut self) -> Option<RefMut<dyn CompositeValueAdapter<'a>>> {
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
-            Value::Array(composite) | Value::Slice(composite) => Some(composite),
+            Value::Array(composite) | Value::Slice(composite) => {
+                Some(composite as &mut dyn CompositeValueAdapter<'a>)
+            }
+            Value::Map(composite) => Some(composite),
             _ => None,
         })
         .ok()
@@ -202,8 +211,9 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
 pub enum Value<'a> {
     Simple(Option<LabelBacktrace<'a>>),
     Expandable(ExpandableValue<'a>),
-    Array(CompositeValue<'a, usize>),
-    Slice(CompositeValue<'a, usize>),
+    Array(CompositeValue<'a, u64>),
+    Slice(CompositeValue<'a, u64>),
+    Map(CompositeValue<'a, SimpleConstValue>),
     Function(FunctionValue<'a>),
 }
 
@@ -218,6 +228,7 @@ impl<'a> Value<'a> {
             Self::Simple(opt) => opt,
             Self::Expandable(exp) => exp,
             Self::Array(composite) | Self::Slice(composite) => composite,
+            Self::Map(composite) => composite,
             Self::Function(func) => func,
         }
     }
@@ -254,6 +265,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
+            Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Function(func) => Self::Function(recurs!(func)),
         }
     }
@@ -276,6 +288,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
+            Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Function(func) => Self::Function(recurs!(func)),
         }
     }
@@ -377,6 +390,26 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
 }
 
 impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
+    pub fn new(
+        r#const: HashMap<K, ValueRef<'a>>,
+        others: impl IntoIterator<Item = ValueRef<'a>>,
+        location: Pinned<Location>,
+    ) -> Self {
+        let children: Vec<_> = others
+            .into_iter()
+            .filter_map(|v| v.backtrace_at_location(location.clone()))
+            .collect();
+
+        let r#dyn = LabelBacktrace::fold(
+            children.iter(),
+            LabelBacktraceKind::Expression,
+            None,
+            location,
+        );
+
+        Self { r#const, r#dyn }
+    }
+
     pub fn get_const(&self, key: K, at_location: Pinned<Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(&key).cloned() {
             Some(value) => value,
@@ -439,15 +472,6 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     }
 }
 
-impl<'a, K: Eq + Hash> From<HashMap<K, ValueRef<'a>>> for CompositeValue<'a, K> {
-    fn from(r#const: HashMap<K, ValueRef<'a>>) -> Self {
-        Self {
-            r#const,
-            r#dyn: None,
-        }
-    }
-}
-
 impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
     fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
         let children: Vec<_> = self
@@ -506,6 +530,81 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
                 .nest_backtrace(parent_kind, parent_symbol, parent_location, extra_children);
 
         Self { r#const, r#dyn }
+    }
+}
+
+// this is necessary because rust doesn't support using some dynamic type
+// CompositeValue<'a, ?> in function return values and etc., but we want to
+// re-use code for similar logic whenever possible while maintaining typing
+// guarantees for integer-keyed composite values
+pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
+    fn get_const(&self, key: SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a>;
+    fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a>;
+    fn set_const(
+        &mut self,
+        key: SimpleConstValue,
+        value: ValueRef<'a>,
+        overwrite: bool,
+        at_location: Pinned<Location>,
+    );
+    fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>);
+}
+
+// trivial implementation
+impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
+    fn get_const(&self, key: SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
+        self.get_const(key, at_location)
+    }
+
+    fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+        self.get_dyn(at_location)
+    }
+
+    fn set_const(
+        &mut self,
+        key: SimpleConstValue,
+        value: ValueRef<'a>,
+        overwrite: bool,
+        at_location: Pinned<Location>,
+    ) {
+        self.set_const(key, value, overwrite, at_location);
+    }
+
+    fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>) {
+        self.set_dyn(value, at_location);
+    }
+}
+
+// integer key adapter
+impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
+    fn get_const(&self, key: SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
+        if let SimpleConstValue::Integer(key) = key {
+            self.get_const(key, at_location)
+        } else {
+            self.get_dyn(at_location)
+        }
+    }
+
+    fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+        self.get_dyn(at_location)
+    }
+
+    fn set_const(
+        &mut self,
+        key: SimpleConstValue,
+        value: ValueRef<'a>,
+        overwrite: bool,
+        at_location: Pinned<Location>,
+    ) {
+        if let SimpleConstValue::Integer(key) = key {
+            self.set_const(key, value, overwrite, at_location);
+        } else {
+            self.set_dyn(value, at_location);
+        }
+    }
+
+    fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>) {
+        self.set_dyn(value, at_location);
     }
 }
 
@@ -656,5 +755,69 @@ impl Ord for FunctionRef<'_> {
 impl PartialOrd for FunctionRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+pub enum SimpleConstValue {
+    Integer(u64),
+    String(String),
+}
+
+// basic support for literal-only composition, e.g. `2 + 3` is recognized as 5
+impl SimpleConstValue {
+    pub fn try_resolve_from_expr(expr: &ExprNode<'_>) -> Option<Self> {
+        let result = match expr {
+            ExprNode::Literal(LiteralNode::String { value, .. }) => Self::String(value.clone()),
+            ExprNode::Literal(LiteralNode::Int { value, .. }) => Self::Integer(*value),
+            ExprNode::UnaryOp {
+                kind: UnaryOpKind::Identity,
+                operand,
+                ..
+            } => Self::try_resolve_from_expr(operand)?,
+            ExprNode::BinaryOp {
+                kind, left, right, ..
+            } => {
+                let l = Self::try_resolve_from_expr(left)?;
+                let r = Self::try_resolve_from_expr(right)?;
+
+                if *kind == BinaryOpKind::Sum {
+                    if let Self::String(l) = l {
+                        if let Self::String(r) = r {
+                            // string concatenation
+                            return Some(Self::String(l + &r));
+                        }
+                    }
+                }
+
+                // otherwise, must be integer operation
+
+                let Self::Integer(l) = Self::try_resolve_from_expr(left)? else {
+                    return None;
+                };
+                let Self::Integer(r) = Self::try_resolve_from_expr(right)? else {
+                    return None;
+                };
+
+                let combined = match kind {
+                    BinaryOpKind::Sum => l.saturating_add(r),
+                    BinaryOpKind::Diff => l.saturating_sub(r),
+                    BinaryOpKind::Product => l.saturating_mul(r),
+                    BinaryOpKind::Quotient if r != 0 => l.saturating_div(r),
+                    BinaryOpKind::Remainder => l % r,
+                    BinaryOpKind::ShiftLeft => l << r,
+                    BinaryOpKind::ShiftRight => l >> r,
+                    BinaryOpKind::BitwiseOr => l | r,
+                    BinaryOpKind::BitwiseAnd => l & r,
+                    BinaryOpKind::BitwiseXor => l ^ r,
+                    _ => return None,
+                };
+
+                Self::Integer(combined)
+            }
+            _ => return None,
+        };
+
+        Some(result)
     }
 }

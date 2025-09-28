@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use parser::{
     Location,
     ast::{
-        BinaryOpKind, CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode,
-        IndexingNode, LiteralNode, OperandNameNode, UnaryOpKind,
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, IndexingNode,
+        LiteralNode, OperandNameNode, UnaryOpKind,
     },
 };
 
@@ -14,7 +14,10 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
-    values::{BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, Value, ValueRef},
+    values::{
+        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
+        ValueRef,
+    },
 };
 
 pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec<ValueRef<'a>> {
@@ -140,34 +143,36 @@ fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> V
         | LiteralNode::String { .. } => ValueRef::from(None),
         LiteralNode::Array {
             values, location, ..
-        } => ValueRef::from(Value::Array(CompositeValue::from(visit_array_literal(
+        } => ValueRef::from(Value::Array(visit_integer_keyed_composite_literal(
             ctx, values, location,
-        )))),
+        ))),
         LiteralNode::Slice {
             values, location, ..
         } => {
             // Array length must be a constant so we don't need to visit it to
             // trigger side-effects (there aren't any); we can focus on values
-            ValueRef::from(Value::Slice(CompositeValue::from(visit_array_literal(
+            ValueRef::from(Value::Slice(visit_integer_keyed_composite_literal(
                 ctx, values, location,
-            ))))
+            )))
         }
+        LiteralNode::Map {
+            values, location, ..
+        } => ValueRef::from(Value::Map(visit_generic_composite_literal(
+            ctx, values, location,
+        ))),
     }
 }
 
-// for analysis purposes, slices are treated as arrays
-fn visit_array_literal<'a>(
+fn visit_integer_keyed_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
-    values: &CompositeLiteralElementListNode<'a, usize>,
+    values: &CompositeLiteralElementListNode<'a>,
     location: &Location,
-) -> HashMap<usize, ValueRef<'a>> {
+) -> CompositeValue<'a, u64> {
     let mut map = HashMap::new();
+    let mut others = Vec::new();
 
     let mut next_default_key = 0;
     for (opt_key, el) in values {
-        let key = opt_key.as_ref().copied().unwrap_or(next_default_key);
-        next_default_key = key + 1;
-
         let value = visit_array_literal_element(ctx, el, location);
 
         if value.is_bottom() {
@@ -175,15 +180,67 @@ fn visit_array_literal<'a>(
             continue;
         }
 
-        map.insert(key, value);
+        let key = if let Some(expr) = opt_key {
+            if let Some(SimpleConstValue::Integer(int)) =
+                SimpleConstValue::try_resolve_from_expr(expr)
+            {
+                Some(int)
+            } else {
+                // should not happen for arrays/slices, but you never know
+                // (more complex const expressions won't be resolved)
+                None
+            }
+        } else {
+            Some(next_default_key)
+        };
+
+        if let Some(key) = key {
+            next_default_key = key + 1;
+
+            map.insert(key, value);
+        } else {
+            next_default_key += 1; // no proper answer on what to do here...
+
+            others.push(value);
+        }
     }
 
-    map
+    CompositeValue::new(map, others, ctx.pin(location.clone()))
 }
 
-fn visit_array_literal_element<'a, K>(
+fn visit_generic_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
-    node: &CompositeLiteralElementNode<'a, K>,
+    values: &CompositeLiteralElementListNode<'a>,
+    location: &Location,
+) -> CompositeValue<'a, SimpleConstValue> {
+    let mut map = HashMap::new();
+    let mut others = Vec::new();
+
+    for (opt_key, el) in values {
+        let value = visit_array_literal_element(ctx, el, location);
+
+        if value.is_bottom() {
+            // we don't need to bloat the HashMap with None backtraces
+            continue;
+        }
+
+        let key = opt_key
+            .as_ref()
+            .and_then(SimpleConstValue::try_resolve_from_expr);
+
+        if let Some(key) = key {
+            map.insert(key, value);
+        } else {
+            others.push(value);
+        }
+    }
+
+    CompositeValue::new(map, others, ctx.pin(location.clone()))
+}
+
+fn visit_array_literal_element<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CompositeLiteralElementNode<'a>,
     location: &Location,
 ) -> ValueRef<'a> {
     match &node {
@@ -229,9 +286,7 @@ fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) ->
         return ValueRef::from(None);
     };
 
-    let index = try_resolve_constant_integer(&node.index)
-        .map(usize::try_from)
-        .and_then(Result::ok);
+    let index = SimpleConstValue::try_resolve_from_expr(&node.index);
 
     if let Some(index) = index {
         composite.get_const(index, ctx.pin(node.location.clone()))
@@ -263,41 +318,7 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
             LiteralNode::String { location, .. } => location.clone(),
             LiteralNode::Array { location, .. } => location.clone(),
             LiteralNode::Slice { location, .. } => location.clone(),
+            LiteralNode::Map { location, .. } => location.clone(),
         },
     }
-}
-
-// basic support for literal-only composition, e.g. `2 + 3` is recognized as 5
-pub fn try_resolve_constant_integer(node: &ExprNode<'_>) -> Option<u64> {
-    let result = match node {
-        ExprNode::Literal(LiteralNode::Int { value, .. }) => *value,
-        ExprNode::UnaryOp {
-            kind: UnaryOpKind::Identity,
-            operand,
-            ..
-        } => try_resolve_constant_integer(operand)?,
-        ExprNode::BinaryOp {
-            kind, left, right, ..
-        } => {
-            let l = try_resolve_constant_integer(left)?;
-            let r = try_resolve_constant_integer(right)?;
-
-            match kind {
-                BinaryOpKind::Sum => l.saturating_add(r),
-                BinaryOpKind::Diff => l.saturating_sub(r),
-                BinaryOpKind::Product => l.saturating_mul(r),
-                BinaryOpKind::Quotient if r != 0 => l.saturating_div(r),
-                BinaryOpKind::Remainder => l % r,
-                BinaryOpKind::ShiftLeft => l << r,
-                BinaryOpKind::ShiftRight => l >> r,
-                BinaryOpKind::BitwiseOr => l | r,
-                BinaryOpKind::BitwiseAnd => l & r,
-                BinaryOpKind::BitwiseXor => l ^ r,
-                _ => return None,
-            }
-        }
-        _ => return None,
-    };
-
-    Some(result)
 }

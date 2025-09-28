@@ -15,7 +15,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::funcs,
-    values::{BacktraceContainer, SelfAwareBacktraceContainer, ValueRef},
+    values::{BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
 pub fn visit_binding_decl<'a>(
@@ -424,9 +424,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
 
         exprs::visit_single_expr(ctx, &self.index); // trigger side effects
 
-        let index = exprs::try_resolve_constant_integer(&self.index)
-            .map(usize::try_from)
-            .and_then(Result::ok);
+        let index = SimpleConstValue::try_resolve_from_expr(&self.index);
 
         let overwrite = simple && root_indexing_in_current_scope(ctx, self);
 
