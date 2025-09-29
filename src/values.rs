@@ -10,7 +10,7 @@ use std::{
 
 use parser::{
     Location, Span,
-    ast::{BinaryOpKind, ExprNode, FunctionSignatureNode, LiteralNode, UnaryOpKind},
+    ast::{BinaryOpKind, ExprNode, FunctionSignatureNode, LiteralNode, TypeNode, UnaryOpKind},
 };
 
 use crate::{
@@ -31,6 +31,38 @@ impl<'a> ValueRef<'a> {
             self.clone()
         } else {
             Self::from(borrowed.clone())
+        }
+    }
+
+    /// Force cloning inner value (copy by value)
+    pub fn clone_inner(&self) -> Self {
+        let borrowed = self.0.borrow();
+
+        Self::from(borrowed.clone())
+    }
+
+    /// Generate a new value just from type information, without init expression
+    ///
+    /// In most cases, Go's zero value corresponds to a `Value::Simple(None)`,
+    /// usually from `nil`, but for array types we need to have an actual
+    /// `Value::Array(...)` since they can be used from the get-go and otherwise
+    /// we would later not recognize the value as a valid indexing base.
+    ///
+    /// Input is an `Option` for easier compatibility with invoking code.
+    pub fn uninitialized_from_type(r#type: Option<&TypeNode<'a>>) -> Self {
+        if let Some(TypeNode::Array { element, .. }) = r#type {
+            // TODO: support nested array types
+            let mut composite = CompositeValue::empty();
+
+            if let TypeNode::Array { .. } = &**element {
+                let inner = Self::uninitialized_from_type(Some(element));
+
+                composite.set_default_value(inner);
+            }
+
+            Self::from(Value::Array(composite))
+        } else {
+            Self::from(None)
         }
     }
 
@@ -387,9 +419,19 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
     r#const: HashMap<K, ValueRef<'a>>,
     // overall backtrace affecting the entire structure, from dynamic sets, etc.
     r#dyn: Option<LabelBacktrace<'a>>,
+    // default value returned by get if the key is not found on access
+    default_value: Option<ValueRef<'a>>,
 }
 
 impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
+    fn empty() -> Self {
+        Self {
+            r#const: HashMap::new(),
+            r#dyn: None,
+            default_value: None,
+        }
+    }
+
     pub fn new(
         r#const: HashMap<K, ValueRef<'a>>,
         others: impl IntoIterator<Item = ValueRef<'a>>,
@@ -407,13 +449,25 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             location,
         );
 
-        Self { r#const, r#dyn }
+        Self {
+            r#const,
+            r#dyn,
+            default_value: None,
+        }
+    }
+
+    pub fn set_default_value(&mut self, default_value: ValueRef<'a>) {
+        self.default_value = Some(default_value);
     }
 
     pub fn get_const(&self, key: K, at_location: Pinned<Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(&key).cloned() {
             Some(value) => value,
-            None => ValueRef::from(None),
+            None => self
+                .default_value
+                .as_ref()
+                .map(ValueRef::clone_inner)
+                .unwrap_or_else(|| ValueRef::from(None)),
         };
 
         value.nest_backtrace(
@@ -432,6 +486,12 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         // implemented elsewhere
 
         let backtrace = self.backtrace_at_location(at_location);
+
+        if backtrace.is_none() {
+            if let Some(default) = &self.default_value {
+                return default.clone_inner();
+            }
+        }
 
         ValueRef::from(backtrace)
     }
@@ -513,7 +573,11 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
 
         let r#dyn = self.r#dyn.realize(from_func, from_index, concrete);
 
-        Self { r#const, r#dyn }
+        Self {
+            r#const,
+            r#dyn,
+            default_value: self.default_value.clone(), // ref-clone is fine here
+        }
     }
 
     fn nest_backtrace(
@@ -529,7 +593,11 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             self.r#dyn
                 .nest_backtrace(parent_kind, parent_symbol, parent_location, extra_children);
 
-        Self { r#const, r#dyn }
+        Self {
+            r#const,
+            r#dyn,
+            default_value: self.default_value.clone(), // ref-clone is fine here
+        }
     }
 }
 
