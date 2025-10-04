@@ -73,6 +73,10 @@ pub enum TypeNode<'a> {
     Slice {
         element: Box<TypeNode<'a>>,
     },
+    Map {
+        key: Box<TypeNode<'a>>,
+        element: Box<TypeNode<'a>>,
+    },
     Function {
         signature: Box<FunctionSignatureNode<'a>>,
     },

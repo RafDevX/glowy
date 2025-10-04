@@ -106,6 +106,20 @@ fn parse_array_or_slice_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNod
     }
 }
 
+fn parse_map_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+    expect(s, TokenKind::Map, Some("map type"))?;
+
+    expect(s, TokenKind::SquareL, Some("map type"))?;
+
+    let key = Box::new(parse_type(s)?);
+
+    expect(s, TokenKind::SquareR, Some("map type"))?;
+
+    let element = Box::new(parse_type(s)?);
+
+    Ok(TypeNode::Map { key, element })
+}
+
 fn parse_function_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     expect(s, TokenKind::Func, Some("function type"))?;
 
@@ -124,6 +138,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
         }
         Some(of_kind!(TokenKind::Func)) => parse_function_type(s),
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_type(s),
+        Some(of_kind!(TokenKind::Map)) => parse_map_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
         Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
         found => Err(ParsingError::UnexpectedConstruct {
