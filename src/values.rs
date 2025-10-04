@@ -784,6 +784,11 @@ pub enum FunctionRef<'a> {
     Named(Pinned<Span<'a>>),
     /// An anonymous function literal.
     Anonymous(Pinned<Location>),
+    /// A built-in function provided by the language or the Go standard library.
+    BuiltIn {
+        package_name: &'static str,
+        name: &'static str,
+    },
 }
 
 impl fmt::Display for FunctionRef<'_> {
@@ -797,6 +802,7 @@ impl fmt::Display for FunctionRef<'_> {
                 pin.inner().start,
                 pin.inner().end
             ),
+            Self::BuiltIn { package_name, name } => write!(f, "{package_name}.{name}"),
         }
     }
 }
@@ -816,6 +822,18 @@ impl Ord for FunctionRef<'_> {
                     .then(a.inner().start.cmp(&b.inner().start))
                     .then(b.inner().end.cmp(&b.inner().end))
             }),
+            (Self::Anonymous(_), _) => cmp::Ordering::Less,
+            (_, Self::Anonymous(_)) => cmp::Ordering::Greater,
+            (
+                Self::BuiltIn {
+                    package_name: a_package_name,
+                    name: a_name,
+                },
+                Self::BuiltIn {
+                    package_name: b_package_name,
+                    name: b_name,
+                },
+            ) => a_package_name.cmp(b_package_name).then(a_name.cmp(b_name)),
         }
     }
 }

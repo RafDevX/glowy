@@ -43,9 +43,15 @@
 
 use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
 
-use parser::Span;
+use parser::{
+    Span,
+    ast::{FunctionParamDeclNode, FunctionSignatureNode, TypeNode},
+};
 
-use crate::{FullPackagePath, Pinned, values::ValueRef};
+use crate::{
+    FullPackagePath, Pinned,
+    values::{FunctionRef, FunctionValue, Value, ValueRef},
+};
 
 #[derive(Debug)]
 pub struct SymbolTable<'a> {
@@ -75,7 +81,43 @@ impl<'a> SymbolTable<'a> {
             universe_scope: Scope::new_universe(),
             package_scopes: HashMap::from([(
                 "fmt".to_owned(),
-                PackageScopeEnvelope::new_builtin("fmt", &["Println"]),
+                PackageScopeEnvelope::new_builtin(
+                    "fmt",
+                    &[(
+                        "Println",
+                        FunctionSignatureNode {
+                            params: vec![FunctionParamDeclNode {
+                                ids: vec![],
+                                variadic: true,
+                                r#type: TypeNode::Name {
+                                    package: None,
+                                    id: Span::new("any", 0, 1),
+                                    args: vec![],
+                                },
+                            }],
+                            result: Some(parser::ast::FunctionResultNode::Params(vec![
+                                FunctionParamDeclNode {
+                                    ids: vec![],
+                                    variadic: false,
+                                    r#type: TypeNode::Name {
+                                        package: None,
+                                        id: Span::new("int", 0, 1),
+                                        args: vec![],
+                                    },
+                                },
+                                FunctionParamDeclNode {
+                                    ids: vec![],
+                                    variadic: false,
+                                    r#type: TypeNode::Name {
+                                        package: None,
+                                        id: Span::new("error", 0, 1),
+                                        args: vec![],
+                                    },
+                                },
+                            ])),
+                        },
+                    )],
+                ),
             )]),
 
             current_file_named_imports: HashMap::new(),
@@ -295,16 +337,25 @@ impl<'a> PackageScopeEnvelope<'a> {
         }
     }
 
-    fn new_builtin(package_name: &'static str, items: &[&'static str]) -> Self {
+    fn new_builtin(
+        package_name: &'static str,
+        items: &[(&'static str, FunctionSignatureNode<'a>)],
+    ) -> Self {
         let envelope = Self::new(Pinned {
             virtual_file_path: PathBuf::new(),
             inner: Span::new(package_name, 0, 0),
         });
 
-        for item in items {
-            let symbol = Symbol::new_predeclared_ref(item);
+        for (name, signature) in items {
+            let func_ref = FunctionRef::BuiltIn { package_name, name };
 
-            envelope.scope.borrow_mut().set_local_symbol(item, symbol);
+            let func = FunctionValue::new(func_ref, signature.clone(), None);
+
+            let value = ValueRef::from(Value::Function(func));
+
+            let symbol = Symbol::new_predeclared_ref(name, value);
+
+            envelope.scope.borrow_mut().set_local_symbol(name, symbol);
         }
 
         envelope
@@ -353,7 +404,7 @@ impl<'a> Scope<'a> {
 
         macro_rules! predeclared_constant {
             ($scope:expr, $id:expr) => {
-                $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id))
+                $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, ValueRef::from(None)))
             };
         }
 
@@ -434,12 +485,12 @@ impl<'a> Symbol<'a> {
         Rc::new(RefCell::new(Self::new(declared_name, mutable, value)))
     }
 
-    fn new_predeclared_ref(name: &'static str) -> SymbolRef<'a> {
+    fn new_predeclared_ref(name: &'static str, value: ValueRef<'a>) -> SymbolRef<'a> {
         Self::new_ref(
             // vv not very pretty, but it should never matter anyway
             Pinned::new(PathBuf::new(), Span::new(name, 0, 0)),
             false,
-            ValueRef::from(None),
+            value,
         )
     }
 
