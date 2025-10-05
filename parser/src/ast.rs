@@ -77,6 +77,9 @@ pub enum TypeNode<'a> {
         key: Box<TypeNode<'a>>,
         element: Box<TypeNode<'a>>,
     },
+    Struct {
+        fields: Vec<FieldDeclNode<'a>>,
+    },
     Function {
         signature: Box<FunctionSignatureNode<'a>>,
     },
@@ -87,6 +90,14 @@ pub enum TypeNode<'a> {
 pub enum ChannelDirection {
     Send,
     Receive,
+}
+
+// TODO: support embedded fields (which are not this shape)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldDeclNode<'a> {
+    pub ids: Vec<Option<Span<'a>>>, // None if just padding ("_" blank field)
+    pub r#type: TypeNode<'a>,
+    pub tag: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

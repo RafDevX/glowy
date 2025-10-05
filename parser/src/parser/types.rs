@@ -1,7 +1,7 @@
 use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
     ParsingError, TokenStream,
-    ast::{ChannelDirection, TypeNode},
+    ast::{ChannelDirection, FieldDeclNode, TypeNode},
     parser::decls,
     token::{Token, TokenKind},
 };
@@ -120,6 +120,57 @@ fn parse_map_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     Ok(TypeNode::Map { key, element })
 }
 
+fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDeclNode<'a>> {
+    let mut ids = vec![];
+
+    loop {
+        let ident = expect(s, TokenKind::Ident, Some("struct type field"))?;
+
+        if ident.span.content() == "_" {
+            ids.push(None);
+        } else {
+            ids.push(Some(ident.span));
+        }
+
+        if let Some(of_kind!(TokenKind::Comma)) = s.peek().cloned().transpose()? {
+            s.next(); // advance
+        } else {
+            break; // since there's no comma, next must be type
+        }
+    }
+
+    let r#type = parse_type(s)?;
+
+    let tag = if let Some(of_kind!(TokenKind::String(tag))) = s.peek().cloned().transpose()? {
+        Some(tag)
+    } else {
+        None
+    };
+
+    Ok(FieldDeclNode { ids, r#type, tag })
+}
+
+fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+    expect(s, TokenKind::Struct, Some("struct type"))?;
+
+    expect(s, TokenKind::CurlyL, Some("struct type"))?;
+
+    let mut fields = vec![];
+
+    while !matches!(
+        s.peek().cloned().transpose()?,
+        None | Some(of_kind!(TokenKind::CurlyR))
+    ) {
+        fields.push(parse_struct_type_field(s)?);
+
+        expect(s, TokenKind::SemiColon, Some("struct type fields list"))?;
+    }
+
+    expect(s, TokenKind::CurlyR, Some("struct type"))?;
+
+    Ok(TypeNode::Struct { fields })
+}
+
 fn parse_function_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     expect(s, TokenKind::Func, Some("function type"))?;
 
@@ -139,6 +190,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
         Some(of_kind!(TokenKind::Func)) => parse_function_type(s),
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_type(s),
         Some(of_kind!(TokenKind::Map)) => parse_map_type(s),
+        Some(of_kind!(TokenKind::Struct)) => parse_struct_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
         Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
         found => Err(ParsingError::UnexpectedConstruct {
