@@ -7,7 +7,7 @@ use crate::{
         OperandNameNode, OrderedF64, StructLiteralFieldsNode,
     },
     parser::{
-        of_kind,
+        BacktrackingContext, of_kind,
         types::{self, parse_type},
     },
     token::{Token, TokenKind},
@@ -36,6 +36,35 @@ fn parse_operand_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, OperandNameNod
         package: None,
         id: token.span,
     })
+}
+
+fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+    // technically we don't really need a BacktrackingContext because we could
+    // try to manually convert an incorrect operand-name into a type-name, but
+    // then there's other complexity (like type args) that we would have to keep
+    // track of and essentially rely on being able to "jump in" into the middle
+    // of lower-level parsing implementations -- it's more sustainable to just
+    // backtrack if it wasn't actually an operand name expression
+
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
+
+    let operand = parse_operand_name(b)?;
+
+    let expr = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = b.peek() {
+        // this is actually a composite literal, not an operand name!
+        // discard b and go back to the main stream, starting over
+
+        // we default to assume any type is a struct
+        parse_struct_literal(s)?.into()
+    } else {
+        // never mind, we got it right the first time, it's an operand name
+        context.commit()?;
+
+        ExprNode::Name(operand)
+    };
+
+    Ok(expr)
 }
 
 fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
@@ -107,7 +136,7 @@ fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<
         });
     };
 
-    let r#type = types::parse_struct_type(s)?;
+    let r#type = types::parse_type(s)?;
 
     let list = parse_composite_literal_element_list(s, true)?;
 
@@ -233,7 +262,7 @@ fn parse_composite_literal_element_list<'a>(
 
 pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
-        Some(of_kind!(TokenKind::Ident)) => parse_operand_name(s)?.into(),
+        Some(of_kind!(TokenKind::Ident)) => parse_identifier_first_expr(s)?,
         Some(token @ of_kind!(TokenKind::Int(value))) => {
             s.next(); // advance
 
