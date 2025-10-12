@@ -163,6 +163,13 @@ fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     ) {
         fields.push(parse_struct_type_field(s)?);
 
+        // spec: "To allow complex statements to occupy a single line, a
+        // semicolon may be omitted before a closing (...) `}`"
+        if let Some(of_kind!(TokenKind::CurlyR)) = s.peek().cloned().transpose()? {
+            // don't require semicolon even though while cond would then trigger
+            break;
+        }
+
         expect(s, TokenKind::SemiColon, Some("struct type fields list"))?;
     }
 
