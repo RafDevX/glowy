@@ -4,9 +4,12 @@ use crate::{
     ParsingError, TokenStream,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
-        OperandNameNode, OrderedF64,
+        OperandNameNode, OrderedF64, StructLiteralFieldsNode,
     },
-    parser::{of_kind, types::parse_type},
+    parser::{
+        of_kind,
+        types::{self, parse_type},
+    },
     token::{Token, TokenKind},
 };
 
@@ -92,6 +95,65 @@ fn parse_map_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>
         key,
         element,
         values,
+        location,
+    })
+}
+
+fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let Some(beginning) = s.peek().cloned().transpose()? else {
+        return Err(ParsingError::UnexpectedConstruct {
+            expected: "a struct literal",
+            found: None,
+        });
+    };
+
+    let r#type = types::parse_struct_type(s)?;
+
+    let list = parse_composite_literal_element_list(s, true)?;
+
+    let fields = if list.iter().any(|(k, _)| k.is_some()) {
+        // if any element has a key, all elements must have a key
+
+        let mut pairs = vec![];
+
+        for (key, value) in list {
+            let Some(key_expr) = key else {
+                return Err(ParsingError::UnexpectedConstruct {
+                    expected: "all-keyed struct literal",
+                    found: None, // FIXME: report actual location instead of EOF
+                });
+            };
+
+            if let ExprNode::Name(OperandNameNode { package: None, id }) = key_expr {
+                // this is not actually an operand name, it's just parsed as
+                // such: in reality it's an identifier corresponding to a field
+                // name, so now we get rid of that (misconstrued) expression and
+                // just extract the inner identifier
+
+                pairs.push((id, value));
+            } else {
+                return Err(ParsingError::UnexpectedConstruct {
+                    expected: "a field name identifier",
+                    found: None, // FIXME: report actual location instead of EOF
+                });
+            }
+        }
+
+        StructLiteralFieldsNode::Keyed(pairs)
+    } else {
+        // otherwise, all fields are exhaustively listed in order without keys
+        // (if omitted, the appropriate zero-value is used)
+
+        let values = list.into_iter().map(|(_, v)| v).collect();
+
+        StructLiteralFieldsNode::Exhaustive(values)
+    };
+
+    let location = s.location_since(&beginning);
+
+    Ok(LiteralNode::Struct {
+        r#type,
+        fields,
         location,
     })
 }
@@ -210,6 +272,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
         }
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_literal(s)?.into(),
         Some(of_kind!(TokenKind::Map)) => parse_map_literal(s)?.into(),
+        Some(of_kind!(TokenKind::Struct)) => parse_struct_literal(s)?.into(),
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance
             let inner = parse_expression(s)?;

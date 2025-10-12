@@ -150,7 +150,7 @@ fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDecl
     Ok(FieldDeclNode { ids, r#type, tag })
 }
 
-fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+pub fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     expect(s, TokenKind::Struct, Some("struct type"))?;
 
     expect(s, TokenKind::CurlyL, Some("struct type"))?;

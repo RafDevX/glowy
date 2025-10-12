@@ -254,7 +254,11 @@ pub enum LiteralNode<'a> {
         values: CompositeLiteralElementListNode<'a>,
         location: Location,
     },
-    // Struct
+    Struct {
+        r#type: TypeNode<'a>,
+        fields: StructLiteralFieldsNode<'a>,
+        location: Location,
+    },
 }
 
 /// Wrapper for f64 to support Eq and Ord
@@ -273,6 +277,12 @@ impl PartialOrd for OrderedF64 {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StructLiteralFieldsNode<'a> {
+    Keyed(Vec<(Span<'a>, CompositeLiteralElementNode<'a>)>),
+    Exhaustive(Vec<CompositeLiteralElementNode<'a>>), // no keys; ordered fields
 }
 
 pub type CompositeLiteralElementListNode<'a> =
