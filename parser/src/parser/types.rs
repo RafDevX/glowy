@@ -132,7 +132,7 @@ fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDecl
             ids.push(Some(ident.span));
         }
 
-        if let Some(of_kind!(TokenKind::Comma)) = s.peek().cloned().transpose()? {
+        if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
             s.next(); // advance
         } else {
             break; // since there's no comma, next must be type
@@ -141,8 +141,8 @@ fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDecl
 
     let r#type = parse_type(s)?;
 
-    let tag = if let Some(of_kind!(TokenKind::String(tag))) = s.peek().cloned().transpose()? {
-        Some(tag)
+    let tag = if let Some(Ok(of_kind!(TokenKind::String(tag)))) = s.peek() {
+        Some(tag.clone())
     } else {
         None
     };
@@ -165,7 +165,7 @@ pub fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a
 
         // spec: "To allow complex statements to occupy a single line, a
         // semicolon may be omitted before a closing (...) `}`"
-        if let Some(of_kind!(TokenKind::CurlyR)) = s.peek().cloned().transpose()? {
+        if let Some(Ok(of_kind!(TokenKind::CurlyR))) = s.peek() {
             // don't require semicolon even though while cond would then trigger
             break;
         }

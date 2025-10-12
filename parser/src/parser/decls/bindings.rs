@@ -85,7 +85,7 @@ fn parse_spec<'a>(
             Some(_) => {
                 r#type = Some(parse_type(s)?);
 
-                if let Some(next) = s.peek().cloned().transpose()? {
+                if let Some(Ok(next)) = s.peek() {
                     if matches!(next.kind, TokenKind::SemiColon | TokenKind::ParenR) {
                         // empty expressions list (sometimes allowed)
                         break;

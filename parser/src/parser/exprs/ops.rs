@@ -33,7 +33,7 @@ fn infix_binding_power(op: &BinaryOpKind) -> (u8, u8) {
 }
 
 fn parse_unary<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let Some(token) = s.peek().cloned().transpose()? {
+    if let Some(Ok(token)) = s.peek().cloned() {
         if let Ok(op) = token.kind.clone().try_into() {
             s.next(); // advance
 
