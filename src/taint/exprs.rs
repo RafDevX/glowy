@@ -4,7 +4,7 @@ use parser::{
     Location,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, IndexingNode,
-        LiteralNode, OperandNameNode, UnaryOpKind,
+        LiteralNode, OperandNameNode, StructLiteralFieldsNode, TypeNode, UnaryOpKind,
     },
 };
 
@@ -157,8 +157,16 @@ fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> V
         }
         LiteralNode::Map {
             values, location, ..
-        } => ValueRef::from(Value::Map(visit_generic_composite_literal(
+        } => ValueRef::from(Value::Map(visit_map_composite_literal(
             ctx, values, location,
+        ))),
+        LiteralNode::Struct {
+            r#type,
+            fields,
+            location,
+            ..
+        } => ValueRef::from(Value::Struct(visit_struct_composite_literal(
+            ctx, fields, r#type, location,
         ))),
     }
 }
@@ -208,7 +216,7 @@ fn visit_integer_keyed_composite_literal<'a>(
     CompositeValue::new(map, others, ctx.pin(location.clone()))
 }
 
-fn visit_generic_composite_literal<'a>(
+fn visit_map_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     values: &CompositeLiteralElementListNode<'a>,
     location: &Location,
@@ -232,6 +240,97 @@ fn visit_generic_composite_literal<'a>(
             map.insert(key, value);
         } else {
             others.push(value);
+        }
+    }
+
+    CompositeValue::new(map, others, ctx.pin(location.clone()))
+}
+
+fn visit_struct_composite_literal<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    fields: &StructLiteralFieldsNode<'a>,
+    r#type: &TypeNode<'a>,
+    location: &Location,
+) -> CompositeValue<'a, String> {
+    let mut map = HashMap::new();
+    let mut others = Vec::new();
+
+    match fields {
+        StructLiteralFieldsNode::Keyed(entries) => {
+            for (field_name, element) in entries {
+                let value = visit_array_literal_element(ctx, element, location);
+
+                if value.is_bottom() {
+                    // we don't need to bloat the HashMap with None backtraces
+                    continue;
+                }
+
+                if map.insert(field_name.content().to_owned(), value).is_some() {
+                    // duplicate; error
+                    ctx.report_error(AnalysisErrorKind::DuplicateStructFieldName {
+                        duplicate: field_name.clone(),
+                    });
+                }
+            }
+        }
+        StructLiteralFieldsNode::Exhaustive(entries) => {
+            // we try to extract field names from the type information, but in
+            // most cases this will not be possible, and in those cases we can
+            // only pass the field information as "others" (which will become
+            // the basis for the dyn backtrace of the composite value)
+
+            let names = if let TypeNode::Struct { fields } = r#type {
+                let candidate: Vec<_> = fields
+                    .iter()
+                    .flat_map(|f| f.ids.iter())
+                    .map(Option::as_ref)
+                    .collect();
+
+                if candidate.len() == entries.len() {
+                    Some(candidate)
+                } else {
+                    // this should never happen, but oh well
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(names) = names {
+                for (name, element) in names.iter().zip(entries) {
+                    let value = visit_array_literal_element(ctx, element, location);
+
+                    if let Some(name) = name {
+                        // happy path: we know the field name!
+                        if map.insert(name.content().to_owned(), value).is_some() {
+                            // duplicate; error
+                            // (should never happen, but we don't validate types)
+                            ctx.report_error(AnalysisErrorKind::DuplicateStructFieldName {
+                                duplicate: *name.clone(),
+                            });
+                        }
+                    } else {
+                        // padding (blank "_" identifier); never accessible so
+                        // we don't need to care about it besides visiting to
+                        // trigger side effects (which we have already done
+                        // above) -- padding fields are always the zero-value
+                        // and are never initialized even if an expression is
+                        // provided: try running this in the Go playground
+                        // ```go
+                        // x := struct{ x, _, y int }{4, 3, -1}
+                        // fmt.Println(x) // prints {4 0 -1}
+                        // ```
+                    }
+                }
+            } else {
+                // nothing to do, we cannot know field names, so we just
+                // approximate by merging all the provided values together
+                for element in entries {
+                    let value = visit_array_literal_element(ctx, element, location);
+
+                    others.push(value);
+                }
+            }
         }
     }
 
@@ -319,6 +418,7 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
             LiteralNode::Array { location, .. } => location.clone(),
             LiteralNode::Slice { location, .. } => location.clone(),
             LiteralNode::Map { location, .. } => location.clone(),
+            LiteralNode::Struct { location, .. } => location.clone(),
         },
     }
 }

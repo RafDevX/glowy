@@ -207,6 +207,11 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
+    /// Duplicate field name specified in struct literal expression.
+    DuplicateStructFieldName {
+        /// The illegal second field name identifier.
+        duplicate: Span<'a>,
+    },
     /// Usage of an expression with no value when a single-value was expected.
     UnexpectedVoidExpression {
         /// Where the expression was found.
@@ -243,6 +248,7 @@ impl AnalysisErrorKind<'_> {
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
             | Self::UnexpectedFallthrough { .. }
+            | Self::DuplicateStructFieldName { .. }
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,

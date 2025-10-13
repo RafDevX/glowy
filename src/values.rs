@@ -246,6 +246,7 @@ pub enum Value<'a> {
     Array(CompositeValue<'a, u64>),
     Slice(CompositeValue<'a, u64>),
     Map(CompositeValue<'a, SimpleConstValue>),
+    Struct(CompositeValue<'a, String>),
     Function(FunctionValue<'a>),
 }
 
@@ -261,6 +262,7 @@ impl<'a> Value<'a> {
             Self::Expandable(exp) => exp,
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
+            Self::Struct(composite) => composite,
             Self::Function(func) => func,
         }
     }
@@ -298,6 +300,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
+            Self::Struct(composite) => Self::Struct(recurs!(composite)),
             Self::Function(func) => Self::Function(recurs!(func)),
         }
     }
@@ -321,6 +324,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
+            Self::Struct(composite) => Self::Struct(recurs!(composite)),
             Self::Function(func) => Self::Function(recurs!(func)),
         }
     }
