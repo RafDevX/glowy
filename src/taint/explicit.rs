@@ -46,7 +46,7 @@ fn visit_binding_decl_spec<'a>(
         for name in &node.ids {
             let value = ValueRef::uninitialized_from_type(node.r#type.as_ref());
 
-            let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, value);
+            let symbol = Symbol::new_ref(ctx.pin(*name), mutable, value);
 
             ctx.declare_new_symbol(symbol);
         }
@@ -99,7 +99,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
     let mut redeclarations = vec![];
     let mut any_new = false;
 
-    for (name, rhs) in ids.iter().zip(rhs_values) {
+    for (name, rhs) in ids.iter().copied().zip(rhs_values) {
         if name.content() == "_" {
             // blank identifier, so we don't really need to do anything else
             // except visiting the expression to process e.g. function calls
@@ -125,7 +125,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             // TODO: `match` other scopes
         };
 
-        let symbol = Symbol::new_ref(ctx.pin(name.clone()), mutable, ValueRef::from(None));
+        let symbol = Symbol::new_ref(ctx.pin(name), mutable, ValueRef::from(None));
         // ^ we don't need to use ValueRef::uninitialized_from_type here, since
         // we know an initialization expression does exist
 
@@ -135,14 +135,14 @@ pub fn visit_raw_binding_decl_spec<'a>(
                 let borrowed = existing.borrow();
 
                 if matches!(
-                    ctx.pin(name.clone())
+                    ctx.pin(name)
                         .pinned_location()
                         .partial_cmp(&borrowed.declared_name().pinned_location()),
                     None | Some(cmp::Ordering::Greater)
                 ) {
                     redeclarations.push(AnalysisErrorKind::IllegalRedeclaration {
                         previous: borrowed.declared_name().clone(),
-                        found: name.clone(),
+                        found: name,
                     });
 
                     continue;
@@ -160,7 +160,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
         // fake node so we can use LeftValue trait
         let node = OperandNameNode {
             package: None,
-            id: name.clone(),
+            id: name,
         };
 
         node.assign(
@@ -347,9 +347,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
         };
 
         if !symbol.borrow().mutable() {
-            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue {
-                symbol: self.id.clone(),
-            });
+            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: self.id });
 
             return;
         }

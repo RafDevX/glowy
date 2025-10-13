@@ -19,7 +19,7 @@ mod token;
 // where the file referred to is obvious
 pub type Location = Range<usize>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span<'a> {
     content: &'a str,
     offset: usize,

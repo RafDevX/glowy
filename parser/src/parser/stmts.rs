@@ -140,7 +140,7 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     }
 
     // assume it's a short var decl and that we're collecting ids (vs expressions)
-    let mut ids = vec![first.span.clone()];
+    let mut ids = vec![first.span];
 
     let mut was_comma = false; // whether the last token was a comma
 

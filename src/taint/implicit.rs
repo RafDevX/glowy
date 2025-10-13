@@ -397,8 +397,8 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
 
     let value = exprs::visit_single_expr(ctx, &node.expr);
 
-    if let Some(id) = &node.decl {
-        ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id.clone()), true, value.clone()));
+    if let Some(id) = node.decl {
+        ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id), true, value.clone()));
     }
 
     let expr_location = ctx.pin(exprs::get_expr_location(&node.expr));

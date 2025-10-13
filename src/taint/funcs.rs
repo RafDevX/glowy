@@ -19,7 +19,7 @@ use crate::{
 };
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
-    let func_name = ctx.pin(node.name.clone());
+    let func_name = ctx.pin(node.name);
 
     let func_ref = FunctionRef::Named(func_name.clone());
 
@@ -38,7 +38,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
     let mut param_index = 0;
 
     for param in &node.signature.params {
-        for id in &param.ids {
+        for &id in &param.ids {
             if id.content() == "_" {
                 // blank identifier, ignore
                 param_index += 1;
@@ -48,7 +48,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
             let synthetic = LabelTag::Synthetic {
                 func: func_ref.clone(),
                 index: param_index,
-                identifier: Some(id.clone()),
+                identifier: Some(id),
             };
 
             let param_backtrace = LabelBacktrace::new_root(
@@ -59,7 +59,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
             );
 
             ctx.declare_new_symbol(Symbol::new_ref(
-                ctx.pin(id.clone()),
+                ctx.pin(id),
                 true,
                 ValueRef::from(Some(param_backtrace)),
             ));

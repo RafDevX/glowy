@@ -236,7 +236,7 @@ impl<'a> AnalysisContext<'a> {
 
             self.report_error(AnalysisErrorKind::IllegalRedeclaration {
                 previous: existing.borrow().declared_name().clone(),
-                found: name.inner().clone(),
+                found: *name.inner(),
             });
         }
     }

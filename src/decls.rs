@@ -18,7 +18,7 @@ pub fn visit_source_file<'a>(
     // the first file's package clause (and enforce for all other files to use
     // the same name)
 
-    let package_name = ctx.pin(node.package_clause.id.clone());
+    let package_name = ctx.pin(node.package_clause.id);
 
     let original_name = ctx
         .symtab_mut()
@@ -33,7 +33,7 @@ pub fn visit_source_file<'a>(
 
         ctx.report_error(AnalysisErrorKind::DistinctPackageName {
             previous,
-            found: node.package_clause.id.clone(),
+            found: node.package_clause.id,
         });
 
         return; // skip the file
@@ -70,10 +70,10 @@ fn visit_binding_decl_spec<'a>(
     node: &BindingDeclSpecNode<'a>,
     mutable: bool,
 ) {
-    for id in &node.ids {
+    for &id in &node.ids {
         let value = ValueRef::uninitialized_from_type(node.r#type.as_ref());
 
-        let symbol = Symbol::new_ref(ctx.pin(id.clone()), mutable, value);
+        let symbol = Symbol::new_ref(ctx.pin(id), mutable, value);
 
         ctx.declare_new_symbol(symbol);
     }
@@ -87,7 +87,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         return;
     }
 
-    let symbol = Symbol::new_ref(ctx.pin(node.name.clone()), false, ValueRef::from(None));
+    let symbol = Symbol::new_ref(ctx.pin(node.name), false, ValueRef::from(None));
 
     ctx.declare_new_symbol(symbol);
 }

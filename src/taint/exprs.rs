@@ -109,16 +109,14 @@ pub fn resolve_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &OperandNameNode<'a>,
 ) -> Option<SymbolRef<'a>> {
-    let symbol = if let Some(qualifier) = &node.package {
+    let symbol = if let Some(qualifier) = node.package {
         if let Some(symbol) = ctx
             .symtab()
             .get_qualified_symbol(qualifier.content(), node.id.content())
         {
             symbol
         } else {
-            ctx.report_error(AnalysisErrorKind::UnknownQualifier {
-                found: qualifier.clone(),
-            });
+            ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
 
             return None;
         }
@@ -127,9 +125,7 @@ pub fn resolve_operand_name<'a>(
     };
 
     if symbol.is_none() {
-        ctx.report_error(AnalysisErrorKind::UnknownSymbol {
-            found: node.id.clone(),
-        });
+        ctx.report_error(AnalysisErrorKind::UnknownSymbol { found: node.id });
     }
 
     symbol
@@ -268,7 +264,7 @@ fn visit_struct_composite_literal<'a>(
                 if map.insert(field_name.content().to_owned(), value).is_some() {
                     // duplicate; error
                     ctx.report_error(AnalysisErrorKind::DuplicateStructFieldName {
-                        duplicate: field_name.clone(),
+                        duplicate: *field_name,
                     });
                 }
             }
@@ -297,16 +293,16 @@ fn visit_struct_composite_literal<'a>(
             };
 
             if let Some(names) = names {
-                for (name, element) in names.iter().zip(entries) {
+                for (name, element) in names.iter().copied().zip(entries) {
                     let value = visit_array_literal_element(ctx, element, location);
 
-                    if let Some(name) = name {
+                    if let Some(&name) = name {
                         // happy path: we know the field name!
                         if map.insert(name.content().to_owned(), value).is_some() {
                             // duplicate; error
                             // (should never happen, but we don't validate types)
                             ctx.report_error(AnalysisErrorKind::DuplicateStructFieldName {
-                                duplicate: *name.clone(),
+                                duplicate: name,
                             });
                         }
                     } else {
