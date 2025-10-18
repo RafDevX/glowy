@@ -336,23 +336,22 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ExpandableValue<'a> {
-    primary: Box<Value<'a>>,
-    secondary: Vec<Value<'a>>,
+    primary: ValueRef<'a>,
+    secondary: Vec<ValueRef<'a>>,
     // ^ secondary may be used if multiple values are needed; else, just primary
 }
 
 impl<'a> ExpandableValue<'a> {
     pub fn expand(&self) -> Vec<ValueRef<'a>> {
-        iter::once(*self.primary.clone())
-            .chain(self.secondary.clone())
-            .map(ValueRef::from)
+        iter::once(self.primary.clone())
+            .chain(self.secondary.iter().cloned())
             .collect()
     }
 }
 
 impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
     fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
-        let backtraces: Vec<LabelBacktrace<'a>> = iter::once(&*self.primary)
+        let backtraces: Vec<LabelBacktrace<'a>> = iter::once(&self.primary)
             .chain(self.secondary.iter())
             .filter_map(|v| v.backtrace_at_location(location.clone()))
             .collect();
@@ -366,7 +365,7 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
     }
 
     fn is_bottom(&self) -> bool {
-        iter::once(&*self.primary)
+        iter::once(&self.primary)
             .chain(self.secondary.iter())
             .all(|v| v.is_bottom())
     }
@@ -379,7 +378,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
         from_index: usize,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
-        let primary = Box::new(self.primary.realize(from_func, from_index, concrete));
+        let primary = self.primary.realize(from_func, from_index, concrete);
 
         let secondary = self
             .secondary
@@ -397,12 +396,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
         parent_location: Pinned<Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
-        let primary = Box::new(self.primary.nest_backtrace(
+        let primary = self.primary.nest_backtrace(
             parent_kind,
             parent_symbol,
             parent_location.clone(),
             extra_children.clone(),
-        ));
+        );
 
         let secondary = self
             .secondary
