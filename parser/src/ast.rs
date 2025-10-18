@@ -137,6 +137,7 @@ pub enum ExprNode<'a> {
     Name(OperandNameNode<'a>),
     Literal(LiteralNode<'a>),
     Call(CallNode<'a>),
+    Make(MakeNode<'a>),
     Indexing(IndexingNode<'a>),
     // TODO: more primary expressions...
     UnaryOp {
@@ -201,6 +202,12 @@ impl<'a> From<LiteralNode<'a>> for ExprNode<'a> {
 impl<'a> From<CallNode<'a>> for ExprNode<'a> {
     fn from(node: CallNode<'a>) -> Self {
         Self::Call(node)
+    }
+}
+
+impl<'a> From<MakeNode<'a>> for ExprNode<'a> {
+    fn from(node: MakeNode<'a>) -> Self {
+        Self::Make(node)
     }
 }
 
@@ -302,6 +309,17 @@ pub struct CallNode<'a> {
     pub variadic: bool,     // whether the last argument is "x..."
     pub location: Location, // for better error messages
     pub annotation: Option<Box<Annotation<'a>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+// technically this should be a CallNode per the spec, but since the first
+// argument is a type, and since this function has special implications, we just
+// treat it as another kind of expression (not a function call)
+pub struct MakeNode<'a> {
+    pub r#type: TypeNode<'a>,
+    pub n: Option<Box<ExprNode<'a>>>,
+    pub m: Option<Box<ExprNode<'a>>>,
+    pub location: Location, // for better error messages
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

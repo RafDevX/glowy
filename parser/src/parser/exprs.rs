@@ -6,10 +6,7 @@ use crate::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
         OperandNameNode, OrderedF64, StructLiteralFieldsNode,
     },
-    parser::{
-        BacktrackingContext, of_kind,
-        types::{self, parse_type},
-    },
+    parser::{BacktrackingContext, of_kind, types::parse_type},
     token::{Token, TokenKind},
 };
 
@@ -136,7 +133,7 @@ fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<
         });
     };
 
-    let r#type = types::parse_type(s)?;
+    let r#type = parse_type(s)?;
 
     let list = parse_composite_literal_element_list(s, true)?;
 

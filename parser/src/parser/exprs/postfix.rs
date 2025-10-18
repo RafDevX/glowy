@@ -1,12 +1,22 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     TokenStream,
-    ast::{CallNode, ExprNode, IndexingNode},
-    parser::{PResult, expect, of_kind, types::parse_channel_type},
+    ast::{CallNode, ExprNode, IndexingNode, MakeNode, OperandNameNode},
+    parser::{
+        PResult, expect, of_kind,
+        types::{parse_channel_type, parse_type},
+    },
     token::{Token, TokenKind},
 };
 
-pub fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, CallNode<'a>> {
+pub fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
+    if let ExprNode::Name(OperandNameNode { package: None, id }) = func {
+        if id.content() == "make" {
+            // make(T, ...) is treated specially, not as a function call
+            return Ok(parse_make(s, id.location().start)?.into());
+        }
+    }
+
     let paren = expect(s, TokenKind::ParenL, Some("function call"))?;
     let annotation = s.take_last_annotation();
 
@@ -44,13 +54,54 @@ pub fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a
 
     expect(s, TokenKind::ParenR, Some("function call"))?;
 
-    Ok(CallNode {
+    let call = CallNode {
         func: Box::new(func),
         type_arg,
         args,
         variadic,
         location: s.location_since(&paren),
         annotation,
+    };
+
+    Ok(call.into())
+}
+
+fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode<'a>> {
+    expect(s, TokenKind::ParenL, Some("make call"))?;
+
+    macro_rules! parse_opt_param {
+        () => {
+            if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
+                None
+            } else {
+                expect(s, TokenKind::Comma, Some("make call parameter list"))?;
+
+                if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
+                    // was just a trailing comma
+                    None
+                } else {
+                    Some(Box::new(parse_expression(s)?))
+                }
+            }
+        };
+    }
+
+    let r#type = parse_type(s)?;
+    let n = parse_opt_param!();
+    let m = parse_opt_param!();
+
+    let end = expect(s, TokenKind::ParenR, Some("make call"))?;
+
+    // we can't use TokenStream::location_since because we don't actually have a
+    // start token, just a start location, so we need to build a location
+    // manually ourselves based on provided start and the closing paren token
+    let location = start..end.span.location().end;
+
+    Ok(MakeNode {
+        r#type,
+        n,
+        m,
+        location,
     })
 }
 
@@ -81,7 +132,7 @@ pub fn parse_postfix_if_exists<'a>(
     operand: ExprNode<'a>,
 ) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
-        Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?.into(),
+        Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?,
         Some(of_kind!(TokenKind::SquareL)) => parse_indexing(s, operand)?.into(),
         _ => return Ok(operand), // nothing found, stop the recursion
     };
