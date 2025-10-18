@@ -66,6 +66,10 @@ impl<'a> ValueRef<'a> {
         }
     }
 
+    pub fn is_simple(&self) -> bool {
+        matches!(*self.0.borrow(), Value::Simple(_))
+    }
+
     pub fn as_expandable(&self) -> Option<Ref<ExpandableValue<'a>>> {
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Expandable(exp) => Some(exp),
@@ -428,7 +432,7 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
 }
 
 impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
-    fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             r#const: HashMap::new(),
             r#dyn: None,
