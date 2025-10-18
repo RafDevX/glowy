@@ -15,8 +15,8 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
     values::{
-        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
-        ValueRef,
+        BacktraceContainer, CompositeValue, ExpandableValue, SelfAwareBacktraceContainer,
+        SimpleConstValue, Value, ValueRef,
     },
 };
 
@@ -469,10 +469,24 @@ fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) ->
 
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);
 
-    if let Some(index) = index {
+    let result = if let Some(index) = index {
         composite.get_const(index, ctx.pin(node.location.clone()))
     } else {
         composite.get_dyn(ctx.pin(node.location.clone()))
+    };
+
+    if base.is_map() {
+        // indexing a map returns a second value corresponding to whether the
+        // key was or not present in the map. here, we assume that this presence
+        // value has the same label as the actual returned value
+        let presence = result.backtrace_at_location(ctx.pin(node.location.clone()));
+
+        ValueRef::from(Value::Expandable(ExpandableValue::new(
+            result,
+            vec![ValueRef::from(presence)],
+        )))
+    } else {
+        result
     }
 }
 

@@ -70,6 +70,10 @@ impl<'a> ValueRef<'a> {
         matches!(*self.0.borrow(), Value::Simple(_))
     }
 
+    pub fn is_map(&self) -> bool {
+        matches!(*self.0.borrow(), Value::Map(_))
+    }
+
     pub fn as_expandable(&self) -> Option<Ref<ExpandableValue<'a>>> {
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Expandable(exp) => Some(exp),
@@ -342,6 +346,10 @@ pub struct ExpandableValue<'a> {
 }
 
 impl<'a> ExpandableValue<'a> {
+    pub fn new(primary: ValueRef<'a>, secondary: Vec<ValueRef<'a>>) -> Self {
+        Self { primary, secondary }
+    }
+
     pub fn expand(&self) -> Vec<ValueRef<'a>> {
         iter::once(self.primary.clone())
             .chain(self.secondary.iter().cloned())
