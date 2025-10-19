@@ -1,6 +1,19 @@
+//! Handling of Go Built-in Functions
+//!
+//! Built-in functions are treated in a special manner because they have no
+//! signature (per spec) and can have special effects. This module contains
+//! handling functions for each of them, taking as input either an ordinary
+//! `CallNode` representing a normal function call (since they look exactly
+//! like normal function calls and so do not actually have to be identified
+//! by the parser, just here during analysis), or otherwise another kind of
+//! node, specialized and specific to that built-in function (e.g., for the
+//! `make(T, ...)` built-in function, a `MakeNode`) given that they are not
+//! treated as function calls by the parser, but rather as their own unique
+//! kinds of expressions that are then dispatched by the analyzer on visit.
+
 use std::collections::HashMap;
 
-use parser::ast::{MakeNode, TypeNode};
+use parser::ast::{CallNode, MakeNode, TypeNode};
 
 use crate::{
     context::AnalysisContext,
@@ -78,7 +91,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
         }
         _ => {
             // we don't know what this is, so there's nothing we can do...
-            ctx.report_error(AnalysisErrorKind::UnsupportedMakeExpression {
+            ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
                 location: node.location.clone(),
             });
 
@@ -101,4 +114,63 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
             ValueRef::from(backtrace)
         }
     }
+}
+
+pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+    // Note: `append` in Go returns a new slice with the appended value, but it
+    // does NOT mutate the original slice!
+
+    // TODO: is it possible to infer what is the current slice length, at least
+    // in some cases, so we can use const instead of dyn?
+
+    if node.args.len() < 2 {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 2,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return ValueRef::from(None);
+    }
+
+    let original = node.args.first().unwrap(); // already checked length
+    let original = exprs::visit_single_expr(ctx, original);
+    let mut result = original.clone_inner(); // don't mutate original
+
+    let Some(mut slice) = result.as_slice_mut() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+            location: node.location.clone(),
+        });
+
+        return ValueRef::from(None);
+    };
+
+    if node.variadic {
+        // argument is another slice
+        let [_, other] = node.args.as_slice() else {
+            // too many arguments
+            ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+                expected: 2,
+                found: node.args.len(),
+                location: node.location.clone(),
+            });
+
+            return ValueRef::from(None);
+        };
+
+        let value = exprs::visit_single_expr(ctx, other);
+
+        slice.set_dyn(value, ctx.pin(node.location.clone()));
+    } else {
+        // multiple arguments corresponding to individual elements
+        for el in node.args.iter().skip(1) {
+            let value = exprs::visit_single_expr(ctx, el);
+
+            slice.set_dyn(value, ctx.pin(node.location.clone()));
+        }
+    }
+
+    drop(slice);
+
+    result
 }

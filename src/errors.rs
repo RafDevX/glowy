@@ -148,6 +148,14 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the function call took place.
         location: Location,
     },
+    /// Unsupported or unknown type passed to the a built-in function.
+    ///
+    /// This may be due to a true Go problem (i.e., non-spec-compliant code), or
+    /// due to the analyzer not succeeding at understanding the specified type.
+    UnexpectedBuiltInArgShape {
+        /// Where the offending built-in function call expression was found.
+        location: Location,
+    },
     /// Incorrect binding declaration spec with mismatching mappings.
     UnevenBindingDeclSpec {
         /// Where the variable declaration spec was found.
@@ -212,14 +220,6 @@ pub enum AnalysisErrorKind<'a> {
         /// The illegal second field name identifier.
         duplicate: Span<'a>,
     },
-    /// Unsupported or unknown type passed to the make built-in function.
-    ///
-    /// This may be due to a true Go problem (i.e., non-spec-compliant code), or
-    /// due to the analyzer not succeeding at understanding the specified type.
-    UnsupportedMakeExpression {
-        /// Where the expression was found.
-        location: Location,
-    },
     /// Usage of an expression with no value when a single-value was expected.
     UnexpectedVoidExpression {
         /// Where the expression was found.
@@ -247,6 +247,7 @@ impl AnalysisErrorKind<'_> {
             | Self::Unreachable { .. }
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }
+            | Self::UnexpectedBuiltInArgShape { .. }
             | Self::UnevenBindingDeclSpec { .. }
             | Self::UnevenAssignment { .. }
             | Self::MultiComplexAssignment { .. }
@@ -257,7 +258,6 @@ impl AnalysisErrorKind<'_> {
             | Self::GoNotCall { .. }
             | Self::UnexpectedFallthrough { .. }
             | Self::DuplicateStructFieldName { .. }
-            | Self::UnsupportedMakeExpression { .. }
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,

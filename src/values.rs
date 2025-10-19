@@ -82,6 +82,14 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
+    pub fn as_slice_mut(&mut self) -> Option<RefMut<CompositeValue<'a, u64>>> {
+        RefMut::filter_map(self.0.borrow_mut(), |value| match value {
+            Value::Slice(composite) => Some(composite),
+            _ => None,
+        })
+        .ok()
+    }
+
     pub fn as_composite(&self) -> Option<Ref<dyn CompositeValueAdapter<'a>>> {
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {

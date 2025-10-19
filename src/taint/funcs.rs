@@ -179,6 +179,19 @@ fn calculate_outcome<'a>(
 }
 
 pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec<ValueRef<'a>> {
+    // we treat some built-in functions specially, not as function calls but as
+    // independent quasi-types of expressions. if they don't look like a real
+    // function call (e.g., take a type instead of a value as input, like make)
+    // then they were already spotted and differentiated by the parser, but
+    // otherwise we need to here identify all remaining built-in functions and
+    // trigger their special handling, aborting function call handling on match
+    if let ExprNode::Name(OperandNameNode { package: None, id }) = &*node.func {
+        match id.content() {
+            "append" => return vec![builtins::visit_append(ctx, node)],
+            _ => {} // nothing to do, it's a real function call
+        }
+    }
+
     let value = exprs::visit_single_expr(ctx, &node.func);
 
     let Some(func) = value.as_function() else {
