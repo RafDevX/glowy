@@ -14,7 +14,6 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
-    taint::funcs,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
@@ -54,21 +53,28 @@ fn visit_binding_decl_spec<'a>(
         return;
     }
 
-    let values = match node.exprs.as_slice() {
-        // vvv case where `var a, b = f()` with `f` returning multiple values
-        // (note: `const` cannot do this - we check `mutable` as a heuristic)
-        [ExprNode::Call(call)] if node.ids.len() > 1 && mutable => funcs::visit_call(ctx, call),
-        _ => node
-            .exprs
-            .iter()
-            .map(|expr| exprs::visit_single_expr(ctx, expr))
-            .collect(),
-    };
+    let mut rhs_values = exprs::visit_multi_exprs(ctx, &node.exprs);
+
+    let mut expanded = None;
+    if node.ids.len() > 1 {
+        if let [single] = rhs_values.as_slice() {
+            if let Some(expandable) = single.as_expandable() {
+                // cannot assign directly to rhs_values here because the borrow
+                // checker is very cool and awesome and does not allow it while
+                // rhs_values is borrowed from the if-let, so we do this instead
+                expanded = Some(expandable.expand());
+            }
+        }
+    }
+
+    if let Some(expanded) = expanded {
+        rhs_values = expanded;
+    }
 
     visit_raw_binding_decl_spec(
         ctx,
         &node.ids,
-        values.into_iter(),
+        rhs_values.into_iter(),
         mutable,
         short,
         location,
@@ -209,23 +215,29 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         return;
     }
 
-    let rhs_backtraces = match node.rhs.as_slice() {
-        // vvv case where `a, b = f()` with `f` returning multiple values
-        [call @ ExprNode::Call(_)] if node.lhs.len() > 1 => {
-            vec![exprs::visit_single_expr(ctx, call)]
+    let mut rhs_values = exprs::visit_multi_exprs(ctx, &node.rhs);
+
+    let mut expanded = None;
+    if node.lhs.len() > 1 {
+        if let [single] = rhs_values.as_slice() {
+            if let Some(expandable) = single.as_expandable() {
+                // cannot assign directly to rhs_values here because the borrow
+                // checker is very cool and awesome and does not allow it while
+                // rhs_values is borrowed from the if-let, so we do this instead
+                expanded = Some(expandable.expand());
+            }
         }
-        _ => node
-            .rhs
-            .iter()
-            .map(|expr| exprs::visit_single_expr(ctx, expr))
-            .collect(),
-    };
+    }
+
+    if let Some(expanded) = expanded {
+        rhs_values = expanded;
+    }
 
     visit_raw_assignment(
         ctx,
         node.kind,
         &node.lhs,
-        rhs_backtraces.into_iter(),
+        rhs_values.into_iter(),
         None, // TODO: support annotations in assignments
         &node.location,
     );

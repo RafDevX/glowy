@@ -77,6 +77,28 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
     ValueRef::from(None)
 }
 
+pub fn visit_multi_exprs<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    nodes: &[ExprNode<'a>],
+) -> Vec<ValueRef<'a>> {
+    if let [single] = nodes {
+        // only one expression, which might end up being:
+        // - a function call returning multiple values, e.g. `x, y := f()`; or
+        // - just a normal expression, corresponding to a single value, but in
+        //   that case visit_expr will wrap it in a vec so we're all good
+
+        visit_expr(ctx, single)
+    } else {
+        // single multiple expressions were provided, we know for sure that each
+        // of them must yield a single value
+
+        nodes
+            .iter()
+            .map(|expr| visit_single_expr(ctx, expr))
+            .collect()
+    }
+}
+
 pub fn get_expr_backtrace<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &ExprNode<'a>,
