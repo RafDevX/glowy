@@ -18,6 +18,8 @@ use crate::{
     },
 };
 
+pub mod builtins;
+
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
     let func_name = ctx.pin(node.name);
 
