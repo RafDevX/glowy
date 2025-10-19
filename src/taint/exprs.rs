@@ -204,6 +204,8 @@ fn visit_integer_keyed_composite_literal<'a>(
 
         if value.is_bottom() {
             // we don't need to bloat the HashMap with None backtraces
+            next_default_key += 1;
+
             continue;
         }
 
