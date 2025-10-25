@@ -190,7 +190,7 @@ fn visit_for_range<'a>(
         explicit::visit_raw_assignment(
             ctx,
             AssignmentKind::Simple,
-            lhs,
+            lhs.iter(),
             rhs_values.into_iter(),
             None,
             header_location,

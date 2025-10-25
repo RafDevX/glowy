@@ -236,7 +236,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
     visit_raw_assignment(
         ctx,
         node.kind,
-        &node.lhs,
+        node.lhs.iter(),
         rhs_values.into_iter(),
         None, // TODO: support annotations in assignments
         &node.location,
@@ -244,10 +244,10 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 }
 
 // for assignment-like cases more generic than an actual assignment node
-pub fn visit_raw_assignment<'a>(
+pub fn visit_raw_assignment<'a: 'b, 'b>(
     ctx: &mut AnalysisContext<'a>,
     kind: AssignmentKind,
-    lhs_exprs: &[ExprNode<'a>],
+    lhs_exprs: impl ExactSizeIterator<Item = &'b ExprNode<'a>>,
     rhs_values: impl ExactSizeIterator<Item = ValueRef<'a>>,
     explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
     location: &Location,
@@ -262,7 +262,7 @@ pub fn visit_raw_assignment<'a>(
         return;
     }
 
-    for (lhs, rhs) in lhs_exprs.iter().zip(rhs_values) {
+    for (lhs, rhs) in lhs_exprs.zip(rhs_values) {
         lhs.assign(
             ctx,
             LabelBacktraceKind::Assignment,
