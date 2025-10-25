@@ -243,3 +243,69 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     // return concerns the number of elements copied, which is tainted
     ValueRef::from(combined)
 }
+
+pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
+    // `clear` has different behavior depending on whether its argument is a map
+    // or a slice. For maps, the result is independent of the original value, so
+    // we can just clear the backtrace completely. However, for slices, the
+    // slice length remains unchanged (information leak), so we must keep the
+    // existing backtrace - just that all consts become dyns.
+
+    // Note: `clear` has no return value.
+
+    let [arg] = node.args.as_slice() else {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 1,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return;
+    };
+
+    let mut current = exprs::visit_single_expr(ctx, arg);
+
+    let new = if current.is_map() {
+        // overwrite to bottom
+        ValueRef::from(None)
+    } else {
+        // ideally we'd do `} else if let Some(mut slice) = ... {` with then
+        // another `} else { ctx.report_error(...); return; };` so it would be
+        // more clear that the error arises from current not being neither a map
+        // nor a slice, but of course doing that would make the borrow checker
+        // very upset because current _might_ be used in the else clause before
+        // Option<(slice)> from the if-let could be destructured, so we do this
+        // (sillier) version as a workaround
+
+        let Some(mut slice) = current.as_slice_mut() else {
+            ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+                location: node.location.clone(),
+            });
+
+            return;
+        };
+
+        let backtrace = slice.backtrace_at_location(ctx.pin(node.location.clone()));
+        slice.clear();
+        slice.set_dyn(ValueRef::from(backtrace), ctx.pin(node.location.clone()));
+
+        drop(slice);
+
+        // just because we mutated it doesn't mean the variable has been updated
+        // since `current` is really the result of evaluating an expression and
+        // so already an independent instance of the value (due to backtrace
+        // nesting with access location)
+        current
+    };
+
+    // see above in `copy`: this is technically wrong because it means arg expr
+    // will be visited twice, but it's the best we can do for now
+    explicit::visit_raw_assignment(
+        ctx,
+        AssignmentKind::Simple,
+        iter::once(arg),
+        iter::once(new),
+        None,
+        &node.location,
+    );
+}

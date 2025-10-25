@@ -189,6 +189,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         match id.content() {
             "append" => return vec![builtins::visit_append(ctx, node)],
             "copy" => return vec![builtins::visit_copy(ctx, node)],
+            "clear" => {
+                builtins::visit_clear(ctx, node);
+                return vec![];
+            }
             _ => {} // nothing to do, it's a real function call
         }
     }
