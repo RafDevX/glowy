@@ -188,6 +188,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     if let ExprNode::Name(OperandNameNode { package: None, id }) = &*node.func {
         match id.content() {
             "append" => return vec![builtins::visit_append(ctx, node)],
+            "copy" => return vec![builtins::visit_copy(ctx, node)],
             _ => {} // nothing to do, it's a real function call
         }
     }

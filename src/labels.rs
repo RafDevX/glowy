@@ -574,4 +574,6 @@ pub enum LabelBacktraceKind {
     FunctionVariadicAggregation,
     /// Individual label for one particular expression in a return statement.
     Return,
+    /// Duplication from one slice to another via the `copy` built-in.
+    SliceCopy,
 }

@@ -11,16 +11,16 @@
 //! treated as function calls by the parser, but rather as their own unique
 //! kinds of expressions that are then dispatched by the analyzer on visit.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, iter};
 
-use parser::ast::{CallNode, MakeNode, TypeNode};
+use parser::ast::{AssignmentKind, CallNode, MakeNode, TypeNode};
 
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
-    taint::exprs,
-    values::{CompositeValue, Value, ValueRef},
+    taint::{explicit, exprs},
+    values::{BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, Value, ValueRef},
 };
 
 pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> ValueRef<'a> {
@@ -146,7 +146,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
     };
 
     if node.variadic {
-        // argument is another slice
+        // argument is another slice (or a string)
         let [_, other] = node.args.as_slice() else {
             // too many arguments
             ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
@@ -173,4 +173,73 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
     drop(slice);
 
     result
+}
+
+pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+    // Note: `copy` in Go mutates the destination slice and returns the number
+    // of elements copied, which is min(len(src), len(dst)). This means dst's
+    // label must always be raised to the maximum of src and we cannot do
+    // anything fancy with const, since all elements matter to the length.
+    // Also: some parts of the destination slice might not be overwritten, so we
+    // need to remember its backtrace too.
+
+    let [dst_expr, src_expr] = node.args.as_slice() else {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 2,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return ValueRef::from(None);
+    };
+
+    let dst_location = ctx.pin(exprs::get_expr_location(dst_expr));
+    let src_location = ctx.pin(exprs::get_expr_location(src_expr));
+
+    let mut dst = exprs::visit_single_expr(ctx, dst_expr);
+    let src = exprs::visit_single_expr(ctx, src_expr);
+
+    let combined = LabelBacktrace::combine_options(
+        dst.backtrace_at_location(dst_location),
+        src.backtrace_at_location(src_location),
+        LabelBacktraceKind::Expression,
+        ctx.pin(node.location.clone()),
+    );
+
+    let Some(mut slice) = dst.as_slice_mut() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+            location: node.location.clone(),
+        });
+
+        return ValueRef::from(None);
+    };
+
+    slice.clear(); // we don't want const info anymore
+    slice.set_dyn(src, ctx.pin(node.location.clone()));
+
+    drop(slice);
+
+    let value = dst.nest_backtrace(
+        LabelBacktraceKind::SliceCopy,
+        None,
+        ctx.pin(node.location.clone()),
+        combined.clone(),
+    );
+
+    // this is technically wrong and should be fixed because it'll lead to
+    // dst_expr being visited twice, which might have unintended side effects,
+    // but since left-values can only be very specific expressions (e.g. operand
+    // names or indexing) it should be ok, and there isn't an easier way to do
+    // this, at least for now the way the code is structured
+    explicit::visit_raw_assignment(
+        ctx,
+        AssignmentKind::Simple,
+        iter::once(dst_expr),
+        iter::once(value),
+        None,
+        &node.location,
+    );
+
+    // return concerns the number of elements copied, which is tainted
+    ValueRef::from(combined)
 }

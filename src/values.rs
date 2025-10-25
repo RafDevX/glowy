@@ -483,6 +483,12 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         self.default_value = Some(default_value);
     }
 
+    pub fn clear(&mut self) {
+        self.r#const = HashMap::new();
+        self.r#dyn = None;
+        self.default_value = None;
+    }
+
     pub fn get_const(&self, key: K, at_location: Pinned<Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(&key).cloned() {
             Some(value) => value,
