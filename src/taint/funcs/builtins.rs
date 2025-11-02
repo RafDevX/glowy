@@ -20,7 +20,10 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{explicit::LeftValue, exprs},
-    values::{BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, Value, ValueRef},
+    values::{
+        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
+        ValueRef,
+    },
 };
 
 pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> ValueRef<'a> {
@@ -331,6 +334,57 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         LabelBacktraceKind::ChannelClose,
         ValueRef::from(None),
         false, // don't want to overwrite
+        None,
+        &node.location,
+    );
+}
+
+pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
+    // we essentially treat delete as `m[k] = None`
+
+    // Note: `delete` has no return value.
+
+    let [map, key] = node.args.as_slice() else {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 2,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return;
+    };
+
+    let mut value = exprs::visit_single_expr(ctx, map);
+
+    if !value.is_map() {
+        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+            location: node.location.clone(),
+        });
+
+        return;
+    }
+
+    let mut composite = value.as_composite_mut().unwrap(); // already checked
+
+    if let Some(r#const) = SimpleConstValue::try_resolve_from_expr(key) {
+        composite.set_const(
+            r#const,
+            ValueRef::from(None),
+            true,
+            ctx.pin(node.location.clone()),
+        )
+    } else {
+        composite.set_dyn(ValueRef::from(None), ctx.pin(node.location.clone()))
+    };
+
+    drop(composite);
+
+    // visiting twice, technically wrong but ok, see `copy` above
+    map.assign(
+        ctx,
+        LabelBacktraceKind::MapElementDelete,
+        value,
+        true,
         None,
         &node.location,
     );

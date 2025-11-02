@@ -197,6 +197,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 builtins::visit_close(ctx, node);
                 return vec![];
             }
+            "delete" => {
+                builtins::visit_delete(ctx, node);
+                return vec![];
+            }
             _ => {} // nothing to do, it's a real function call
         }
     }

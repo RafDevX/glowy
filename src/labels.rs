@@ -580,4 +580,6 @@ pub enum LabelBacktraceKind {
     CollectionClear,
     /// Blocking further sends of a channel via the `close` built-in.
     ChannelClose,
+    /// Removal of a map element via the `delete` built-in.
+    MapElementDelete,
 }
