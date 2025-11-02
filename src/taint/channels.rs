@@ -35,7 +35,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
     let base = exprs::visit_single_expr(ctx, &node.expr);
 
     // we take send as syntactic sugar for a complex assignment
-    node.expr.assign(
+    node.channel.assign(
         ctx,
         LabelBacktraceKind::Send,
         base,
