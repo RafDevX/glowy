@@ -309,3 +309,29 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         &node.location,
     );
 }
+
+pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
+    // close doesn't actually do anything except if there's a branch backtrace
+    // set, so we assign to None to essentially mix in the branch backtrace
+
+    // Note: `clear` has no return value.
+
+    let [arg] = node.args.as_slice() else {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 1,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return;
+    };
+
+    explicit::visit_raw_assignment(
+        ctx,
+        AssignmentKind::Sum, // cannot be simple, don't want to overwrite
+        iter::once(arg),
+        iter::once(ValueRef::from(None)),
+        None,
+        &node.location,
+    );
+}
