@@ -576,4 +576,8 @@ pub enum LabelBacktraceKind {
     Return,
     /// Duplication from one slice to another via the `copy` built-in.
     SliceCopy,
+    /// Removal of all of a slice/map's elements via the `clear` built-in.
+    CollectionClear,
+    /// Blocking further sends of a channel via the `close` built-in.
+    ChannelClose,
 }

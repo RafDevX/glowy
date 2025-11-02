@@ -11,15 +11,15 @@
 //! treated as function calls by the parser, but rather as their own unique
 //! kinds of expressions that are then dispatched by the analyzer on visit.
 
-use std::{collections::HashMap, iter};
+use std::collections::HashMap;
 
-use parser::ast::{AssignmentKind, CallNode, MakeNode, TypeNode};
+use parser::ast::{CallNode, MakeNode, TypeNode};
 
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
-    taint::{explicit, exprs},
+    taint::{explicit::LeftValue, exprs},
     values::{BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, Value, ValueRef},
 };
 
@@ -231,11 +231,11 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     // but since left-values can only be very specific expressions (e.g. operand
     // names or indexing) it should be ok, and there isn't an easier way to do
     // this, at least for now the way the code is structured
-    explicit::visit_raw_assignment(
+    dst_expr.assign(
         ctx,
-        AssignmentKind::Simple,
-        iter::once(dst_expr),
-        iter::once(value),
+        LabelBacktraceKind::SliceCopy,
+        value,
+        true,
         None,
         &node.location,
     );
@@ -300,11 +300,11 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     // see above in `copy`: this is technically wrong because it means arg expr
     // will be visited twice, but it's the best we can do for now
-    explicit::visit_raw_assignment(
+    arg.assign(
         ctx,
-        AssignmentKind::Simple,
-        iter::once(arg),
-        iter::once(new),
+        LabelBacktraceKind::CollectionClear,
+        new,
+        true,
         None,
         &node.location,
     );
@@ -326,11 +326,11 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         return;
     };
 
-    explicit::visit_raw_assignment(
+    arg.assign(
         ctx,
-        AssignmentKind::Sum, // cannot be simple, don't want to overwrite
-        iter::once(arg),
-        iter::once(ValueRef::from(None)),
+        LabelBacktraceKind::ChannelClose,
+        ValueRef::from(None),
+        false, // don't want to overwrite
         None,
         &node.location,
     );
