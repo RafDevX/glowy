@@ -253,13 +253,17 @@ fn visit_map_composite_literal<'a>(
             continue;
         }
 
-        let key = opt_key
+        let const_key = opt_key
             .as_ref()
             .and_then(SimpleConstValue::try_resolve_from_expr);
 
-        if let Some(key) = key {
-            map.insert(key, value);
+        if let Some(const_key) = const_key {
+            map.insert(const_key, value);
         } else {
+            if let Some(dyn_key) = opt_key {
+                others.push(visit_single_expr(ctx, dyn_key));
+            }
+
             others.push(value);
         }
     }
