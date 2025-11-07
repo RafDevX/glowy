@@ -6,7 +6,7 @@ use crate::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
         OperandNameNode, OrderedF64, StructLiteralFieldsNode,
     },
-    parser::{BacktrackingContext, of_kind, types::parse_type},
+    parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
 };
 
@@ -62,6 +62,24 @@ fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprN
     };
 
     Ok(expr)
+}
+
+fn parse_function_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let beginning = expect(s, TokenKind::Func, Some("function literal"))?;
+
+    // func literals don't support type parameters, per spec
+
+    let signature = decls::funcs::parse_signature(s)?;
+
+    let body = stmts::parse_block(s)?;
+
+    let location = s.location_since(&beginning);
+
+    Ok(LiteralNode::Function {
+        signature,
+        body,
+        location,
+    })
 }
 
 fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
@@ -296,6 +314,7 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             }
             .into()
         }
+        Some(of_kind!(TokenKind::Func)) => parse_function_literal(s)?.into(),
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_literal(s)?.into(),
         Some(of_kind!(TokenKind::Map)) => parse_map_literal(s)?.into(),
         Some(of_kind!(TokenKind::Struct)) => parse_struct_literal(s)?.into(),

@@ -241,6 +241,11 @@ pub enum LiteralNode<'a> {
         value: String,
         location: Location,
     },
+    Function {
+        signature: FunctionSignatureNode<'a>,
+        body: BlockNode<'a>,
+        location: Location,
+    },
     // all below should in theory be one Composite { r#type, value }, but this
     // is simpler and works for now; nevertheless, it does not support arbitrary
     // type literals (where `LiteralType` is `TypeName [TypeArgs]`, per spec)
