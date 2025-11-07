@@ -574,6 +574,8 @@ pub enum LabelBacktraceKind {
     FunctionVariadicAggregation,
     /// Individual label for one particular expression in a return statement.
     Return,
+    /// Conservative label returned by a function without known implementation.
+    BlackboxCall,
     /// Duplication from one slice to another via the `copy` built-in.
     SliceCopy,
     /// Removal of all of a slice/map's elements via the `clear` built-in.

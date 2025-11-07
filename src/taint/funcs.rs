@@ -1,3 +1,5 @@
+use std::iter;
+
 use parser::{
     Location, Span,
     ast::{
@@ -256,9 +258,43 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
+    let Some(outcome) = func.outcome() else {
+        // we don't have a known implementation of this function, so we must
+        // treat it as a blackbox and assume the label of all its outputs is the
+        // union of the label of all its inputs; we can't do anything fancy
+
+        let mut children = vec![];
+
+        for arg in &node.args {
+            if let Some(child) = exprs::get_expr_backtrace(ctx, arg) {
+                children.push(child);
+            }
+        }
+
+        let bt = LabelBacktrace::fold(
+            children.iter().chain(func.backtrace()),
+            LabelBacktraceKind::BlackboxCall,
+            None,
+            ctx.pin(node.location.clone()),
+        );
+
+        let n_outputs = match &func.signature().result {
+            None => 0,
+            Some(FunctionResultNode::Single(_)) => 1,
+            Some(FunctionResultNode::Params(v)) => v.len(),
+        };
+
+        return iter::once(Value::Simple(bt))
+            .cycle()
+            .take(n_outputs)
+            // only after cycle otherwise Clone would just make many references
+            .map(ValueRef::from)
+            .collect();
+    };
+
     let mut result = vec![];
 
-    'components: for component in func.outcome() {
+    'components: for component in outcome {
         let mut realized = None;
 
         // vvv cannot actually do this because if/else would have diff types,

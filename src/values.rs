@@ -712,7 +712,7 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
 pub struct FunctionValue<'a> {
     r#ref: FunctionRef<'a>,
     signature: FunctionSignatureNode<'a>,
-    outcome: Vec<ValueRef<'a>>,
+    outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
 }
@@ -726,7 +726,7 @@ impl<'a> FunctionValue<'a> {
         Self {
             r#ref,
             signature,
-            outcome: Vec::new(),
+            outcome: None,
             backtrace,
         }
     }
@@ -780,12 +780,12 @@ impl<'a> FunctionValue<'a> {
         &self.signature
     }
 
-    pub fn outcome(&self) -> &Vec<ValueRef<'a>> {
-        &self.outcome
+    pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
+        self.outcome.as_ref()
     }
 
     pub fn set_outcome(&mut self, outcome: Vec<ValueRef<'a>>) {
-        self.outcome = outcome;
+        self.outcome = Some(outcome);
     }
 
     pub fn backtrace(&self) -> Option<&LabelBacktrace<'a>> {
