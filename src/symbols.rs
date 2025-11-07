@@ -43,14 +43,11 @@
 
 use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
 
-use parser::{
-    Span,
-    ast::{FunctionParamDeclNode, FunctionSignatureNode, TypeNode},
-};
+use parser::Span;
 
 use crate::{
     FullPackagePath, Pinned,
-    values::{FunctionRef, FunctionValue, Value, ValueRef},
+    values::{FunctionValue, Value, ValueRef},
 };
 
 #[derive(Debug)]
@@ -83,40 +80,7 @@ impl<'a> SymbolTable<'a> {
                 "fmt".to_owned(),
                 PackageScopeEnvelope::new_builtin(
                     "fmt",
-                    &[(
-                        "Println",
-                        FunctionSignatureNode {
-                            params: vec![FunctionParamDeclNode {
-                                ids: vec![],
-                                variadic: true,
-                                r#type: TypeNode::Name {
-                                    package: None,
-                                    id: Span::new("any", 0, 1),
-                                    args: vec![],
-                                },
-                            }],
-                            result: Some(parser::ast::FunctionResultNode::Params(vec![
-                                FunctionParamDeclNode {
-                                    ids: vec![],
-                                    variadic: false,
-                                    r#type: TypeNode::Name {
-                                        package: None,
-                                        id: Span::new("int", 0, 1),
-                                        args: vec![],
-                                    },
-                                },
-                                FunctionParamDeclNode {
-                                    ids: vec![],
-                                    variadic: false,
-                                    r#type: TypeNode::Name {
-                                        package: None,
-                                        id: Span::new("error", 0, 1),
-                                        args: vec![],
-                                    },
-                                },
-                            ])),
-                        },
-                    )],
+                    [FunctionValue::new_builtin("Println", &["a"], true, 2)],
                 ),
             )]),
 
@@ -339,17 +303,15 @@ impl<'a> PackageScopeEnvelope<'a> {
 
     fn new_builtin(
         package_name: &'static str,
-        items: &[(&'static str, FunctionSignatureNode<'a>)],
+        funcs: impl IntoIterator<Item = FunctionValue<'a>>,
     ) -> Self {
         let envelope = Self::new(Pinned {
             virtual_file_path: PathBuf::new(),
             inner: Span::new(package_name, 0, 0),
         });
 
-        for (name, signature) in items {
-            let func_ref = FunctionRef::BuiltIn { package_name, name };
-
-            let func = FunctionValue::new(func_ref, signature.clone(), None);
+        for func in funcs {
+            let name = func.r#ref().declared_name().unwrap(); // no anonymous builtins
 
             let value = ValueRef::from(Value::Function(func));
 
@@ -403,8 +365,26 @@ impl<'a> Scope<'a> {
         let mut scope = Self::new(None);
 
         macro_rules! predeclared_constant {
+            ($scope:expr, $id:expr, $value:expr) => {
+                $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
+            };
             ($scope:expr, $id:expr) => {
-                $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, ValueRef::from(None)))
+                predeclared_constant!($scope, $id, ValueRef::from(None))
+            };
+        }
+
+        macro_rules! predeclared_function {
+            ($scope:expr, $id:expr, $params:expr, $variadic:expr, $n_returned:expr) => {
+                predeclared_constant!(
+                    $scope,
+                    $id,
+                    ValueRef::from(Value::Function(FunctionValue::new_builtin(
+                        $id,
+                        $params,
+                        $variadic,
+                        $n_returned
+                    )))
+                )
             };
         }
 
@@ -413,7 +393,16 @@ impl<'a> Scope<'a> {
         predeclared_constant!(scope, "iota");
         predeclared_constant!(scope, "nil"); // not really a constant, but close enough
 
-        // TODO: pre-declare functions (need to set some number of expected args?)
+        predeclared_function!(scope, "len", &["s"], false, 1);
+        predeclared_function!(scope, "cap", &["s"], false, 1);
+        predeclared_function!(scope, "min", &["n"], true, 1);
+        predeclared_function!(scope, "max", &["n"], true, 1);
+        predeclared_function!(scope, "panic", &["value"], false, 0);
+        predeclared_function!(scope, "recover", &[], false, 1);
+
+        predeclared_function!(scope, "complex", &["realPart", "imaginaryPart"], false, 1);
+        predeclared_function!(scope, "real", &["c"], false, 1);
+        predeclared_function!(scope, "imag", &["c"], false, 1);
 
         scope
     }
@@ -485,7 +474,7 @@ impl<'a> Symbol<'a> {
         Rc::new(RefCell::new(Self::new(declared_name, mutable, value)))
     }
 
-    fn new_predeclared_ref(name: &'static str, value: ValueRef<'a>) -> SymbolRef<'a> {
+    fn new_predeclared_ref(name: &'a str, value: ValueRef<'a>) -> SymbolRef<'a> {
         Self::new_ref(
             // vv not very pretty, but it should never matter anyway
             Pinned::new(PathBuf::new(), Span::new(name, 0, 0)),

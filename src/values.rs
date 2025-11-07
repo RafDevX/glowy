@@ -10,7 +10,10 @@ use std::{
 
 use parser::{
     Location, Span,
-    ast::{BinaryOpKind, ExprNode, FunctionSignatureNode, LiteralNode, TypeNode, UnaryOpKind},
+    ast::{
+        BinaryOpKind, ExprNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode,
+        LiteralNode, TypeNode, UnaryOpKind,
+    },
 };
 
 use crate::{
@@ -728,6 +731,47 @@ impl<'a> FunctionValue<'a> {
         }
     }
 
+    pub fn new_builtin(
+        name: &'static str,
+        params: &[&'static str],
+        variadic: bool,
+        n_returned: usize,
+    ) -> Self {
+        let r#ref = FunctionRef::BuiltIn(name);
+
+        let param_ids = params.iter().map(|id| Span::new(id, 0, 1)).collect();
+
+        let dummy_type = TypeNode::Name {
+            package: None,
+            id: Span::new("unknown", 0, 1),
+            args: vec![],
+        };
+
+        let result = match n_returned {
+            0 => None,
+            1 => Some(FunctionResultNode::Single(dummy_type.clone())),
+            n => Some(FunctionResultNode::Params(vec![
+                FunctionParamDeclNode {
+                    ids: vec![],
+                    variadic: false,
+                    r#type: dummy_type.clone()
+                };
+                n
+            ])),
+        };
+
+        let signature = FunctionSignatureNode {
+            params: vec![FunctionParamDeclNode {
+                ids: param_ids,
+                variadic,
+                r#type: dummy_type,
+            }],
+            result,
+        };
+
+        Self::new(r#ref, signature, None)
+    }
+
     pub fn r#ref(&self) -> &FunctionRef<'a> {
         &self.r#ref
     }
@@ -814,10 +858,17 @@ pub enum FunctionRef<'a> {
     /// An anonymous function literal.
     Anonymous(Pinned<Location>),
     /// A built-in function provided by the language or the Go standard library.
-    BuiltIn {
-        package_name: &'static str,
-        name: &'static str,
-    },
+    BuiltIn(&'static str),
+}
+
+impl<'a> FunctionRef<'a> {
+    pub fn declared_name(&self) -> Option<&'a str> {
+        match self {
+            Self::Named(span) => Some(span.content()),
+            Self::Anonymous(_) => None,
+            Self::BuiltIn(name) => Some(name),
+        }
+    }
 }
 
 impl fmt::Display for FunctionRef<'_> {
@@ -831,7 +882,7 @@ impl fmt::Display for FunctionRef<'_> {
                 pin.inner().start,
                 pin.inner().end
             ),
-            Self::BuiltIn { package_name, name } => write!(f, "{package_name}.{name}"),
+            Self::BuiltIn(name) => name.fmt(f),
         }
     }
 }
@@ -853,16 +904,7 @@ impl Ord for FunctionRef<'_> {
             }),
             (Self::Anonymous(_), _) => cmp::Ordering::Less,
             (_, Self::Anonymous(_)) => cmp::Ordering::Greater,
-            (
-                Self::BuiltIn {
-                    package_name: a_package_name,
-                    name: a_name,
-                },
-                Self::BuiltIn {
-                    package_name: b_package_name,
-                    name: b_name,
-                },
-            ) => a_package_name.cmp(b_package_name).then(a_name.cmp(b_name)),
+            (Self::BuiltIn(a), Self::BuiltIn(b)) => a.cmp(b),
         }
     }
 }
