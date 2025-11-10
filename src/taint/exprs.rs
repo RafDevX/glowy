@@ -160,6 +160,11 @@ fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> V
         | LiteralNode::Float { .. }
         | LiteralNode::Rune { .. }
         | LiteralNode::String { .. } => ValueRef::from(None),
+        LiteralNode::Function {
+            signature,
+            body,
+            location,
+        } => funcs::visit_function_literal(ctx, signature, body, location),
         LiteralNode::Array {
             values, location, ..
         } => ValueRef::from(Value::Array(visit_integer_keyed_composite_literal(
@@ -455,6 +460,7 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
             LiteralNode::Float { location, .. } => location.clone(),
             LiteralNode::Rune { location, .. } => location.clone(),
             LiteralNode::String { location, .. } => location.clone(),
+            LiteralNode::Function { location, .. } => location.clone(),
             LiteralNode::Array { location, .. } => location.clone(),
             LiteralNode::Slice { location, .. } => location.clone(),
             LiteralNode::Map { location, .. } => location.clone(),

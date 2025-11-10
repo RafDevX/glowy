@@ -3,12 +3,13 @@ use std::iter;
 use parser::{
     Location, Span,
     ast::{
-        CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
+        BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
         OperandNameNode,
     },
 };
 
 use crate::{
+    Pinned,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
@@ -22,26 +23,30 @@ use crate::{
 
 pub mod builtins;
 
-pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
-    let func_name = ctx.pin(node.name);
-
-    let func_ref = FunctionRef::Named(func_name.clone());
-
+fn visit_function_def<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    r#ref: FunctionRef<'a>,
+    decl_symbol: Option<Pinned<Span<'a>>>,
+    signature: &FunctionSignatureNode<'a>,
+    body: &BlockNode<'a>,
+) -> ValueRef<'a> {
     let value = ValueRef::from(Value::Function(FunctionValue::new(
-        func_ref.clone(),
-        node.signature.clone(),
+        r#ref.clone(),
+        signature.clone(),
         None, // TODO: support annotations
     )));
 
-    let symbol = Symbol::new_ref(func_name.clone(), false, value.clone());
+    if let Some(name) = decl_symbol {
+        let symbol = Symbol::new_ref(name, false, value.clone());
 
-    ctx.declare_new_symbol(symbol.clone());
+        ctx.declare_new_symbol(symbol.clone());
+    }
 
     ctx.symtab_mut().select_next_child_scope(); // push
 
     let mut param_index = 0;
 
-    for param in &node.signature.params {
+    for param in &signature.params {
         for &id in &param.ids {
             if id.content() == "_" {
                 // blank identifier, ignore
@@ -50,7 +55,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
             }
 
             let synthetic = LabelTag::Synthetic {
-                func: func_ref.clone(),
+                func: r#ref.clone(),
                 index: param_index,
                 identifier: Some(id),
             };
@@ -83,15 +88,36 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         }
     }
 
-    ctx.push_function(value);
+    ctx.push_function(value.clone());
     ctx.increase_branch_scope_depth();
 
-    super::visit_statements(ctx, &node.body);
+    super::visit_statements(ctx, body);
 
     ctx.decrease_branch_scope_depth();
     ctx.pop_function();
 
     ctx.symtab_mut().select_parent_scope(); // pop
+
+    value
+}
+
+pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
+    let func_name = ctx.pin(node.name);
+
+    let r#ref = FunctionRef::Named(func_name.clone());
+
+    visit_function_def(ctx, r#ref, Some(func_name), &node.signature, &node.body);
+}
+
+pub fn visit_function_literal<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    signature: &FunctionSignatureNode<'a>,
+    body: &BlockNode<'a>,
+    location: &Location,
+) -> ValueRef<'a> {
+    let r#ref = FunctionRef::Anonymous(ctx.pin(location.clone()));
+
+    visit_function_def(ctx, r#ref, None, signature, body)
 }
 
 pub fn visit_return<'a>(
