@@ -23,5 +23,6 @@ license = "MIT"
 rust-version = "1.86"
 
 [dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
 codespan-reporting.workspace = true
 parser = { path = "parser" }
