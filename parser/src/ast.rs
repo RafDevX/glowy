@@ -116,13 +116,29 @@ pub struct FunctionDeclNode<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionSignatureNode<'a> {
     pub params: Vec<FunctionParamDeclNode<'a>>,
-    pub result: Option<FunctionResultNode<'a>>,
+    pub result: FunctionResultNode<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FunctionResultNode<'a> {
+    None,
     Single(TypeNode<'a>),
     Params(Vec<FunctionParamDeclNode<'a>>),
+}
+
+impl FunctionResultNode<'_> {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::Single(_) => 1,
+            Self::Params(vec) => vec.len(),
+        }
+    }
+
+    // make clippy happy (clippy::len_without_is_empty)
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::None)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

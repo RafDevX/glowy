@@ -86,10 +86,10 @@ pub fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSigna
     let params = parse_params(s)?;
 
     let result = match s.peek().cloned().transpose()? {
-        None => None,
-        Some(of_kind!(kind)) if stmts::terminal_token(&kind) => None,
-        Some(of_kind!(TokenKind::ParenL)) => Some(FunctionResultNode::Params(parse_params(s)?)),
-        _ => Some(FunctionResultNode::Single(parse_type(s)?)),
+        None => FunctionResultNode::None,
+        Some(of_kind!(kind)) if stmts::terminal_token(&kind) => FunctionResultNode::None,
+        Some(of_kind!(TokenKind::ParenL)) => FunctionResultNode::Params(parse_params(s)?),
+        _ => FunctionResultNode::Single(parse_type(s)?),
     };
 
     Ok(FunctionSignatureNode { params, result })

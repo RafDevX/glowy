@@ -235,11 +235,11 @@ fn get_for_range_values<'a>(
             .map(|param| &param.r#type);
 
         if let Some(TypeNode::Function { signature }) = yield_type {
-            if let Some(FunctionResultNode::Single(TypeNode::Name {
+            if let FunctionResultNode::Single(TypeNode::Name {
                 package: None,
                 id: yield_result,
                 ..
-            })) = &signature.result
+            }) = &signature.result
             {
                 if yield_result.content() == "bool" {
                     let n_values: usize = signature.params.iter().map(|p| p.ids.len()).sum();

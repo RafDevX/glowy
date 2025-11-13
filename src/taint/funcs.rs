@@ -174,7 +174,7 @@ fn calculate_outcome<'a>(
     let mut outcome = vec![];
 
     let exprs = if exprs.is_empty() {
-        if let Some(FunctionResultNode::Params(result)) = &signature.result {
+        if let FunctionResultNode::Params(result) = &signature.result {
             // naked returns
 
             result
@@ -304,15 +304,9 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             ctx.pin(node.location.clone()),
         );
 
-        let n_outputs = match &func.signature().result {
-            None => 0,
-            Some(FunctionResultNode::Single(_)) => 1,
-            Some(FunctionResultNode::Params(v)) => v.len(),
-        };
-
         return iter::once(Value::Simple(bt))
             .cycle()
-            .take(n_outputs)
+            .take(func.signature().result.len())
             // only after cycle otherwise Clone would just make many references
             .map(ValueRef::from)
             .collect();

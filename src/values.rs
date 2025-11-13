@@ -748,16 +748,16 @@ impl<'a> FunctionValue<'a> {
         };
 
         let result = match n_returned {
-            0 => None,
-            1 => Some(FunctionResultNode::Single(dummy_type.clone())),
-            n => Some(FunctionResultNode::Params(vec![
+            0 => FunctionResultNode::None,
+            1 => FunctionResultNode::Single(dummy_type.clone()),
+            n => FunctionResultNode::Params(vec![
                 FunctionParamDeclNode {
                     ids: vec![],
                     variadic: false,
                     r#type: dummy_type.clone()
                 };
                 n
-            ])),
+            ]),
         };
 
         let signature = FunctionSignatureNode {

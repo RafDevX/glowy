@@ -351,7 +351,7 @@ mod tests {
                             r#type: TypeNode::Function {
                                 signature: Box::new(FunctionSignatureNode {
                                     params: vec![],
-                                    result: Some(FunctionResultNode::Params(vec![
+                                    result: FunctionResultNode::Params(vec![
                                         FunctionParamDeclNode {
                                             ids: vec![Span::new("x", 25, 1)],
                                             variadic: false,
@@ -374,7 +374,7 @@ mod tests {
                                                 }]
                                             }
                                         },
-                                    ]))
+                                    ])
                                 })
                             }
                         },
@@ -392,16 +392,16 @@ mod tests {
                                             args: vec![]
                                         }
                                     }],
-                                    result: Some(FunctionResultNode::Single(TypeNode::Name {
+                                    result: FunctionResultNode::Single(TypeNode::Name {
                                         package: None,
                                         id: Span::new("bool", 62, 1),
                                         args: vec![]
-                                    }))
+                                    })
                                 })
                             }
                         }
                     ],
-                    result: Some(FunctionResultNode::Single(TypeNode::Function {
+                    result: FunctionResultNode::Single(TypeNode::Function {
                         signature: Box::new(FunctionSignatureNode {
                             params: vec![FunctionParamDeclNode {
                                 ids: vec![Span::new("result", 73, 1)],
@@ -412,9 +412,9 @@ mod tests {
                                     args: vec![]
                                 }
                             }],
-                            result: None,
+                            result: FunctionResultNode::None,
                         })
-                    }))
+                    })
                 })
             },
             parse("func(a int, f, g func() (x int, y p.A[T]), ...func(x float32) bool) func(result int)")
