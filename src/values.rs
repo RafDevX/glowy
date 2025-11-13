@@ -802,7 +802,13 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
     }
 
     fn is_bottom(&self) -> bool {
-        self.backtrace.is_none()
+        if self.backtrace.is_some() {
+            false
+        } else if let Some(outcome) = &self.outcome {
+            outcome.iter().all(ValueRef::is_bottom)
+        } else {
+            true
+        }
     }
 }
 
@@ -813,11 +819,23 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         from_index: usize,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
-        let mut new = self.clone();
+        // we need to recursively realize everything in the outcome, for example
+        // to deal with the case where a function returns another function
+        // (since then the inner function could depend on the outer's params)
+        let outcome = self.outcome.as_ref().map(|vec| {
+            vec.iter()
+                .map(|val| val.realize(from_func, from_index, concrete))
+                .collect()
+        });
 
-        new.backtrace = new.backtrace.realize(from_func, from_index, concrete);
+        let backtrace = self.backtrace.realize(from_func, from_index, concrete);
 
-        new
+        Self {
+            r#ref: self.r#ref.clone(),
+            signature: self.signature.clone(),
+            outcome,
+            backtrace,
+        }
     }
 
     fn nest_backtrace(
