@@ -30,11 +30,28 @@ fn visit_function_def<'a>(
     signature: &FunctionSignatureNode<'a>,
     body: &BlockNode<'a>,
 ) -> ValueRef<'a> {
-    let value = ValueRef::from(Value::Function(FunctionValue::new(
+    let mut func_val = FunctionValue::new(
         r#ref.clone(),
         signature.clone(),
         None, // TODO: support annotations
-    )));
+    );
+
+    // cannot use `vec![ValueRef::from(None); signature.result.len()]`, since
+    // the vec! macro would clone the ValueRef (and so they'd all point to the
+    // same value, which is not what we want; they should be independent)
+    let bottom_outcome = iter::once(Value::Simple(None))
+        .cycle()
+        .take(signature.result.len())
+        // map only after cycle, otherwise Clone would just make many references
+        .map(ValueRef::from)
+        .collect();
+
+    // since we know that this function has an implementation, we set a bottom
+    // value as outcome (with the right cardinality), to distinguish from a
+    // blackbox function without implementation (which would have unset outcome)
+    func_val.set_outcome(bottom_outcome);
+
+    let value = ValueRef::from(Value::Function(func_val));
 
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
