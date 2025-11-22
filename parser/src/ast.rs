@@ -100,8 +100,10 @@ pub struct FieldDeclNode<'a> {
     pub tag: Option<String>,
 }
 
+/// This represents both function declarations and method declarations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionDeclNode<'a> {
+    pub receiver: Option<FunctionParamDeclNode<'a>>, // if method
     pub name: Span<'a>,
     // TODO: pub type_params: Vec<___>,
     pub signature: FunctionSignatureNode<'a>,

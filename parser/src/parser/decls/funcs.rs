@@ -9,7 +9,10 @@ use crate::{
     token::{Token, TokenKind},
 };
 
-fn parse_param_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionParamDeclNode<'a>> {
+fn parse_param_decl<'a>(
+    s: &mut TokenStream<'a>,
+    single: bool,
+) -> PResult<'a, FunctionParamDeclNode<'a>> {
     let mut ids = vec![];
 
     // TODO: support declarations without identifiers, e.g. "int"
@@ -26,6 +29,11 @@ fn parse_param_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionParamDec
         }
 
         ids.push(expect(s, TokenKind::Ident, Some("parameter declaration"))?.span);
+
+        if single {
+            // we only support one identifier, not a list, so we stop right away
+            break;
+        }
 
         // check the next token
         if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
@@ -67,7 +75,7 @@ fn parse_params<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<FunctionParamDec
             break;
         }
 
-        params.push(parse_param_decl(s)?);
+        params.push(parse_param_decl(s, false)?);
 
         // need to check again in case there isn't an (optional) trailing comma
         if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
@@ -95,8 +103,21 @@ pub fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSigna
     Ok(FunctionSignatureNode { params, result })
 }
 
+// for the purposes of this parser, methods are special functions (w/ receiver)
 pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionDeclNode<'a>> {
     let beginning = expect(s, TokenKind::Func, Some("function declaration"))?;
+
+    let receiver = if let Some(Ok(of_kind!(TokenKind::ParenL))) = s.peek() {
+        s.next(); // advance
+
+        let param = parse_param_decl(s, true)?;
+
+        expect(s, TokenKind::ParenR, Some("method receiver"))?;
+
+        Some(param)
+    } else {
+        None
+    };
 
     let name = expect(s, TokenKind::Ident, Some("function name"))?.span;
 
@@ -115,6 +136,7 @@ pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionD
     let location = s.location_since(&beginning);
 
     Ok(FunctionDeclNode {
+        receiver,
         name,
         signature,
         body,
