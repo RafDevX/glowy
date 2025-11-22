@@ -48,17 +48,36 @@ fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprN
 
     let operand = parse_operand_name(b)?;
 
-    let expr = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = b.peek() {
-        // this is actually a composite literal, not an operand name!
-        // discard b and go back to the main stream, starting over
-
-        // we default to assume any type is a struct
-        parse_struct_literal(s)?.into()
-    } else {
-        // never mind, we got it right the first time, it's an operand name
+    let expr = if !matches!(b.peek(), Some(Ok(of_kind!(TokenKind::CurlyL)))) {
+        // ok, we got it right, this was for sure an operand name
         context.commit()?;
 
         ExprNode::Name(operand)
+    } else {
+        // now we know there's a trailing {, but we don't know if that is
+        // because of a composite literal (`x { ... }`) or completely unrelated
+        // (`if x {`), so we need to try parsing a composite literal but be
+        // ready to backtrack (must use the original stream since if correct
+        // then `operand` is wrong)
+        let mut context2 = BacktrackingContext::new(s);
+        let b2 = context2.stream();
+
+        // we default to assume any type is a struct
+        if let Ok(lit) = parse_struct_literal(b2) {
+            // ok, confirmed, everything worked out
+            context2.commit()?;
+
+            lit.into()
+        } else {
+            // nope, if we got this far then our first guess was correct and it
+            // truly is an operand name with an innocent unrelated { after it
+            ExprNode::Name(parse_operand_name(s)?)
+            // ^^^ note, cannot just re-use the `operand` variable because then
+            // the main stream would not be at the right position, and cannot
+            // use `context.commit()` to fix it because we can only construct
+            // `context2` (&mut s) if the previous `context` (also &mut s) has
+            // already been dropped (way before this point)
+        }
     };
 
     Ok(expr)
