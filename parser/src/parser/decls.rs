@@ -1,5 +1,6 @@
 use bindings::{parse_const_decl, parse_var_decl};
 use funcs::parse_function_decl;
+use types::parse_type_decl;
 
 use super::{PResult, of_kind};
 use crate::{
@@ -10,6 +11,7 @@ use crate::{
 
 pub mod bindings;
 pub mod funcs;
+pub mod types;
 
 pub fn try_parse_top_level_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Option<DeclNode<'a>>> {
     match s.peek().cloned().transpose()? {
@@ -17,6 +19,7 @@ pub fn try_parse_top_level_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Opti
         Some(of_kind!(TokenKind::Const)) => Ok(Some(parse_const_decl(s)?)),
         Some(of_kind!(TokenKind::Var)) => Ok(Some(parse_var_decl(s)?)),
         Some(of_kind!(TokenKind::Func)) => Ok(Some(parse_function_decl(s).map(Into::into)?)),
+        Some(of_kind!(TokenKind::Type)) => Ok(Some(parse_type_decl(s)?)),
         Some(token) => Err(ParsingError::UnexpectedConstruct {
             expected: "a top-level declaration",
             found: Some(token),

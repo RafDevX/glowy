@@ -38,6 +38,10 @@ pub enum DeclNode<'a> {
         location: Location,
         annotation: Option<Box<Annotation<'a>>>,
     },
+    Type {
+        specs: Vec<TypeDeclSpecNode<'a>>,
+        location: Location,
+    },
     Function(FunctionDeclNode<'a>),
 }
 
@@ -53,6 +57,14 @@ pub struct BindingDeclSpecNode<'a> {
     pub ids: Vec<Span<'a>>,
     pub exprs: Vec<ExprNode<'a>>,
     pub r#type: Option<TypeNode<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeDeclSpecNode<'a> {
+    pub alias: bool, // otherwise, typedef
+    pub id: Span<'a>,
+    // TODO: params
+    pub r#type: TypeNode<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
