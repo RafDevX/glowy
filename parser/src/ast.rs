@@ -361,7 +361,7 @@ pub struct MakeNode<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexingNode<'a> {
-    pub expr: Box<ExprNode<'a>>,
+    pub base: Box<ExprNode<'a>>,
     pub index: Box<ExprNode<'a>>,
     pub location: Location, // for better error messages
 }

@@ -416,7 +416,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        let mut base = exprs::visit_single_expr(ctx, &self.expr);
+        let mut base = exprs::visit_single_expr(ctx, &self.base);
 
         let Some(mut composite) = base.as_composite_mut() else {
             ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
@@ -454,7 +454,7 @@ fn root_indexing_in_current_scope<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &IndexingNode<'a>,
 ) -> bool {
-    match &*node.expr {
+    match &*node.base {
         ExprNode::Name(operand) => {
             if let Some(symbol) = exprs::resolve_operand_name(ctx, operand) {
                 ctx.symtab().is_symbol_in_current_scope(symbol)

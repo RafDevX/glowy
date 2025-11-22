@@ -405,7 +405,7 @@ fn visit_array_literal_element<'a>(
 }
 
 fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
-    let base = visit_single_expr(ctx, &node.expr);
+    let base = visit_single_expr(ctx, &node.base);
 
     let Some(composite) = base.as_composite() else {
         ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {

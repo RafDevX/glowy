@@ -107,7 +107,7 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
 
 pub fn parse_indexing<'a>(
     s: &mut TokenStream<'a>,
-    expr: ExprNode<'a>,
+    base: ExprNode<'a>,
 ) -> PResult<'a, IndexingNode<'a>> {
     let open = expect(s, TokenKind::SquareL, Some("indexing expression"))?;
 
@@ -121,7 +121,7 @@ pub fn parse_indexing<'a>(
     expect(s, TokenKind::SquareR, Some("indexing expression"))?;
 
     Ok(IndexingNode {
-        expr: Box::new(expr),
+        base: Box::new(base),
         index: Box::new(index),
         location: s.location_since(&open),
     })
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(
             ExprNode::Call(CallNode {
                 func: Box::new(ExprNode::Indexing(IndexingNode {
-                    expr: Box::new(ExprNode::BinaryOp {
+                    base: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
                         left: Box::new(ExprNode::Name(OperandNameNode {
                             package: Some(Span::new("abc", 1, 1)),
