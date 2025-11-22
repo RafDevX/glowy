@@ -1,7 +1,7 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     TokenStream,
-    ast::{CallNode, ExprNode, IndexingNode, MakeNode, OperandNameNode},
+    ast::{CallNode, ExprNode, IndexingNode, MakeNode, OperandNameNode, SelectionNode},
     parser::{
         PResult, expect, of_kind,
         types::{parse_channel_type, parse_type},
@@ -9,7 +9,7 @@ use crate::{
     token::TokenKind,
 };
 
-pub fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
+fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
     if let ExprNode::Name(OperandNameNode { package: None, id }) = func {
         if id.content() == "make" {
             // make(T, ...) is treated specially, not as a function call
@@ -105,7 +105,24 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
     })
 }
 
-pub fn parse_indexing<'a>(
+fn parse_selection<'a>(
+    s: &mut TokenStream<'a>,
+    base: ExprNode<'a>,
+) -> PResult<'a, SelectionNode<'a>> {
+    let beginning = expect(s, TokenKind::Period, Some("selection expression"))?;
+
+    let selector = expect(s, TokenKind::Ident, Some("selector"))?.span;
+
+    let location = s.location_since(&beginning);
+
+    Ok(SelectionNode {
+        base: Box::new(base),
+        selector,
+        location,
+    })
+}
+
+fn parse_indexing<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
 ) -> PResult<'a, IndexingNode<'a>> {
@@ -133,6 +150,7 @@ pub fn parse_postfix_if_exists<'a>(
 ) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?,
+        Some(of_kind!(TokenKind::Period)) => parse_selection(s, operand)?.into(),
         Some(of_kind!(TokenKind::SquareL)) => parse_indexing(s, operand)?.into(),
         _ => return Ok(operand), // nothing found, stop the recursion
     };

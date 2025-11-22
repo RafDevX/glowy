@@ -170,6 +170,7 @@ pub enum ExprNode<'a> {
     Literal(LiteralNode<'a>),
     Call(CallNode<'a>),
     Make(MakeNode<'a>),
+    Selection(SelectionNode<'a>),
     Indexing(IndexingNode<'a>),
     // TODO: more primary expressions...
     UnaryOp {
@@ -240,6 +241,12 @@ impl<'a> From<CallNode<'a>> for ExprNode<'a> {
 impl<'a> From<MakeNode<'a>> for ExprNode<'a> {
     fn from(node: MakeNode<'a>) -> Self {
         Self::Make(node)
+    }
+}
+
+impl<'a> From<SelectionNode<'a>> for ExprNode<'a> {
+    fn from(node: SelectionNode<'a>) -> Self {
+        Self::Selection(node)
     }
 }
 
@@ -356,6 +363,13 @@ pub struct MakeNode<'a> {
     pub r#type: TypeNode<'a>,
     pub n: Option<Box<ExprNode<'a>>>,
     pub m: Option<Box<ExprNode<'a>>>,
+    pub location: Location, // for better error messages
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectionNode<'a> {
+    pub base: Box<ExprNode<'a>>,
+    pub selector: Span<'a>,
     pub location: Location, // for better error messages
 }
 
