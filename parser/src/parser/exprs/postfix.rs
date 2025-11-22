@@ -6,7 +6,7 @@ use crate::{
         PResult, expect, of_kind,
         types::{parse_channel_type, parse_type},
     },
-    token::{Token, TokenKind},
+    token::TokenKind,
 };
 
 pub fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {

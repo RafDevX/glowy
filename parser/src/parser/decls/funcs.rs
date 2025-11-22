@@ -6,7 +6,7 @@ use crate::{
         stmts::{self, parse_block},
         types::parse_type,
     },
-    token::{Token, TokenKind},
+    token::TokenKind,
 };
 
 fn parse_param_decl<'a>(

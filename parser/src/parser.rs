@@ -18,7 +18,7 @@ type PResult<'a, T> = Result<T, ParsingError<'a>>;
 
 macro_rules! of_kind {
     ($k:pat) => {
-        Token { kind: $k, .. }
+        crate::token::Token { kind: $k, .. }
     };
 }
 // required to allow the `allow()` below

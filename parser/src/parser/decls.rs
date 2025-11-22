@@ -3,11 +3,7 @@ use funcs::parse_function_decl;
 use types::parse_type_decl;
 
 use super::{PResult, of_kind};
-use crate::{
-    ParsingError, TokenStream,
-    ast::DeclNode,
-    token::{Token, TokenKind},
-};
+use crate::{ParsingError, TokenStream, ast::DeclNode, token::TokenKind};
 
 pub mod bindings;
 pub mod funcs;

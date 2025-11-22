@@ -11,7 +11,7 @@ use crate::{
         stmts::{parse_block, parse_statement, parse_statements_until, terminal_token},
         types::parse_types_until,
     },
-    token::{Token, TokenKind},
+    token::TokenKind,
 };
 
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {

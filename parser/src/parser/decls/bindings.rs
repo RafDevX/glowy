@@ -2,7 +2,7 @@ use crate::{
     Location, ParsingError, TokenStream,
     ast::{BindingDeclSpecNode, DeclNode},
     parser::{PResult, expect, exprs::parse_expressions_list_while, of_kind, types::parse_type},
-    token::{Annotation, Token, TokenKind},
+    token::{Annotation, TokenKind},
 };
 
 // bindings is our term for constants and variables,

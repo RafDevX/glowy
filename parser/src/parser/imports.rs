@@ -2,7 +2,7 @@ use super::{PResult, expect, of_kind};
 use crate::{
     ParsingError, TokenStream,
     ast::{ImportNode, ImportSpecNode},
-    token::{Token, TokenKind},
+    token::TokenKind,
 };
 
 fn parse_spec<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ImportSpecNode<'a>> {
