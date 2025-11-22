@@ -191,6 +191,11 @@ pub enum AnalysisErrorKind<'a> {
         /// The immutable symbol.
         symbol: Span<'a>,
     },
+    /// Illegal or unsupported expression used as base for selection.
+    InvalidSelectionBase {
+        /// Where the selection was found.
+        location: Location,
+    },
     /// Illegal or unsupported expression used as base for indexing.
     InvalidIndexingBase {
         /// Where the indexing was found.
@@ -253,6 +258,7 @@ impl AnalysisErrorKind<'_> {
             | Self::MultiComplexAssignment { .. }
             | Self::InvalidLeftValue { .. }
             | Self::ImmutableLeftValue { .. }
+            | Self::InvalidSelectionBase { .. }
             | Self::InvalidIndexingBase { .. }
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }

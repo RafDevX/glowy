@@ -115,6 +115,14 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
+    pub fn as_struct(&self) -> Option<Ref<CompositeValue<'a, String>>> {
+        Ref::filter_map(self.0.borrow(), |value| match value {
+            Value::Struct(r#struct) => Some(r#struct),
+            _ => None,
+        })
+        .ok()
+    }
+
     pub fn as_function(&self) -> Option<Ref<FunctionValue<'a>>> {
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Function(func) => Some(func),

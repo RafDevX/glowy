@@ -4,7 +4,8 @@ use parser::{
     Location,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, IndexingNode,
-        LiteralNode, OperandNameNode, StructLiteralFieldsNode, TypeNode, UnaryOpKind,
+        LiteralNode, OperandNameNode, SelectionNode, StructLiteralFieldsNode, TypeNode,
+        UnaryOpKind,
     },
 };
 
@@ -26,6 +27,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         ExprNode::Literal(lit) => visit_literal(ctx, lit),
         ExprNode::Call(call) => return funcs::visit_call(ctx, call),
         ExprNode::Make(make) => funcs::builtins::visit_make(ctx, make),
+        ExprNode::Selection(selection) => visit_selection(ctx, selection),
         ExprNode::Indexing(indexing) => visit_indexing(ctx, indexing),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
@@ -404,6 +406,23 @@ fn visit_array_literal_element<'a>(
     }
 }
 
+fn visit_selection<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectionNode<'a>) -> ValueRef<'a> {
+    let base = visit_single_expr(ctx, &node.base);
+
+    let Some(r#struct) = base.as_struct() else {
+        ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
+            location: node.location.clone(),
+        });
+
+        return ValueRef::from(None);
+    };
+
+    r#struct.get_const(
+        node.selector.content().to_owned(),
+        ctx.pin(node.location.clone()),
+    )
+}
+
 fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
     let base = visit_single_expr(ctx, &node.base);
 
@@ -451,6 +470,7 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
         }
         ExprNode::Call(call) => call.location.clone(),
         ExprNode::Make(make) => make.location.clone(),
+        ExprNode::Selection(selection) => selection.location.clone(),
         ExprNode::Indexing(indexing) => indexing.location.clone(),
         ExprNode::UnaryOp { location, .. } | ExprNode::BinaryOp { location, .. } => {
             location.clone()
