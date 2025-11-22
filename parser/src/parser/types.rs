@@ -194,6 +194,12 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
             expect(s, TokenKind::ParenR, Some("parenthesized type"))?;
             Ok(inner)
         }
+        Some(of_kind!(TokenKind::Star)) => {
+            s.next(); // advance
+            let base = Box::new(parse_type(s)?);
+
+            Ok(TypeNode::Pointer { base })
+        }
         Some(of_kind!(TokenKind::Func)) => parse_function_type(s),
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_type(s),
         Some(of_kind!(TokenKind::Map)) => parse_map_type(s),

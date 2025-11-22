@@ -95,7 +95,9 @@ pub enum TypeNode<'a> {
     Function {
         signature: Box<FunctionSignatureNode<'a>>,
     },
-    // TODO: Literal
+    Pointer {
+        base: Box<TypeNode<'a>>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
