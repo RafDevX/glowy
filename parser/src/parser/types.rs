@@ -142,7 +142,10 @@ fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDecl
     let r#type = parse_type(s)?;
 
     let tag = if let Some(Ok(of_kind!(TokenKind::String(tag)))) = s.peek() {
-        Some(tag.clone())
+        let tag = tag.clone(); // clone before mutating s (tag is a ref)
+        s.next(); // advance
+
+        Some(tag)
     } else {
         None
     };
