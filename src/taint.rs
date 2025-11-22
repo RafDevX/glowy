@@ -96,6 +96,7 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
         } => {
             explicit::visit_binding_decl(ctx, specs, true, location, annotation);
         }
+        DeclNode::Type { .. } => {} // we just ignore these
         DeclNode::Function(func_node) => funcs::visit_function_decl(ctx, func_node),
     }
 }
@@ -190,6 +191,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Decl(
             DeclNode::Const { location, .. }
             | DeclNode::Var { location, .. }
+            | DeclNode::Type { location, .. }
             | DeclNode::Function(FunctionDeclNode { location, .. }),
         )
         | StatementNode::If(IfNode { location, .. })

@@ -51,6 +51,7 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
     match node {
         DeclNode::Const { specs, .. } => visit_binding_decl(ctx, specs, false),
         DeclNode::Var { specs, .. } => visit_binding_decl(ctx, specs, true),
+        DeclNode::Type { .. } => {} // we just ignore these
         DeclNode::Function(func_node) => visit_function_decl(ctx, func_node),
     }
 }
