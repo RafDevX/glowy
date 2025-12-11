@@ -5,7 +5,7 @@ use crate::{
         ForRangeNode, IfNode, StatementNode, SwitchNode, TypeSwitchCaseClause, TypeSwitchNode,
     },
     parser::{
-        PResult, expect,
+        BacktrackingContext, PResult, expect,
         exprs::{parse_expression, parse_expressions_list_while, parse_primary_expression},
         of_kind,
         stmts::{parse_block, parse_statement, parse_statements_until, terminal_token},
@@ -17,26 +17,24 @@ use crate::{
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {
     let beginning = expect(s, TokenKind::If, Some("if statement"))?;
 
-    let mut stmt = None;
+    // try to read a statement
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
 
-    // no point in using BacktrackingContext if we'll never commit
-    for future in s.clone() {
-        match future?.kind {
-            TokenKind::CurlyL => break, // reached block & no semi was found
-            TokenKind::SemiColon => {
-                // ok, there's a simple statement we need to parse before
-                // the actual condition (note we use the actual stream again
-                // now, the clone was just to look for a semicolon)
+    let stmt = if let Ok(stmt) = parse_statement(b, false) {
+        if let Some(Ok(of_kind!(TokenKind::SemiColon))) = b.next() {
+            // got it, we can continue with the main stream from now on
+            context.commit()?;
 
-                stmt = Some(Box::new(parse_statement(s, false)?));
-
-                expect(s, TokenKind::SemiColon, Some("if statement"))?;
-
-                break;
-            }
-            _ => {}
+            Some(Box::new(stmt))
+        } else {
+            // nope, rollback
+            None
         }
-    }
+    } else {
+        // nope, rollback
+        None
+    };
 
     let cond = parse_expression(s)?;
     let then = parse_block(s)?;
