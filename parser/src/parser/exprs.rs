@@ -3,8 +3,8 @@ use super::{PResult, expect};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, LiteralNode,
-        OperandNameNode, OrderedF64, StructLiteralFieldsNode,
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode, ExprNode,
+        LiteralNode, OperandNameNode, OrderedF64, StructLiteralFieldsNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -294,7 +294,46 @@ fn parse_composite_literal_element_list<'a>(
     Ok(values)
 }
 
+fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'a>> {
+    let start = s.peek().map(Result::as_ref).and_then(Result::ok).cloned();
+
+    let r#type = parse_type(s)?;
+
+    expect(s, TokenKind::ParenL, Some("explicit conversion"))?;
+
+    let expr = Box::new(parse_expression(s)?);
+
+    expect(s, TokenKind::ParenR, Some("explicit conversion"))?;
+
+    let location = s.location_since(&start.unwrap());
+    // ^ unwrap is safe since next token definitely exists
+    // (otherwise we would not have gotten this far; `expect` would have failed)
+
+    Ok(ConversionNode {
+        r#type,
+        expr,
+        location,
+    })
+}
+
 pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+    macro_rules! with_conversion_fallback {
+        ($main:path) => {{
+            let mut context = BacktrackingContext::new(s);
+            let b = context.stream();
+
+            if let Ok(ret) = $main(b).map(Into::into) {
+                context.commit()?;
+
+                ret
+            } else {
+                // rollback; try parsing a conversion
+
+                parse_conversion(s)?.into()
+            }
+        }};
+    }
+
     let expr = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::Ident)) => parse_identifier_first_expr(s)?,
         Some(token @ of_kind!(TokenKind::Int(value))) => {
@@ -334,9 +373,11 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             .into()
         }
         Some(of_kind!(TokenKind::Func)) => parse_function_literal(s)?.into(),
-        Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_literal(s)?.into(),
-        Some(of_kind!(TokenKind::Map)) => parse_map_literal(s)?.into(),
-        Some(of_kind!(TokenKind::Struct)) => parse_struct_literal(s)?.into(),
+        Some(of_kind!(TokenKind::SquareL)) => {
+            with_conversion_fallback!(parse_array_or_slice_literal)
+        }
+        Some(of_kind!(TokenKind::Map)) => with_conversion_fallback!(parse_map_literal),
+        Some(of_kind!(TokenKind::Struct)) => with_conversion_fallback!(parse_struct_literal),
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance
             let inner = parse_expression(s)?;
@@ -345,10 +386,21 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
             inner
         }
         found => {
-            return Err(ParsingError::UnexpectedConstruct {
-                expected: "a primary expression",
-                found,
-            });
+            if let Ok(conversion) = parse_conversion(s) {
+                // this was a conversion to a weird type like `->int`, which
+                // starts with a strange token (didn't match above)
+
+                conversion.into()
+            } else {
+                // if conversion fails to parse, this was probably not a
+                // conversion at all to begin with, so it's better to show a
+                // more generic error message
+
+                return Err(ParsingError::UnexpectedConstruct {
+                    expected: "a primary expression",
+                    found,
+                });
+            }
         }
     };
 

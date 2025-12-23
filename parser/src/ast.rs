@@ -172,6 +172,7 @@ pub enum ExprNode<'a> {
     Make(MakeNode<'a>),
     Selection(SelectionNode<'a>),
     Indexing(IndexingNode<'a>),
+    Conversion(ConversionNode<'a>),
     // TODO: more primary expressions...
     UnaryOp {
         kind: UnaryOpKind,
@@ -253,6 +254,12 @@ impl<'a> From<SelectionNode<'a>> for ExprNode<'a> {
 impl<'a> From<IndexingNode<'a>> for ExprNode<'a> {
     fn from(node: IndexingNode<'a>) -> Self {
         Self::Indexing(node)
+    }
+}
+
+impl<'a> From<ConversionNode<'a>> for ExprNode<'a> {
+    fn from(node: ConversionNode<'a>) -> Self {
+        Self::Conversion(node)
     }
 }
 
@@ -377,6 +384,13 @@ pub struct SelectionNode<'a> {
 pub struct IndexingNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub index: Box<ExprNode<'a>>,
+    pub location: Location, // for better error messages
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConversionNode<'a> {
+    pub r#type: TypeNode<'a>,
+    pub expr: Box<ExprNode<'a>>,
     pub location: Location, // for better error messages
 }
 
