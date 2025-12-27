@@ -2,33 +2,48 @@ use crate::{
     ParsingError, TokenStream,
     ast::{FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode},
     parser::{
-        PResult, expect, of_kind,
+        BacktrackingContext, PResult, expect, of_kind,
         stmts::{self, parse_block},
         types::parse_type,
     },
     token::TokenKind,
 };
 
-fn parse_param_decl<'a>(
+fn parse_type_only_param_decl<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, FunctionParamDeclNode<'a>> {
+    // each declaration is just one type, so this is easy
+
+    // note: no need to take a `single: bool` parameter because type-only
+    // declarations are always single anyway
+
+    let variadic = if let Some(Ok(of_kind!(TokenKind::Ellipsis))) = s.peek() {
+        s.next(); // advance
+
+        true
+    } else {
+        false
+    };
+
+    let r#type = parse_type(s)?;
+
+    Ok(FunctionParamDeclNode {
+        ids: vec![],
+        variadic,
+        r#type,
+    })
+}
+
+fn parse_identifiers_list_param_decl<'a>(
     s: &mut TokenStream<'a>,
     single: bool,
 ) -> PResult<'a, FunctionParamDeclNode<'a>> {
     let mut ids = vec![];
 
-    // TODO: support declarations without identifiers, e.g. "int"
-    // this is non-trivial because a declaration "a, b int" is
-    // indistinguishable from 2 declarations "a" and "b int"
-    // (this example is illegal but the ambiguity remains within a single
-    // declaration) note: partial support already exists but only when variadic
-    // or type is not simple
+    loop {
+        let ident = expect(s, TokenKind::Ident, Some("parameter declaration"))?;
 
-    while let Some(token) = s.peek().cloned().transpose()? {
-        if ids.is_empty() && token.kind != TokenKind::Ident {
-            // this is definitely not a name, so it must be a type
-            break;
-        }
-
-        ids.push(expect(s, TokenKind::Ident, Some("parameter declaration"))?.span);
+        ids.push(ident.span);
 
         if single {
             // we only support one identifier, not a list, so we stop right away
@@ -62,6 +77,43 @@ fn parse_param_decl<'a>(
         variadic,
         r#type,
     })
+}
+
+fn parse_param_decl<'a>(
+    s: &mut TokenStream<'a>,
+    single: bool,
+) -> PResult<'a, FunctionParamDeclNode<'a>> {
+    // Go in practice supports two different flavors of parameter declarations:
+    // either just with types, such as `f(int, int, float32)`, or more commonly
+    // with identifiers, like `f(a, b int, z float32)` -- the latter obviously
+    // being much more difficult to parse
+
+    // We have no way of knowing which flavor is being used until we actually
+    // try it out, so here we just do trial-and-error: we first try parsing the
+    // most common identifiers-list flavor, and if that fails then we try
+    // parsing the simpler type-only version
+
+    // Note we could not do this the other way around, since parsing the flavor
+    // with identifiers is guaranteed to fail immediately for the first
+    // declaration if we made an incorrect assumption, but parsing the type-only
+    // flavor would not necessarily fail right away even if we got it wrong,
+    // since an identifier can always be erroneously parsed as a type -- meaning
+    // that if we later discovered that this parameter list was actually using
+    // identifiers, we would need to re-parse all previous parameter
+    // declarations under this new flavor. In any case, the identifiers-list
+    // version _should_ occur more regularly, and it's nice not having to
+    // backtrack most of the time
+
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
+
+    if let Ok(decl) = parse_identifiers_list_param_decl(b, single) {
+        context.commit()?;
+
+        Ok(decl)
+    } else {
+        parse_type_only_param_decl(s)
+    }
 }
 
 fn parse_params<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<FunctionParamDeclNode<'a>>> {
