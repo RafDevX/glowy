@@ -32,7 +32,7 @@ fn visit_function_def<'a>(
 ) -> ValueRef<'a> {
     let mut func_val = FunctionValue::new(
         r#ref.clone(),
-        signature.clone(),
+        Some(signature.clone()),
         None, // TODO: support annotations
     );
 
@@ -177,7 +177,7 @@ pub fn visit_return<'a>(
 
 fn calculate_outcome<'a>(
     ctx: &mut AnalysisContext<'a>,
-    signature: &FunctionSignatureNode<'a>,
+    signature: Option<&FunctionSignatureNode<'a>>,
     exprs: &[ExprNode<'a>],
     location: &Location,
 ) -> Vec<ValueRef<'a>> {
@@ -191,7 +191,7 @@ fn calculate_outcome<'a>(
     let mut outcome = vec![];
 
     let exprs = if exprs.is_empty() {
-        if let FunctionResultNode::Params(result) = &signature.result {
+        if let Some(FunctionResultNode::Params(result)) = signature.map(|sig| &sig.result) {
             // naked returns
 
             result
@@ -279,7 +279,9 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     //     .enumerate();
 
     let mut ids = Vec::new();
-    for param in &func.signature().params {
+    let def_params = vec![];
+    let params = func.signature().map_or(&def_params, |sig| &sig.params);
+    for param in params {
         if param.ids.is_empty() {
             ids.push((None, param.variadic));
         } else {
@@ -321,9 +323,13 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             ctx.pin(node.location.clone()),
         );
 
+        let n_results = func.signature().map_or(1, |sig| sig.result.len());
+        // ^ if we really have no information about this function, we have no
+        // choice but to assume an arbitrary number of return values (here, 1)
+
         return iter::once(Value::Simple(bt))
             .cycle()
-            .take(func.signature().result.len())
+            .take(n_results)
             // only after cycle otherwise Clone would just make many references
             .map(ValueRef::from)
             .collect();

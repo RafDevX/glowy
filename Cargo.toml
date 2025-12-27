@@ -26,3 +26,4 @@ rust-version = "1.86"
 clap = { version = "4.5.51", features = ["derive"] }
 codespan-reporting.workspace = true
 parser = { path = "parser" }
+uuid = { version = "1.19.0", features = ["v4"] }

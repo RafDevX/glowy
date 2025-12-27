@@ -15,6 +15,7 @@ use parser::{
         LiteralNode, TypeNode, UnaryOpKind,
     },
 };
+use uuid::Uuid;
 
 use crate::{
     Pinned,
@@ -26,6 +27,10 @@ use crate::{
 pub struct ValueRef<'a>(Rc<RefCell<Value<'a>>>);
 
 impl<'a> ValueRef<'a> {
+    pub fn new_unknown() -> Self {
+        Self::from(Value::Unknown(UnknownValue {}))
+    }
+
     /// Copy by value or by reference according to Go aliasing rules
     pub fn copy(&self) -> Self {
         let borrowed = self.0.borrow();
@@ -77,7 +82,18 @@ impl<'a> ValueRef<'a> {
         matches!(*self.0.borrow(), Value::Map(_))
     }
 
+    // force a Value::Unknown to take a concrete shape when used
+    fn coerce_unknown_to(&self, f: impl FnOnce() -> Value<'a>) {
+        if matches!(*self.0.borrow(), Value::Unknown(_)) {
+            *self.0.borrow_mut() = f();
+        }
+    }
+
     pub fn as_expandable(&self) -> Option<Ref<ExpandableValue<'a>>> {
+        self.coerce_unknown_to(|| {
+            Value::Expandable(ExpandableValue::new(Self::new_unknown(), Vec::new()))
+        });
+
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Expandable(exp) => Some(exp),
             _ => None,
@@ -86,6 +102,8 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_slice_mut(&mut self) -> Option<RefMut<CompositeValue<'a, u64>>> {
+        self.coerce_unknown_to(|| Value::Slice(CompositeValue::empty()));
+
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Slice(composite) => Some(composite),
             _ => None,
@@ -94,6 +112,8 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_composite(&self) -> Option<Ref<dyn CompositeValueAdapter<'a>>> {
+        self.coerce_unknown_to(|| Value::Array(CompositeValue::empty()));
+
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {
                 Some(composite as &dyn CompositeValueAdapter<'a>)
@@ -105,6 +125,8 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_composite_mut(&mut self) -> Option<RefMut<dyn CompositeValueAdapter<'a>>> {
+        self.coerce_unknown_to(|| Value::Array(CompositeValue::empty()));
+
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {
                 Some(composite as &mut dyn CompositeValueAdapter<'a>)
@@ -116,6 +138,8 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_struct(&self) -> Option<Ref<CompositeValue<'a, String>>> {
+        self.coerce_unknown_to(|| Value::Struct(CompositeValue::empty()));
+
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Struct(r#struct) => Some(r#struct),
             _ => None,
@@ -124,6 +148,8 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_function(&self) -> Option<Ref<FunctionValue<'a>>> {
+        self.coerce_unknown_to(|| Value::Function(FunctionValue::new_unknown()));
+
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Function(func) => Some(func),
             _ => None,
@@ -132,6 +158,8 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_function_mut(&mut self) -> Option<RefMut<FunctionValue<'a>>> {
+        self.coerce_unknown_to(|| Value::Function(FunctionValue::new_unknown()));
+
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Function(func) => Some(func),
             _ => None,
@@ -269,6 +297,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Value<'a> {
     Simple(Option<LabelBacktrace<'a>>),
+    Unknown(UnknownValue), // output from a blackbox; becomes concrete when used
     Expandable(ExpandableValue<'a>),
     Array(CompositeValue<'a, u64>),
     Slice(CompositeValue<'a, u64>),
@@ -286,6 +315,7 @@ impl<'a> Value<'a> {
     fn sub_container(&self) -> &dyn BacktraceContainer<'a> {
         match self {
             Self::Simple(opt) => opt,
+            Self::Unknown(unknown) => unknown,
             Self::Expandable(exp) => exp,
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
@@ -323,6 +353,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
 
         match self {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
+            Self::Unknown(_) => self.clone(),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
@@ -347,6 +378,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
 
         match self {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
+            Self::Unknown(_) => recurs!(Self::Simple(None)),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
@@ -354,6 +386,22 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Struct(composite) => Self::Struct(recurs!(composite)),
             Self::Function(func) => Self::Function(recurs!(func)),
         }
+    }
+}
+
+// This struct serves no purpose, but it makes Value::Unknown fit better with
+// how all other variants are structured (always around some sub-container of
+// sorts). It also helps keep all relevant methods in one place.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct UnknownValue;
+
+impl<'a> BacktraceContainer<'a> for UnknownValue {
+    fn backtrace_at_location(&self, _location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+        None
+    }
+
+    fn is_bottom(&self) -> bool {
+        true
     }
 }
 
@@ -719,7 +767,8 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FunctionValue<'a> {
     r#ref: FunctionRef<'a>,
-    signature: FunctionSignatureNode<'a>,
+    signature: Option<FunctionSignatureNode<'a>>, // None if no known decl
+    // ^ this will generally only be None for blackbox-inferred functions
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
@@ -728,7 +777,7 @@ pub struct FunctionValue<'a> {
 impl<'a> FunctionValue<'a> {
     pub fn new(
         r#ref: FunctionRef<'a>,
-        signature: FunctionSignatureNode<'a>,
+        signature: Option<FunctionSignatureNode<'a>>,
         backtrace: Option<LabelBacktrace<'a>>,
     ) -> Self {
         Self {
@@ -777,15 +826,21 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(r#ref, signature, None)
+        Self::new(r#ref, Some(signature), None)
+    }
+
+    fn new_unknown() -> Self {
+        let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
+
+        Self::new(r#ref, None, None)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
         &self.r#ref
     }
 
-    pub fn signature(&self) -> &FunctionSignatureNode<'a> {
-        &self.signature
+    pub fn signature(&self) -> Option<&FunctionSignatureNode<'a>> {
+        self.signature.as_ref()
     }
 
     pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
@@ -885,14 +940,16 @@ pub enum FunctionRef<'a> {
     Anonymous(Pinned<Location>),
     /// A built-in function provided by the language or the Go standard library.
     BuiltIn(&'static str),
+    /// An inferred function for which no declaration exists/was found.
+    BlackboxInference(Uuid),
 }
 
 impl<'a> FunctionRef<'a> {
     pub fn declared_name(&self) -> Option<&'a str> {
         match self {
             Self::Named(span) => Some(span.content()),
-            Self::Anonymous(_) => None,
             Self::BuiltIn(name) => Some(name),
+            Self::Anonymous(_) | Self::BlackboxInference(_) => None,
         }
     }
 }
@@ -909,6 +966,7 @@ impl fmt::Display for FunctionRef<'_> {
                 pin.inner().end
             ),
             Self::BuiltIn(name) => name.fmt(f),
+            Self::BlackboxInference(uuid) => write!(f, "inferred@{}", uuid.hyphenated()),
         }
     }
 }
@@ -931,6 +989,9 @@ impl Ord for FunctionRef<'_> {
             (Self::Anonymous(_), _) => cmp::Ordering::Less,
             (_, Self::Anonymous(_)) => cmp::Ordering::Greater,
             (Self::BuiltIn(a), Self::BuiltIn(b)) => a.cmp(b),
+            (Self::BuiltIn(_), _) => cmp::Ordering::Less,
+            (_, Self::BuiltIn(_)) => cmp::Ordering::Greater,
+            (Self::BlackboxInference(a), Self::BlackboxInference(b)) => a.cmp(b),
         }
     }
 }

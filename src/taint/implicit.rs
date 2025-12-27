@@ -229,8 +229,7 @@ fn get_for_range_values<'a>(
     } else if let Some(func) = value.as_function() {
         let yield_type = func
             .signature()
-            .params
-            .first()
+            .and_then(|sig| sig.params.first())
             .filter(|param| param.ids.len() == 1)
             .map(|param| &param.r#type);
 

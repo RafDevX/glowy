@@ -117,7 +117,7 @@ pub fn visit_operand_name<'a>(
 ) -> ValueRef<'a> {
     let Some(symbol) = resolve_operand_name(ctx, node) else {
         // error already reported
-        return ValueRef::from(None);
+        return ValueRef::new_unknown();
     };
 
     let borrowed = symbol.borrow();
