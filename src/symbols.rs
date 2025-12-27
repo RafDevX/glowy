@@ -200,24 +200,25 @@ impl<'a> SymbolTable<'a> {
         self.universe_scope.get_local_symbol(name)
     }
 
-    /// Returns None if qualifier cannot be resolved, Some(None) if name is not
-    /// exported by the referenced package, or Some(Some(symbol)) otherwise.
+    /// Returns None if qualifier cannot be resolved, Some(None) if the
+    /// qualifier is recognized but no matching package has (yet?) been analyzed
+    /// so it is not known if the symbol exists, Some(Some(None)) if name is not
+    /// exported by the referenced package, or finally Some(Some(Some(symbol)))
+    /// otherwise (if the symbol exists).
     pub fn get_qualified_symbol(
         &self,
         qualifier: &str,
         name: &str,
-    ) -> Option<Option<SymbolRef<'a>>> {
+    ) -> Option<Option<Option<SymbolRef<'a>>>> {
         if let Some(path) = self.current_file_named_imports.get(qualifier) {
             if let Some(envelope) = self.package_scopes.get(path) {
                 if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
-                    Some(envelope.scope.borrow().get_local_symbol(name))
+                    Some(Some(envelope.scope.borrow().get_local_symbol(name)))
                 } else {
-                    Some(None)
+                    Some(Some(None))
                 }
             } else {
-                // we haven't visited the package yet so we must assume the
-                // symbol doesn't exist there (but it'd be wrong to say that
-                // the qualifier is wrong - it was recognized)
+                // we haven't visited the package (yet?)
                 Some(None)
             }
         } else {
@@ -249,16 +250,30 @@ impl<'a> SymbolTable<'a> {
     /// return indicates whether the new spec conflicts with a previous spec
     /// (i.e., `Some(true)` means the same qualifier has been registered before
     /// and was now overwritten).
+    ///
+    /// If `infer_from_path` is true, this function will never return None,
+    /// since if not found in any other way the qualifier will default to the
+    /// last component of the path. This should be avoided since it is not
+    /// guaranteed to be correct and can lead to unexpected problems if it leads
+    /// to an incorrect qualifier being registered, but if necessary it should
+    /// infer correctly most of the time.
     pub fn register_import_spec(
         &mut self,
         qualifier: Option<String>,
         path: FullPackagePath,
+        infer_from_path: bool,
     ) -> Option<bool> {
         let qualifier = qualifier.or_else(|| {
             self.package_scopes
                 .get(&path)
                 .map(|envelope| envelope.package_name.content().to_owned())
-        })?;
+        });
+
+        let qualifier = match qualifier {
+            Some(qual) => qual,
+            None if infer_from_path => path.rsplit('/').next().unwrap().to_owned(),
+            None => return None,
+        };
 
         let conflicted = if qualifier == "." {
             self.current_file_wildcard_imports.push(path);

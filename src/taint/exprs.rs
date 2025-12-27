@@ -136,15 +136,23 @@ pub fn resolve_operand_name<'a>(
     node: &OperandNameNode<'a>,
 ) -> Option<SymbolRef<'a>> {
     let symbol = if let Some(qualifier) = node.package {
-        if let Some(symbol) = ctx
+        match ctx
             .symtab()
             .get_qualified_symbol(qualifier.content(), node.id.content())
         {
-            symbol
-        } else {
-            ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
+            Some(Some(symbol)) => symbol,
+            Some(None) => {
+                // this is likely the accessing of blackbox package for which we
+                // do not actually have the source, so we just return None now
+                // without actually reporting any error
 
-            return None;
+                return None;
+            }
+            None => {
+                ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
+
+                return None;
+            }
         }
     } else {
         ctx.symtab().get_symbol(node.id.content())

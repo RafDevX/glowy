@@ -85,6 +85,10 @@ impl<'a> AnalysisContext<'a> {
         &mut self.symbol_table
     }
 
+    pub fn stage(&self) -> &AnalysisStage {
+        &self.stage
+    }
+
     pub fn set_stage(&mut self, stage: AnalysisStage) {
         self.stage = stage;
     }
@@ -274,6 +278,15 @@ impl AnalysisStage {
             self,
             Self::RecordDeclarations | Self::EnforceSecurityPolicies
         )
+    }
+
+    /// This returns whether the present stage if the first stage of analysis.
+    ///
+    /// If a value of false is returned, the invoker may assume that all input
+    /// files have already been reviewed at least one (meaning that, for
+    /// example, package clause and import spec registration should be complete)
+    pub fn is_first(&self) -> bool {
+        matches!(self, Self::RecordDeclarations)
     }
 }
 
