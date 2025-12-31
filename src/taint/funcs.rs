@@ -16,8 +16,8 @@ use crate::{
     symbols::Symbol,
     taint::exprs,
     values::{
-        BacktraceContainer, FunctionRef, FunctionValue, SelfAwareBacktraceContainer, Value,
-        ValueRef,
+        BacktraceContainer, ExpandableValue, FunctionRef, FunctionValue,
+        SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
 
@@ -278,28 +278,37 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     //     })
     //     .enumerate();
 
-    let mut ids = Vec::new();
-    let def_params = vec![];
-    let params = func.signature().map_or(&def_params, |sig| &sig.params);
-    for param in params {
-        if param.ids.is_empty() {
-            ids.push((None, param.variadic));
-        } else {
-            ids.extend(param.ids.iter().map(|id| (Some(id), param.variadic)));
+    let ids = if let Some(signature) = func.signature() {
+        let mut ids = vec![];
+
+        for param in &signature.params {
+            if param.ids.is_empty() {
+                ids.push((None, param.variadic));
+            } else {
+                ids.extend(param.ids.iter().map(|id| (Some(id), param.variadic)));
+            }
         }
-    }
 
-    if node.args.len() != ids.len() {
-        let variadic = ids.last().map(|(_, variadic)| *variadic).unwrap_or(false);
+        Some(ids)
+    } else {
+        None
+    };
 
-        if !(variadic && node.args.len() > ids.len()) {
-            ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                expected: ids.len(),
-                found: node.args.len(),
-                location: node.location.clone(),
-            });
+    // can only check for correct cardinality if we have a signature,
+    // otherwise we just assume everything is fine (would be wrong to error)
+    if let Some(ids) = &ids {
+        if node.args.len() != ids.len() {
+            let variadic = ids.last().map(|(_, variadic)| *variadic).unwrap_or(false);
 
-            return vec![];
+            if !(variadic && node.args.len() > ids.len()) {
+                ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+                    expected: ids.len(),
+                    found: node.args.len(),
+                    location: node.location.clone(),
+                });
+
+                return vec![];
+            }
         }
     }
 
@@ -323,17 +332,41 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             ctx.pin(node.location.clone()),
         );
 
-        let n_results = func.signature().map_or(1, |sig| sig.result.len());
-        // ^ if we really have no information about this function, we have no
-        // choice but to assume an arbitrary number of return values (here, 1)
+        if let Some(signature) = func.signature() {
+            // we have a signature, so we know exactly how many values it
+            // returns and so can use that information
 
-        return iter::once(Value::Simple(bt))
-            .cycle()
-            .take(n_results)
-            // only after cycle otherwise Clone would just make many references
-            .map(ValueRef::from)
-            .collect();
+            return iter::once(Value::Simple(bt))
+                .cycle()
+                .take(signature.result.len())
+                // only after cycle otherwise Clone would just make many refs
+                .map(ValueRef::from)
+                .collect();
+        } else {
+            // we have no way of knowing how many values this function returns,
+            // so the best we can do is return an expandable value capable of
+            // supporting however many the invoker expects, up to a reasonable
+            // upper limit (since ExpandableValue assumes it is finite)
+            const RET_VAL_CAP: usize = 10;
+
+            let primary = ValueRef::from(bt);
+            let secondary = vec![primary.clone(); RET_VAL_CAP - 1];
+            // ^ all refs point to the same inner value! (= cheap)
+
+            let val = ExpandableValue::new(primary, secondary);
+            let val = ValueRef::from(Value::Expandable(val));
+
+            return vec![val];
+        }
     };
+
+    // by this point, we know `func.outcome()` is `Some`, which means we have
+    // an implementation for it (i.e., we have access to the function's source
+    // code and we have analyzed it) -- given this information, there should be
+    // no possibility that we don't have the function's declaration, so we
+    // must know its signature, meaning that `ids` will be Some, and this unwrap
+    // will never panic if all assumptions hold
+    let ids = ids.unwrap();
 
     let mut result = vec![];
 
