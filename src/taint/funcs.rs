@@ -16,8 +16,8 @@ use crate::{
     symbols::Symbol,
     taint::exprs,
     values::{
-        BacktraceContainer, ExpandableValue, FunctionRef, FunctionValue,
-        SelfAwareBacktraceContainer, Value, ValueRef,
+        BacktraceContainer, FunctionRef, FunctionValue, MobiusValue, SelfAwareBacktraceContainer,
+        Value, ValueRef,
     },
 };
 
@@ -344,19 +344,13 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 .collect();
         } else {
             // we have no way of knowing how many values this function returns,
-            // so the best we can do is return an expandable value capable of
-            // supporting however many the invoker expects, up to a reasonable
-            // upper limit (since ExpandableValue assumes it is finite)
-            const RET_VAL_CAP: usize = 10;
+            // so the best we can do is return a Möbius value that can be
+            // expanded to however many values the invoker expects
 
-            let primary = ValueRef::from(bt);
-            let secondary = vec![primary.clone(); RET_VAL_CAP - 1];
-            // ^ all refs point to the same inner value! (= cheap)
+            let inner = ValueRef::from(bt);
+            let mobius = MobiusValue::new(inner);
 
-            let val = ExpandableValue::new(primary, secondary);
-            let val = ValueRef::from(Value::Expandable(val));
-
-            return vec![val];
+            return vec![ValueRef::from(Value::Mobius(mobius))];
         }
     };
 

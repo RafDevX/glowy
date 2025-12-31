@@ -101,6 +101,16 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
+    pub fn as_mobius(&self) -> Option<Ref<MobiusValue<'a>>> {
+        self.coerce_unknown_to(|| Value::Mobius(MobiusValue::new(Self::new_unknown())));
+
+        Ref::filter_map(self.0.borrow(), |value| match value {
+            Value::Mobius(mobius) => Some(mobius),
+            _ => None,
+        })
+        .ok()
+    }
+
     pub fn as_slice_mut(&mut self) -> Option<RefMut<CompositeValue<'a, u64>>> {
         self.coerce_unknown_to(|| Value::Slice(CompositeValue::empty()));
 
@@ -299,6 +309,7 @@ pub enum Value<'a> {
     Simple(Option<LabelBacktrace<'a>>),
     Unknown(UnknownValue), // output from a blackbox; becomes concrete when used
     Expandable(ExpandableValue<'a>),
+    Mobius(MobiusValue<'a>),
     Array(CompositeValue<'a, u64>),
     Slice(CompositeValue<'a, u64>),
     Map(CompositeValue<'a, SimpleConstValue>),
@@ -317,6 +328,7 @@ impl<'a> Value<'a> {
             Self::Simple(opt) => opt,
             Self::Unknown(unknown) => unknown,
             Self::Expandable(exp) => exp,
+            Self::Mobius(mobius) => mobius,
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
@@ -355,6 +367,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
             Self::Unknown(_) => self.clone(),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
+            Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
@@ -380,6 +393,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
             Self::Unknown(_) => recurs!(Self::Simple(None)),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
+            Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
@@ -492,6 +506,62 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
             .collect();
 
         Self { primary, secondary }
+    }
+}
+
+// represents a value of unknown, adaptable cardinality -- similar to an
+// ExpandableValue, but more flexible, able to become any number of the same
+// inner value, in a sort of illusion like a Möbius strip.
+// (this struct by itself is very simple; its real purpose is just to
+// semantically tag a value as needing some leniency when being treated)
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MobiusValue<'a>(ValueRef<'a>);
+
+impl<'a> MobiusValue<'a> {
+    pub fn new(inner: ValueRef<'a>) -> Self {
+        Self(inner)
+    }
+
+    pub fn expand_to(&self, len: usize) -> Vec<ValueRef<'a>> {
+        // note that vec! will just clone the ValueRef, but the underlying Value
+        // is the same for all elements; only the references are cloned (cheap)
+        vec![self.0.clone(); len]
+    }
+}
+
+impl<'a> BacktraceContainer<'a> for MobiusValue<'a> {
+    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+        self.0.backtrace_at_location(location)
+    }
+
+    fn is_bottom(&self) -> bool {
+        self.0.is_bottom()
+    }
+}
+
+impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
+    fn realize(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_index: usize,
+        concrete: Option<&LabelBacktrace<'a>>,
+    ) -> Self {
+        Self::new(self.0.realize(from_func, from_index, concrete))
+    }
+
+    fn nest_backtrace(
+        &self,
+        parent_kind: LabelBacktraceKind,
+        parent_symbol: Option<&'a str>,
+        parent_location: Pinned<Location>,
+        extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
+    ) -> Self {
+        Self::new(self.0.nest_backtrace(
+            parent_kind,
+            parent_symbol,
+            parent_location,
+            extra_children,
+        ))
     }
 }
 

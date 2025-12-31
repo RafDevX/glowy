@@ -63,6 +63,8 @@ fn visit_binding_decl_spec<'a>(
                 // checker is very cool and awesome and does not allow it while
                 // rhs_values is borrowed from the if-let, so we do this instead
                 expanded = Some(expandable.expand());
+            } else if let Some(mobius) = single.as_mobius() {
+                expanded = Some(mobius.expand_to(node.ids.len()))
             }
         }
     }
@@ -225,6 +227,8 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                 // checker is very cool and awesome and does not allow it while
                 // rhs_values is borrowed from the if-let, so we do this instead
                 expanded = Some(expandable.expand());
+            } else if let Some(mobius) = single.as_mobius() {
+                expanded = Some(mobius.expand_to(node.lhs.len()))
             }
         }
     }
