@@ -1,9 +1,9 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
-    TokenStream,
+    ParsingError, TokenStream,
     ast::{CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode},
     parser::{
-        PResult, expect, of_kind,
+        BacktrackingContext, PResult, expect, of_kind,
         types::{parse_channel_type, parse_type},
     },
     token::TokenKind,
@@ -150,8 +150,32 @@ pub fn parse_postfix_if_exists<'a>(
 ) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?,
-        Some(of_kind!(TokenKind::Period)) => parse_selection(s, operand)?.into(),
         Some(of_kind!(TokenKind::SquareL)) => parse_indexing(s, operand)?.into(),
+        Some(of_kind!(TokenKind::Period)) => {
+            // this is only a postfix (selection) if the token after the period
+            // is an identifier, otherwise it could be something else, such as
+            // a `.(type)` in a type switch, and in that case we need to leave
+            // that part alone
+
+            let mut context = BacktrackingContext::new(s);
+            let b = context.stream();
+
+            let original = operand.clone();
+
+            match parse_selection(b, operand) {
+                Ok(selection) => {
+                    // all good, this is really a selection
+                    context.commit()?;
+
+                    selection.into()
+                }
+                Err(ParsingError::UnexpectedTokenKind {
+                    expected: TokenKind::Ident,
+                    ..
+                }) => return Ok(original), // just return what we had before
+                Err(err) => return Err(err),
+            }
+        }
         _ => return Ok(operand), // nothing found, stop the recursion
     };
 
