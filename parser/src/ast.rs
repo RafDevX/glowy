@@ -166,7 +166,13 @@ pub struct FunctionParamDeclNode<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExprNode<'a> {
-    Name(OperandNameNode<'a>),
+    Name(Span<'a>),
+    // ^ note: qualified operand names supported only via selection -- even
+    // though technically they should just be a type of operand name, having it
+    // as a separate super-expression greatly simplifies parsing and is
+    // functionally equivalent (in some cases, the parser does not have enough
+    // information to distinguish a qualified name `pkg.Exported` from a normal
+    // struct-like selection `obj.Field`)
     Literal(LiteralNode<'a>),
     Call(CallNode<'a>),
     Make(MakeNode<'a>),
@@ -221,12 +227,6 @@ pub enum BinaryOpKind {
     LogicalOr,  // x || y
 }
 
-impl<'a> From<OperandNameNode<'a>> for ExprNode<'a> {
-    fn from(node: OperandNameNode<'a>) -> Self {
-        Self::Name(node)
-    }
-}
-
 impl<'a> From<LiteralNode<'a>> for ExprNode<'a> {
     fn from(node: LiteralNode<'a>) -> Self {
         Self::Literal(node)
@@ -261,12 +261,6 @@ impl<'a> From<ConversionNode<'a>> for ExprNode<'a> {
     fn from(node: ConversionNode<'a>) -> Self {
         Self::Conversion(node)
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OperandNameNode<'a> {
-    pub package: Option<Span<'a>>, // for qualified operand names
-    pub id: Span<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

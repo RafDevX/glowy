@@ -504,7 +504,7 @@ mod tests {
         Span,
         ast::{
             AssignmentKind, AssignmentNode, BinaryOpKind, BlockNode, CallNode, ExprNode,
-            LiteralNode, OperandNameNode, OrderedF64, ShortVarDeclNode, StatementNode, TypeNode,
+            LiteralNode, OrderedF64, SelectionNode, ShortVarDeclNode, StatementNode, TypeNode,
             TypeSwitchCaseClause, UnaryOpKind,
         },
         lexer::Lexer,
@@ -526,10 +526,7 @@ mod tests {
                     kind: BinaryOpKind::Greater,
                     left: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
-                        left: Box::new(ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("a", 50, 3)
-                        })),
+                        left: Box::new(ExprNode::Name(Span::new("a", 50, 3))),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 3,
                             location: 54..55
@@ -546,10 +543,7 @@ mod tests {
                     StatementNode::Empty { location: 90..91 },
                     StatementNode::Assignment(AssignmentNode {
                         kind: AssignmentKind::Simple,
-                        lhs: vec![ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("a", 120, 5)
-                        })],
+                        lhs: vec![ExprNode::Name(Span::new("a", 120, 5))],
                         rhs: vec![ExprNode::Literal(LiteralNode::Int {
                             value: 4,
                             location: 124..125
@@ -583,23 +577,18 @@ mod tests {
                     otherwise: Some(ElseNode::Block(vec![
                         StatementNode::Block(vec![]),
                         StatementNode::Dec {
-                            operand: ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("m", 298, 10),
-                            }),
+                            operand: ExprNode::Name(Span::new("m", 298, 10),),
                             location: 298..301,
                         },
                         StatementNode::Assignment(AssignmentNode {
                             kind: AssignmentKind::BitClear,
                             lhs: vec![
-                                ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("k", 331, 11)
+                                ExprNode::Name(Span::new("k", 331, 11)),
+                                ExprNode::Selection(SelectionNode {
+                                    base: Box::new(ExprNode::Name(Span::new("m", 334, 11))),
+                                    selector: Span::new("r", 336, 11),
+                                    location: 335..337
                                 }),
-                                ExprNode::Name(OperandNameNode {
-                                    package: Some(Span::new("m", 334, 11)),
-                                    id: Span::new("r", 336, 11)
-                                })
                             ],
                             rhs: vec![
                                 ExprNode::Literal(LiteralNode::Int {
@@ -653,10 +642,7 @@ mod tests {
                 }))),
                 cond: ExprNode::BinaryOp {
                     kind: BinaryOpKind::Less,
-                    left: Box::new(ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("x", 58, 3)
-                    })),
+                    left: Box::new(ExprNode::Name(Span::new("x", 58, 3))),
                     right: Box::new(ExprNode::Literal(LiteralNode::Int {
                         value: 3,
                         location: 62..63
@@ -666,27 +652,18 @@ mod tests {
                 then: vec![StatementNode::Empty { location: 94..95 }],
                 otherwise: Some(ElseNode::If(Box::new(IfNode {
                     stmt: None,
-                    cond: ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("false", 130, 5)
-                    }),
+                    cond: ExprNode::Name(Span::new("false", 130, 5)),
                     then: vec![StatementNode::Empty { location: 166..167 }],
                     otherwise: Some(ElseNode::If(Box::new(IfNode {
                         stmt: Some(Box::new(StatementNode::Expr(ExprNode::Call(CallNode {
-                            func: Box::new(ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("y", 202, 7)
-                            })),
+                            func: Box::new(ExprNode::Name(Span::new("y", 202, 7))),
                             type_arg: None,
                             args: vec![],
                             variadic: false,
                             location: 203..205,
                             annotation: None
                         })))),
-                        cond: ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("true", 207, 7)
-                        }),
+                        cond: ExprNode::Name(Span::new("true", 207, 7)),
                         then: vec![StatementNode::Block(vec![])],
                         otherwise: None,
                         location: 199..270
@@ -718,10 +695,7 @@ mod tests {
             vec![
                 StatementNode::Switch(SwitchNode::Expr(ExprSwitchNode {
                     stmt: None,
-                    expr: Some(ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("tag", 54, 3)
-                    })),
+                    expr: Some(ExprNode::Name(Span::new("tag", 54, 3))),
                     clauses: vec![
                         ExprSwitchCaseClause {
                             exprs: vec![],
@@ -746,10 +720,7 @@ mod tests {
                                 }),
                             ],
                             body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
-                                func: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("f", 141, 5)
-                                })),
+                                func: Box::new(ExprNode::Name(Span::new("f", 141, 5))),
                                 type_arg: None,
                                 args: vec![],
                                 variadic: false,
@@ -773,10 +744,7 @@ mod tests {
                                 }),
                             ],
                             body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
-                                func: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("g", 187, 6)
-                                })),
+                                func: Box::new(ExprNode::Name(Span::new("g", 187, 6))),
                                 type_arg: None,
                                 args: vec![],
                                 variadic: false,
@@ -791,10 +759,7 @@ mod tests {
                     stmt: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
                         ids: vec![Span::new("x", 249, 9)],
                         exprs: vec![ExprNode::Call(CallNode {
-                            func: Box::new(ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("f", 254, 9)
-                            })),
+                            func: Box::new(ExprNode::Name(Span::new("f", 254, 9))),
                             type_arg: None,
                             args: vec![],
                             variadic: false,
@@ -809,10 +774,7 @@ mod tests {
                         ExprSwitchCaseClause {
                             exprs: vec![ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Less,
-                                left: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("x", 294, 10)
-                                })),
+                                left: Box::new(ExprNode::Name(Span::new("x", 294, 10))),
                                 right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                     value: 0,
                                     location: 298..299
@@ -822,10 +784,7 @@ mod tests {
                             body: vec![StatementNode::Return {
                                 exprs: vec![ExprNode::UnaryOp {
                                     kind: UnaryOpKind::Negation,
-                                    operand: Box::new(ExprNode::Name(OperandNameNode {
-                                        package: None,
-                                        id: Span::new("x", 309, 10)
-                                    })),
+                                    operand: Box::new(ExprNode::Name(Span::new("x", 309, 10))),
                                     location: 308..310
                                 }],
                                 location: 301..310
@@ -834,10 +793,7 @@ mod tests {
                         ExprSwitchCaseClause {
                             exprs: vec![],
                             body: vec![StatementNode::Return {
-                                exprs: vec![ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("x", 355, 11)
-                                })],
+                                exprs: vec![ExprNode::Name(Span::new("x", 355, 11))],
                                 location: 348..356
                             }]
                         }
@@ -851,22 +807,13 @@ mod tests {
                         ExprSwitchCaseClause {
                             exprs: vec![ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Less,
-                                left: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("x", 450, 15)
-                                })),
-                                right: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("y", 454, 15)
-                                })),
+                                left: Box::new(ExprNode::Name(Span::new("x", 450, 15))),
+                                right: Box::new(ExprNode::Name(Span::new("y", 454, 15))),
                                 location: 450..455
                             }],
                             body: vec![
                                 StatementNode::Expr(ExprNode::Call(CallNode {
-                                    func: Box::new(ExprNode::Name(OperandNameNode {
-                                        package: None,
-                                        id: Span::new("f", 489, 16)
-                                    })),
+                                    func: Box::new(ExprNode::Name(Span::new("f", 489, 16))),
                                     type_arg: None,
                                     args: vec![],
                                     variadic: false,
@@ -875,10 +822,7 @@ mod tests {
                                 })),
                                 StatementNode::Assignment(AssignmentNode {
                                     kind: AssignmentKind::Simple,
-                                    lhs: vec![ExprNode::Name(OperandNameNode {
-                                        package: None,
-                                        id: Span::new("z", 525, 17)
-                                    })],
+                                    lhs: vec![ExprNode::Name(Span::new("z", 525, 17))],
                                     rhs: vec![ExprNode::Literal(LiteralNode::Int {
                                         value: 3,
                                         location: 529..530
@@ -891,10 +835,7 @@ mod tests {
                         ExprSwitchCaseClause {
                             exprs: vec![],
                             body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
-                                func: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("g", 644, 20)
-                                })),
+                                func: Box::new(ExprNode::Name(Span::new("g", 644, 20))),
                                 type_arg: None,
                                 args: vec![],
                                 variadic: false,
@@ -942,10 +883,7 @@ mod tests {
                 StatementNode::Switch(SwitchNode::Type(TypeSwitchNode {
                     stmt: None,
                     decl: Some(Span::new("i", 54, 3)),
-                    expr: ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("x", 59, 3)
-                    }),
+                    expr: ExprNode::Name(Span::new("x", 59, 3)),
                     clauses: vec![
                         TypeSwitchCaseClause {
                             types: vec![TypeNode::Name {
@@ -970,18 +908,12 @@ mod tests {
                             ],
                             body: vec![StatementNode::Assignment(AssignmentNode {
                                 kind: AssignmentKind::Simple,
-                                lhs: vec![ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("isEven", 155, 5)
-                                })],
+                                lhs: vec![ExprNode::Name(Span::new("isEven", 155, 5))],
                                 rhs: vec![ExprNode::BinaryOp {
                                     kind: BinaryOpKind::Eq,
                                     left: Box::new(ExprNode::BinaryOp {
                                         kind: BinaryOpKind::Remainder,
-                                        left: Box::new(ExprNode::Name(OperandNameNode {
-                                            package: None,
-                                            id: Span::new("i", 164, 5)
-                                        })),
+                                        left: Box::new(ExprNode::Name(Span::new("i", 164, 5))),
                                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                             value: 2,
                                             location: 168..169
@@ -1001,10 +933,7 @@ mod tests {
                             types: vec![],
                             body: vec![
                                 StatementNode::Expr(ExprNode::Call(CallNode {
-                                    func: Box::new(ExprNode::Name(OperandNameNode {
-                                        package: None,
-                                        id: Span::new("f", 244, 7)
-                                    })),
+                                    func: Box::new(ExprNode::Name(Span::new("f", 244, 7))),
                                     type_arg: None,
                                     args: vec![],
                                     variadic: false,
@@ -1035,10 +964,7 @@ mod tests {
                     }))),
                     decl: None,
                     expr: ExprNode::Call(CallNode {
-                        func: Box::new(ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("f", 358, 11)
-                        })),
+                        func: Box::new(ExprNode::Name(Span::new("f", 358, 11))),
                         type_arg: None,
                         args: vec![ExprNode::Literal(LiteralNode::Int {
                             value: 7,
@@ -1055,15 +981,9 @@ mod tests {
                             args: vec![]
                         }],
                         body: vec![StatementNode::Expr(ExprNode::Call(CallNode {
-                            func: Box::new(ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("g", 414, 12)
-                            })),
+                            func: Box::new(ExprNode::Name(Span::new("g", 414, 12))),
                             type_arg: None,
-                            args: vec![ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("z", 416, 12)
-                            })],
+                            args: vec![ExprNode::Name(Span::new("z", 416, 12))],
                             variadic: false,
                             location: 415..418,
                             annotation: None
@@ -1110,10 +1030,7 @@ mod tests {
                         }))),
                         cond: Some(ExprNode::BinaryOp {
                             kind: BinaryOpKind::Less,
-                            left: Box::new(ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("i", 59, 3)
-                            })),
+                            left: Box::new(ExprNode::Name(Span::new("i", 59, 3))),
                             right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                 value: 5,
                                 location: 63..64
@@ -1121,10 +1038,7 @@ mod tests {
                             location: 59..64
                         }),
                         post: Some(Box::new(StatementNode::Inc {
-                            operand: ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("i", 66, 3)
-                            }),
+                            operand: ExprNode::Name(Span::new("i", 66, 3)),
                             location: 66..69
                         }))
                     }),
@@ -1220,10 +1134,7 @@ mod tests {
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::Decl {
                         lhs: vec![Span::new("i", 51, 3), Span::new("item", 54, 3)],
-                        range_expr: ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("arr", 68, 3)
-                        })
+                        range_expr: ExprNode::Name(Span::new("arr", 68, 3))
                     }),
                     header_location: 47..71,
                     body: vec![StatementNode::Empty { location: 102..103 }],
@@ -1231,14 +1142,8 @@ mod tests {
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::Assignment {
-                        lhs: vec![ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("x", 159, 7)
-                        })],
-                        range_expr: ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("arr", 169, 7)
-                        })
+                        lhs: vec![ExprNode::Name(Span::new("x", 159, 7))],
+                        range_expr: ExprNode::Name(Span::new("arr", 169, 7))
                     }),
                     header_location: 155..172,
                     body: vec![StatementNode::Empty { location: 203..204 }],
@@ -1246,10 +1151,7 @@ mod tests {
                 }),
                 StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::None {
-                        range_expr: ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("ch", 266, 11)
-                        })
+                        range_expr: ExprNode::Name(Span::new("ch", 266, 11))
                     }),
                     header_location: 256..268,
                     body: vec![],
@@ -1283,10 +1185,7 @@ mod tests {
                 inner: Box::new(StatementNode::For(ForNode {
                     header: ForHeaderNode::Range(ForRangeNode::Decl {
                         lhs: vec![Span::new("i", 58, 3), Span::new("item", 61, 3)],
-                        range_expr: ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("arr", 75, 3)
-                        })
+                        range_expr: ExprNode::Name(Span::new("arr", 75, 3))
                     }),
                     header_location: 54..78,
                     body: vec![StatementNode::If(IfNode {
@@ -1295,10 +1194,7 @@ mod tests {
                             kind: BinaryOpKind::Eq,
                             left: Box::new(ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Remainder,
-                                left: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("i", 112, 4)
-                                })),
+                                left: Box::new(ExprNode::Name(Span::new("i", 112, 4))),
                                 right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                     value: 2,
                                     location: 116..117
@@ -1321,10 +1217,7 @@ mod tests {
                                 kind: BinaryOpKind::Eq,
                                 left: Box::new(ExprNode::BinaryOp {
                                     kind: BinaryOpKind::Remainder,
-                                    left: Box::new(ExprNode::Name(OperandNameNode {
-                                        package: None,
-                                        id: Span::new("i", 204, 6)
-                                    })),
+                                    left: Box::new(ExprNode::Name(Span::new("i", 204, 6))),
                                     right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                         value: 3,
                                         location: 208..209
@@ -1347,10 +1240,7 @@ mod tests {
                                     kind: BinaryOpKind::Eq,
                                     left: Box::new(ExprNode::BinaryOp {
                                         kind: BinaryOpKind::Remainder,
-                                        left: Box::new(ExprNode::Name(OperandNameNode {
-                                            package: None,
-                                            id: Span::new("i", 302, 8)
-                                        })),
+                                        left: Box::new(ExprNode::Name(Span::new("i", 302, 8))),
                                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                             value: 5,
                                             location: 306..307

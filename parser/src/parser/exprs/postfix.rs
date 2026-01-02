@@ -1,7 +1,7 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     TokenStream,
-    ast::{CallNode, ExprNode, IndexingNode, MakeNode, OperandNameNode, SelectionNode},
+    ast::{CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode},
     parser::{
         PResult, expect, of_kind,
         types::{parse_channel_type, parse_type},
@@ -10,7 +10,7 @@ use crate::{
 };
 
 fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let ExprNode::Name(OperandNameNode { package: None, id }) = func {
+    if let ExprNode::Name(id) = func {
         if id.content() == "make" {
             // make(T, ...) is treated specially, not as a function call
             return Ok(parse_make(s, id.location().start)?.into());
@@ -163,9 +163,7 @@ mod tests {
     use super::*;
     use crate::{
         Span,
-        ast::{
-            BinaryOpKind, ChannelDirection, LiteralNode, OperandNameNode, TypeNode, UnaryOpKind,
-        },
+        ast::{BinaryOpKind, ChannelDirection, LiteralNode, TypeNode, UnaryOpKind},
         lexer::Lexer,
         parser::exprs::parse_expression,
     };
@@ -183,9 +181,10 @@ mod tests {
                 func: Box::new(ExprNode::Call(CallNode {
                     func: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
-                        left: Box::new(ExprNode::Name(OperandNameNode {
-                            package: Some(Span::new("abc", 1, 1)),
-                            id: Span::new("def", 5, 1)
+                        left: Box::new(ExprNode::Selection(SelectionNode {
+                            base: Box::new(ExprNode::Name(Span::new("abc", 1, 1))),
+                            selector: Span::new("def", 5, 1),
+                            location: 4..8
                         })),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 14,
@@ -245,9 +244,10 @@ mod tests {
                 func: Box::new(ExprNode::Indexing(IndexingNode {
                     base: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
-                        left: Box::new(ExprNode::Name(OperandNameNode {
-                            package: Some(Span::new("abc", 1, 1)),
-                            id: Span::new("def", 5, 1)
+                        left: Box::new(ExprNode::Selection(SelectionNode {
+                            base: Box::new(ExprNode::Name(Span::new("abc", 1, 1))),
+                            selector: Span::new("def", 5, 1),
+                            location: 4..8
                         })),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 14,
@@ -257,10 +257,7 @@ mod tests {
                     }),
                     index: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
-                        left: Box::new(ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("k", 15, 1)
-                        })),
+                        left: Box::new(ExprNode::Name(Span::new("k", 15, 1))),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 2,
                             location: 19..20
@@ -283,9 +280,10 @@ mod tests {
     fn call_with_type_arg() {
         assert_eq!(
             ExprNode::Call(CallNode {
-                func: Box::new(ExprNode::Name(OperandNameNode {
-                    package: Some(Span::new("p", 0, 1)),
-                    id: Span::new("f", 2, 1)
+                func: Box::new(ExprNode::Selection(SelectionNode {
+                    base: Box::new(ExprNode::Name(Span::new("p", 0, 1))),
+                    selector: Span::new("f", 2, 1),
+                    location: 1..3
                 })),
                 type_arg: Some(TypeNode::Channel {
                     r#type: Box::new(TypeNode::Name {
@@ -301,10 +299,7 @@ mod tests {
                         location: 14..18
                     }),
                     ExprNode::Call(CallNode {
-                        func: Box::new(ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("g", 20, 1)
-                        })),
+                        func: Box::new(ExprNode::Name(Span::new("g", 20, 1))),
                         type_arg: Some(TypeNode::Channel {
                             r#type: Box::new(TypeNode::Name {
                                 package: None,
@@ -314,10 +309,7 @@ mod tests {
                             direction: Some(ChannelDirection::Send),
                         }),
                         args: vec![ExprNode::Call(CallNode {
-                            func: Box::new(ExprNode::Name(OperandNameNode {
-                                package: None,
-                                id: Span::new("h", 34, 1)
-                            })),
+                            func: Box::new(ExprNode::Name(Span::new("h", 34, 1))),
                             type_arg: Some(TypeNode::Channel {
                                 r#type: Box::new(TypeNode::Name {
                                     package: Some(Span::new("pkg", 43, 1)),

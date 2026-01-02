@@ -4,7 +4,7 @@ use crate::{
     ParsingError, TokenStream,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode, ExprNode,
-        LiteralNode, OperandNameNode, OrderedF64, StructLiteralFieldsNode,
+        LiteralNode, OrderedF64, StructLiteralFieldsNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -12,28 +12,6 @@ use crate::{
 
 mod ops;
 mod postfix;
-
-fn parse_operand_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, OperandNameNode<'a>> {
-    let token = expect(s, TokenKind::Ident, Some("operand name"))?;
-
-    if let Some(Ok(of_kind!(TokenKind::Period))) = s.peek() {
-        // make sure that it's actually `pkg.sym` and not e.g. `x.(type)` in
-        // a type switch statement (in which case the `.` shouldn't be touched)
-        if let Some(Ok(of_kind!(TokenKind::Ident))) = s.clone().nth(1) {
-            s.next(); // advance period
-
-            return Ok(OperandNameNode {
-                package: Some(token.span),
-                id: expect(s, TokenKind::Ident, Some("operand name"))?.span,
-            });
-        }
-    }
-
-    Ok(OperandNameNode {
-        package: None,
-        id: token.span,
-    })
-}
 
 fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
     // technically we don't really need a BacktrackingContext because we could
@@ -46,13 +24,13 @@ fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprN
     let mut context = BacktrackingContext::new(s);
     let b = context.stream();
 
-    let operand = parse_operand_name(b)?;
+    let operand = expect(b, TokenKind::Ident, Some("identifier first expression"))?;
 
     let expr = if !matches!(b.peek(), Some(Ok(of_kind!(TokenKind::CurlyL)))) {
         // ok, we got it right, this was for sure an operand name
         context.commit()?;
 
-        ExprNode::Name(operand)
+        ExprNode::Name(operand.span)
     } else {
         // now we know there's a trailing {, but we don't know if that is
         // because of a composite literal (`x { ... }`) or completely unrelated
@@ -71,12 +49,15 @@ fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprN
         } else {
             // nope, if we got this far then our first guess was correct and it
             // truly is an operand name with an innocent unrelated { after it
-            ExprNode::Name(parse_operand_name(s)?)
+
+            let operand = expect(s, TokenKind::Ident, Some("operand name"))?;
             // ^^^ note, cannot just re-use the `operand` variable because then
             // the main stream would not be at the right position, and cannot
             // use `context.commit()` to fix it because we can only construct
             // `context2` (&mut s) if the previous `context` (also &mut s) has
             // already been dropped (way before this point)
+
+            ExprNode::Name(operand.span)
         }
     };
 
@@ -187,7 +168,7 @@ fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<
                 });
             };
 
-            if let ExprNode::Name(OperandNameNode { package: None, id }) = key_expr {
+            if let ExprNode::Name(id) = key_expr {
                 // this is not actually an operand name, it's just parsed as
                 // such: in reality it's an identifier corresponding to a field
                 // name, so now we get rid of that (misconstrued) expression and

@@ -243,7 +243,7 @@ mod tests {
         Span,
         ast::{
             BinaryOpKind, ExprNode, FunctionParamDeclNode, FunctionResultNode,
-            FunctionSignatureNode, LiteralNode, OperandNameNode,
+            FunctionSignatureNode, LiteralNode,
         },
         lexer::Lexer,
     };
@@ -311,10 +311,7 @@ mod tests {
                                     value: 2,
                                     location: 7..8
                                 })),
-                                right: Box::new(ExprNode::Name(OperandNameNode {
-                                    package: None,
-                                    id: Span::new("N", 11, 1)
-                                })),
+                                right: Box::new(ExprNode::Name(Span::new("N", 11, 1))),
                                 location: 7..12
                             }),
                             right: Box::new(ExprNode::Literal(LiteralNode::Int {

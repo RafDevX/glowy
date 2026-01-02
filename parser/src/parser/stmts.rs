@@ -304,7 +304,7 @@ mod tests {
     use super::*;
     use crate::{
         Span,
-        ast::{BinaryOpKind, LiteralNode, OperandNameNode, UnaryOpKind},
+        ast::{BinaryOpKind, LiteralNode, UnaryOpKind},
         lexer::Lexer,
     };
 
@@ -334,24 +334,12 @@ mod tests {
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
                     lhs: vec![
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("a", 88, 5)
-                        }),
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("b", 91, 5)
-                        })
+                        ExprNode::Name(Span::new("a", 88, 5)),
+                        ExprNode::Name(Span::new("b", 91, 5))
                     ],
                     rhs: vec![
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("c", 95, 5)
-                        }),
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("d", 98, 5)
-                        })
+                        ExprNode::Name(Span::new("c", 95, 5)),
+                        ExprNode::Name(Span::new("d", 98, 5))
                     ],
                     location: 88..99,
                 }),
@@ -366,14 +354,8 @@ mod tests {
                             })),
                             location: 121..123,
                         },
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("x", 125, 6)
-                        }),
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("k", 129, 6)
-                        })
+                        ExprNode::Name(Span::new("x", 125, 6)),
+                        ExprNode::Name(Span::new("k", 129, 6))
                     ],
                     rhs: vec![
                         ExprNode::BinaryOp {
@@ -400,10 +382,7 @@ mod tests {
                             })),
                             location: 141..146,
                         },
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("x", 148, 6)
-                        })
+                        ExprNode::Name(Span::new("x", 148, 6))
                     ],
                     location: 121..149,
                 }),
@@ -414,40 +393,22 @@ mod tests {
                         Span::new("v", 177, 7)
                     ],
                     exprs: vec![
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("m", 182, 7)
-                        }),
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("n", 185, 7)
-                        }),
-                        ExprNode::Name(OperandNameNode {
-                            package: None,
-                            id: Span::new("o", 188, 7)
-                        })
+                        ExprNode::Name(Span::new("m", 182, 7)),
+                        ExprNode::Name(Span::new("n", 185, 7)),
+                        ExprNode::Name(Span::new("o", 188, 7))
                     ],
                     location: 171..189,
                     annotation: None,
                 }),
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
-                    lhs: vec![ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("a", 211, 8)
-                    })],
-                    rhs: vec![ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("b", 215, 8)
-                    })],
+                    lhs: vec![ExprNode::Name(Span::new("a", 211, 8))],
+                    rhs: vec![ExprNode::Name(Span::new("b", 215, 8))],
                     location: 211..216,
                 }),
                 StatementNode::ShortVarDecl(ShortVarDeclNode {
                     ids: vec![Span::new("c", 238, 9)],
-                    exprs: vec![ExprNode::Name(OperandNameNode {
-                        package: None,
-                        id: Span::new("d", 243, 9)
-                    })],
+                    exprs: vec![ExprNode::Name(Span::new("d", 243, 9))],
                     location: 238..244,
                     annotation: None
                 })
