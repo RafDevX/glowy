@@ -297,7 +297,7 @@ fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'
     })
 }
 
-pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
     macro_rules! with_conversion_fallback {
         ($main:path) => {{
             let mut context = BacktrackingContext::new(s);
@@ -383,6 +383,53 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
                 });
             }
         }
+    };
+
+    parse_postfix_if_exists(s, expr)
+}
+
+pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+    // the real parser is `parse_inner_primary_expression` above, but we need to
+    // have this wrapper because of the possibility of composite literals, which
+    // might invalidate a parsed expression even if parsing was successful.
+    // this cannot be a postfix because then we cannot take in an `operand`, we
+    // must re-parse the initial expression as a type
+
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
+
+    let inner = parse_inner_primary_expression(b)?;
+
+    let expr = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = b.peek() {
+        // we don't know if there's a trailing { because of a composite
+        // literal (`x { ... }`) or if the { is completely unrelated
+        // (`if x {`), so we need to try parsing a composite literal
+        // on the original stream to find out whether we need to discard
+        // the inner expression we just parsed
+
+        let mut context2 = BacktrackingContext::new(s);
+        let b2 = context2.stream();
+
+        // we default to assume any type is a struct
+        if let Ok(lit) = parse_struct_literal(b2) {
+            // yup, it was a literal, so just commit and discard inner
+            context2.commit()?;
+
+            lit.into()
+        } else {
+            // nope, the { is unrelated, so inner is correct, but here we cannot
+            // just commit `context` and return the already-parsed `inner`,
+            // since that would make the borrow checker upset (cannot have a ref
+            // to `context` here after `context2` was created), so we have to
+            // re-parse from the original stream directly
+
+            parse_inner_primary_expression(s)?
+        }
+    } else {
+        // everything looks good, just commit and return the inner expression
+        context.commit()?;
+
+        inner
     };
 
     parse_postfix_if_exists(s, expr)
