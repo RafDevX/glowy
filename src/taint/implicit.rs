@@ -278,7 +278,7 @@ fn get_for_range_values<'a>(
 
 pub fn visit_continue_break<'a>(
     ctx: &mut AnalysisContext<'a>,
-    label: Option<&Span<'a>>,
+    label: Option<Span<'a>>,
     location: &Location,
 ) {
     let target = if let Some(label) = label {

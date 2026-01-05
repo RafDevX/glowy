@@ -165,7 +165,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             });
         }
         StatementNode::Continue { label, location } | StatementNode::Break { label, location } => {
-            implicit::visit_continue_break(ctx, label.as_ref(), location)
+            implicit::visit_continue_break(ctx, *label, location)
         }
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Go { expr, location } => match expr {
