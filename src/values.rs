@@ -111,6 +111,16 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
+    pub fn as_package_ref(&self) -> Option<Ref<PackageRefValue<'a>>> {
+        // no coercion because there's no 'blank' package ref
+
+        Ref::filter_map(self.0.borrow(), |value| match value {
+            Value::PackageRef(pkg) => Some(pkg),
+            _ => None,
+        })
+        .ok()
+    }
+
     pub fn as_slice_mut(&mut self) -> Option<RefMut<CompositeValue<'a, u64>>> {
         self.coerce_unknown_to(|| Value::Slice(CompositeValue::empty()));
 
@@ -310,6 +320,7 @@ pub enum Value<'a> {
     Unknown(UnknownValue), // output from a blackbox; becomes concrete when used
     Expandable(ExpandableValue<'a>),
     Mobius(MobiusValue<'a>),
+    PackageRef(PackageRefValue<'a>),
     Array(CompositeValue<'a, u64>),
     Slice(CompositeValue<'a, u64>),
     Map(CompositeValue<'a, SimpleConstValue>),
@@ -329,6 +340,7 @@ impl<'a> Value<'a> {
             Self::Unknown(unknown) => unknown,
             Self::Expandable(exp) => exp,
             Self::Mobius(mobius) => mobius,
+            Self::PackageRef(pkg) => pkg,
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
@@ -368,6 +380,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Unknown(_) => self.clone(),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
+            Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
@@ -394,6 +407,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Unknown(_) => recurs!(Self::Simple(None)),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
+            Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
@@ -562,6 +576,55 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
             parent_location,
             extra_children,
         ))
+    }
+}
+
+// represents a reference to another package by the name under which it was
+// imported to this file -- this replaces the need for qualified identifiers,
+// since `pkg.abc` becomes represented as a selection of "pseudo-field" `abc`
+// on "pseudo-struct" `pkg` (which is actually a `PackageRefValue`).
+// PackageRefValues are useless on their own and can only be used in selections.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PackageRefValue<'a>(Span<'a>);
+
+impl<'a> PackageRefValue<'a> {
+    pub fn new(qualifier: Span<'a>) -> Self {
+        Self(qualifier)
+    }
+
+    pub fn qualifier(&self) -> Span<'a> {
+        self.0
+    }
+}
+
+impl<'a> BacktraceContainer<'a> for PackageRefValue<'a> {
+    fn backtrace_at_location(&self, _location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+        None
+    }
+
+    fn is_bottom(&self) -> bool {
+        true
+    }
+}
+
+impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
+    fn realize(
+        &self,
+        _from_func: &FunctionRef<'a>,
+        _from_index: usize,
+        _concrete: Option<&LabelBacktrace<'a>>,
+    ) -> Self {
+        self.clone()
+    }
+
+    fn nest_backtrace(
+        &self,
+        _parent_kind: LabelBacktraceKind,
+        _parent_symbol: Option<&'a str>,
+        _parent_location: Pinned<Location>,
+        _extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
+    ) -> Self {
+        self.clone()
     }
 }
 

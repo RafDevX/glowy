@@ -4,7 +4,7 @@ use parser::{
     Annotation, Location, Span,
     ast::{
         AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, IndexingNode, LiteralNode,
-        OperandNameNode, ShortVarDeclNode,
+        ShortVarDeclNode,
     },
 };
 
@@ -165,13 +165,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
 
         // now that symbol is declared, we can assign a value to it
 
-        // fake node so we can use LeftValue trait
-        let node = OperandNameNode {
-            package: None,
-            id: name,
-        };
-
-        node.assign(
+        name.assign(
             ctx,
             LabelBacktraceKind::DeclarationInitialization,
             rhs,
@@ -347,7 +341,8 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
     }
 }
 
-impl<'a> LeftValue<'a> for OperandNameNode<'a> {
+// for use only in the context of an operand name! not just any Span
+impl<'a> LeftValue<'a> for Span<'a> {
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
@@ -357,13 +352,13 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        let Some(symbol) = exprs::resolve_operand_name(ctx, self) else {
+        let Some(symbol) = exprs::resolve_operand_name(ctx, *self, None) else {
             // no symbol found, but error already reported
             return;
         };
 
         if !symbol.borrow().mutable() {
-            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: self.id });
+            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: *self });
 
             return;
         }
@@ -384,7 +379,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
 
             rhs.nest_backtrace(
                 backtrace_kind,
-                Some(self.id.content()), // symbol.declared_name()?
+                Some(self.content()), // symbol.declared_name()?
                 ctx.pin(location.clone()),
                 explicit_backtrace
                     .into_iter()
@@ -396,7 +391,7 @@ impl<'a> LeftValue<'a> for OperandNameNode<'a> {
 
             borrowed.value().nest_backtrace(
                 backtrace_kind,
-                Some(self.id.content()), // symbol.declared_name()?
+                Some(self.content()), // symbol.declared_name()?
                 ctx.pin(location.clone()),
                 explicit_backtrace
                     .into_iter()
@@ -460,7 +455,7 @@ fn root_indexing_in_current_scope<'a>(
 ) -> bool {
     match &*node.base {
         ExprNode::Name(operand) => {
-            if let Some(symbol) = exprs::resolve_operand_name(ctx, operand) {
+            if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {
                 ctx.symtab().is_symbol_in_current_scope(symbol)
             } else {
                 false

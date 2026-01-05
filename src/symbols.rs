@@ -287,6 +287,10 @@ impl<'a> SymbolTable<'a> {
 
         Some(conflicted)
     }
+
+    pub fn qualifier_exists(&self, qualifier: &str) -> bool {
+        self.current_file_named_imports.contains_key(qualifier)
+    }
 }
 
 impl Default for SymbolTable<'_> {

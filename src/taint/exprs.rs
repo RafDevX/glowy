@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
 use parser::{
-    Location,
+    Location, Span,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, IndexingNode,
-        LiteralNode, OperandNameNode, SelectionNode, StructLiteralFieldsNode, TypeNode,
-        UnaryOpKind,
+        LiteralNode, SelectionNode, StructLiteralFieldsNode, TypeNode, UnaryOpKind,
     },
 };
 
@@ -16,14 +15,14 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
     values::{
-        BacktraceContainer, CompositeValue, ExpandableValue, SelfAwareBacktraceContainer,
-        SimpleConstValue, Value, ValueRef,
+        BacktraceContainer, CompositeValue, ExpandableValue, PackageRefValue,
+        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
     },
 };
 
 pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec<ValueRef<'a>> {
     let single = match node {
-        ExprNode::Name(name) => visit_operand_name(ctx, name),
+        ExprNode::Name(name) => visit_operand_name(ctx, *name, None),
         ExprNode::Literal(lit) => visit_literal(ctx, lit),
         ExprNode::Call(call) => return funcs::visit_call(ctx, call),
         ExprNode::Make(make) => funcs::builtins::visit_make(ctx, make),
@@ -113,9 +112,21 @@ pub fn get_expr_backtrace<'a>(
 
 pub fn visit_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
-    node: &OperandNameNode<'a>,
+    name: Span<'a>,
+    qualifier: Option<Span<'a>>,
 ) -> ValueRef<'a> {
-    let Some(symbol) = resolve_operand_name(ctx, node) else {
+    if qualifier.is_none() && ctx.symtab().qualifier_exists(name.content()) {
+        // FIXME: this is wrong because it means an existing qualifier will
+        // always have precedence over a declared symbol with the same name,
+        // but that is *not* the expected behavior -- however, this is _much_
+        // simpler to handle since putting this after resolve_operand_name would
+        // not prevent an unknown symbol error from being reported even when
+        // a qualifier is valid
+
+        return ValueRef::from(Value::PackageRef(PackageRefValue::new(name)));
+    }
+
+    let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
         // error already reported
         return ValueRef::new_unknown();
     };
@@ -124,21 +135,22 @@ pub fn visit_operand_name<'a>(
 
     borrowed.value().nest_backtrace(
         LabelBacktraceKind::Expression,
-        Some(node.id.content()),
-        ctx.pin(node.id.location()),
+        Some(name.content()),
+        ctx.pin(name.location()),
         [],
     )
 }
 
-/// Reports error for unknown qualifier and unknown symbol, if applicable
+/// Reports error for unknown symbol or unknown qualifier, if applicable
 pub fn resolve_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
-    node: &OperandNameNode<'a>,
+    name: Span<'a>,
+    qualifier: Option<Span<'a>>,
 ) -> Option<SymbolRef<'a>> {
-    let symbol = if let Some(qualifier) = node.package {
+    let symbol = if let Some(qualifier) = qualifier {
         match ctx
             .symtab()
-            .get_qualified_symbol(qualifier.content(), node.id.content())
+            .get_qualified_symbol(qualifier.content(), name.content())
         {
             Some(Some(symbol)) => symbol,
             Some(None) => {
@@ -155,11 +167,11 @@ pub fn resolve_operand_name<'a>(
             }
         }
     } else {
-        ctx.symtab().get_symbol(node.id.content())
+        ctx.symtab().get_symbol(name.content())
     };
 
     if symbol.is_none() {
-        ctx.report_error(AnalysisErrorKind::UnknownSymbol { found: node.id });
+        ctx.report_error(AnalysisErrorKind::UnknownSymbol { found: name });
     }
 
     symbol
@@ -418,6 +430,12 @@ fn visit_array_literal_element<'a>(
 fn visit_selection<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectionNode<'a>) -> ValueRef<'a> {
     let base = visit_single_expr(ctx, &node.base);
 
+    if let Some(pkg) = base.as_package_ref() {
+        // this is not actually a selection, it's just a qualified operand name
+
+        return visit_operand_name(ctx, node.selector, Some(pkg.qualifier()));
+    }
+
     let Some(r#struct) = base.as_struct() else {
         ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
             location: node.location.clone(),
@@ -468,15 +486,7 @@ fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) ->
 
 pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
     match node {
-        ExprNode::Name(name) => {
-            let start = if let Some(package) = &name.package {
-                package.location().start
-            } else {
-                name.id.location().start
-            };
-
-            start..name.id.location().end
-        }
+        ExprNode::Name(name) => name.location(),
         ExprNode::Call(call) => call.location.clone(),
         ExprNode::Make(make) => make.location.clone(),
         ExprNode::Selection(selection) => selection.location.clone(),

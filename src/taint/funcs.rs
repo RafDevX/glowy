@@ -4,7 +4,6 @@ use parser::{
     Location, Span,
     ast::{
         BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
-        OperandNameNode,
     },
 };
 
@@ -197,7 +196,6 @@ fn calculate_outcome<'a>(
             result
                 .iter()
                 .flat_map(|p| p.ids.clone())
-                .map(|id| OperandNameNode { package: None, id })
                 .map(ExprNode::Name)
                 .collect()
         } else {
@@ -230,7 +228,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // then they were already spotted and differentiated by the parser, but
     // otherwise we need to here identify all remaining built-in functions and
     // trigger their special handling, aborting function call handling on match
-    if let ExprNode::Name(OperandNameNode { package: None, id }) = &*node.func {
+    if let ExprNode::Name(id) = &*node.func {
         match id.content() {
             "append" => return vec![builtins::visit_append(ctx, node)],
             "copy" => return vec![builtins::visit_copy(ctx, node)],
