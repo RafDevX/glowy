@@ -404,7 +404,14 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
 
         match self {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
-            Self::Unknown(_) => recurs!(Self::Simple(None)),
+            Self::Unknown(_) if extra_children.clone().into_iter().next().is_some() => {
+                // this is the only case where next_backtrace will actually have
+                // some effect, since otherwise LabelBacktrace::fold will
+                // ultimately return None (because of no children, as Unknown
+                // will always be coerced into a None backtrace)
+                recurs!(Self::Simple(None))
+            }
+            Self::Unknown(_) => self.clone(), // we keep the Unknown shape
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
@@ -688,7 +695,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
                 .default_value
                 .as_ref()
                 .map(ValueRef::clone_inner)
-                .unwrap_or_else(|| ValueRef::from(None)),
+                .unwrap_or_else(ValueRef::new_unknown),
         };
 
         value.nest_backtrace(
