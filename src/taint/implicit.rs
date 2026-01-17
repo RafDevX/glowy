@@ -74,7 +74,10 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
         }
     }
 
+    // we decrease before triggering since that is also what would happen if the
+    // target were a LabeledLoop (triggering happens after visit of inner stmt)
     ctx.decrease_branch_scope_depth();
+    ctx.trigger_defer_target(DeferTarget::InnermostLoop);
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
 }

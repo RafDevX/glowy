@@ -110,6 +110,7 @@ fn visit_function_def<'a>(
     super::visit_statements(ctx, body);
 
     ctx.decrease_branch_scope_depth();
+    ctx.trigger_defer_target(DeferTarget::Function);
     ctx.pop_function();
 
     ctx.symtab_mut().select_parent_scope(); // pop
