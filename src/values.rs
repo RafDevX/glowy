@@ -167,6 +167,16 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
+    pub fn as_struct_mut(&self) -> Option<RefMut<CompositeValue<'a, String>>> {
+        self.coerce_unknown_to(|| Value::Struct(CompositeValue::empty()));
+
+        RefMut::filter_map(self.0.borrow_mut(), |value| match value {
+            Value::Struct(r#struct) => Some(r#struct),
+            _ => None,
+        })
+        .ok()
+    }
+
     pub fn as_function(&self) -> Option<Ref<FunctionValue<'a>>> {
         self.coerce_unknown_to(|| Value::Function(FunctionValue::new_unknown()));
 

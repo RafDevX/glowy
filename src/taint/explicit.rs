@@ -4,7 +4,7 @@ use parser::{
     Annotation, Location, Span,
     ast::{
         AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, IndexingNode, LiteralNode,
-        ShortVarDeclNode,
+        SelectionNode, ShortVarDeclNode,
     },
 };
 
@@ -321,6 +321,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         let inner: &dyn LeftValue = match self {
             ExprNode::Name(name) => name,
             ExprNode::Indexing(indexing) => indexing,
+            ExprNode::Selection(selection) => selection,
             _ => {
                 ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
                     location: exprs::get_expr_location(self),
@@ -463,5 +464,59 @@ fn root_indexing_in_current_scope<'a>(
         }
         ExprNode::Indexing(inner) => root_indexing_in_current_scope(ctx, inner),
         _ => false, // too complex to determine; err on the side of caution
+    }
+}
+
+impl<'a> LeftValue<'a> for SelectionNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        backtrace_kind: LabelBacktraceKind,
+        rhs: ValueRef<'a>,
+        simple: bool,
+        explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        location: &Location,
+    ) {
+        let base = exprs::visit_single_expr(ctx, &self.base);
+
+        let Some(mut r#struct) = base.as_struct_mut() else {
+            ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
+                location: self.location.clone(),
+            });
+
+            return;
+        };
+
+        let value = rhs.nest_backtrace(
+            backtrace_kind,
+            None,
+            ctx.pin(location.clone()),
+            explicit_backtrace
+                .cloned()
+                .into_iter()
+                .chain(ctx.branch_backtrace().cloned()),
+        );
+
+        let overwrite = if simple {
+            if let ExprNode::Name(operand) = &*self.base {
+                if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {
+                    ctx.symtab().is_symbol_in_current_scope(symbol)
+                } else {
+                    false
+                }
+            } else {
+                // too complex to determine; err on the side of caution
+                false
+            }
+        } else {
+            false
+        };
+
+        r#struct.set_const(
+            self.selector.content().to_owned(),
+            value,
+            overwrite,
+            ctx.pin(location.clone()),
+        );
     }
 }
