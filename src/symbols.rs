@@ -54,8 +54,8 @@ use crate::{
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers
     universe_scope: Scope<'a>,
-    /// Root scopes associated with each package
-    package_scopes: HashMap<FullPackagePath, PackageScopeEnvelope<'a>>,
+    /// Root scopes associated with each package (None if blackbox)
+    package_scopes: HashMap<FullPackagePath, Option<PackageScopeEnvelope<'a>>>,
 
     /// Other packages imported by the current file, with an assigned qualifier
     current_file_named_imports: HashMap<String, FullPackagePath>,
@@ -76,13 +76,7 @@ impl<'a> SymbolTable<'a> {
     pub fn new() -> Self {
         Self {
             universe_scope: Scope::new_universe(),
-            package_scopes: HashMap::from([(
-                "fmt".to_owned(),
-                PackageScopeEnvelope::new_builtin(
-                    "fmt",
-                    [FunctionValue::new_builtin("Println", &["a"], true, 2)],
-                ),
-            )]),
+            package_scopes: HashMap::from([("fmt".to_owned(), None)]),
 
             current_file_named_imports: HashMap::new(),
             current_file_wildcard_imports: Vec::new(),
@@ -109,7 +103,11 @@ impl<'a> SymbolTable<'a> {
         let envelope = self
             .package_scopes
             .entry(path)
-            .or_insert_with(|| PackageScopeEnvelope::new(name));
+            .or_insert_with(|| Some(PackageScopeEnvelope::new(name)));
+
+        let envelope = envelope
+            .as_ref()
+            .expect("package to be entered should not be blackbox");
 
         self.current_file_named_imports.clear();
         self.current_file_wildcard_imports.clear();
@@ -122,14 +120,14 @@ impl<'a> SymbolTable<'a> {
 
     pub fn save_package_progress(&mut self, path: &FullPackagePath) {
         if let Some(&index) = self.current_cursor.first() {
-            if let Some(envelope) = self.package_scopes.get_mut(path) {
+            if let Some(Some(envelope)) = self.package_scopes.get_mut(path) {
                 envelope.next_child_index = index;
             }
         }
     }
 
     pub fn clear_all_package_progress(&mut self) {
-        for envelope in self.package_scopes.values_mut() {
+        for envelope in self.package_scopes.values_mut().flatten() {
             envelope.next_child_index = 0;
         }
     }
@@ -189,7 +187,7 @@ impl<'a> SymbolTable<'a> {
 
         if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
             for path in &self.current_file_wildcard_imports {
-                if let Some(envelope) = self.package_scopes.get(path) {
+                if let Some(Some(envelope)) = self.package_scopes.get(path) {
                     if let Some(symbol) = envelope.scope.borrow().get_local_symbol(name) {
                         return Some(symbol);
                     }
@@ -211,7 +209,7 @@ impl<'a> SymbolTable<'a> {
         name: &str,
     ) -> Option<Option<Option<SymbolRef<'a>>>> {
         if let Some(path) = self.current_file_named_imports.get(qualifier) {
-            if let Some(envelope) = self.package_scopes.get(path) {
+            if let Some(Some(envelope)) = self.package_scopes.get(path) {
                 if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
                     Some(Some(envelope.scope.borrow().get_local_symbol(name)))
                 } else {
@@ -266,6 +264,7 @@ impl<'a> SymbolTable<'a> {
         let qualifier = qualifier.or_else(|| {
             self.package_scopes
                 .get(&path)
+                .and_then(Option::as_ref)
                 .map(|envelope| envelope.package_name.content().to_owned())
         });
 
@@ -290,6 +289,16 @@ impl<'a> SymbolTable<'a> {
 
     pub fn qualifier_exists(&self, qualifier: &str) -> bool {
         self.current_file_named_imports.contains_key(qualifier)
+    }
+
+    pub fn is_package_blackbox(&self, qualifier: &str) -> bool {
+        if let Some(path) = self.current_file_named_imports.get(qualifier) {
+            if let Some(envelope) = self.package_scopes.get(path) {
+                return envelope.is_none();
+            }
+        }
+
+        false
     }
 }
 
@@ -318,28 +327,6 @@ impl<'a> PackageScopeEnvelope<'a> {
             scope,
             next_child_index: 0,
         }
-    }
-
-    fn new_builtin(
-        package_name: &'static str,
-        funcs: impl IntoIterator<Item = FunctionValue<'a>>,
-    ) -> Self {
-        let envelope = Self::new(Pinned {
-            virtual_file_path: PathBuf::new(),
-            inner: Span::new(package_name, 0, 0),
-        });
-
-        for func in funcs {
-            let name = func.r#ref().declared_name().unwrap(); // no anonymous builtins
-
-            let value = ValueRef::from(Value::Function(func));
-
-            let symbol = Symbol::new_predeclared_ref(name, value);
-
-            envelope.scope.borrow_mut().set_local_symbol(name, symbol);
-        }
-
-        envelope
     }
 }
 

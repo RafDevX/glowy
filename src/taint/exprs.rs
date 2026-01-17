@@ -124,6 +124,13 @@ pub fn visit_operand_name<'a>(
         // a qualifier is valid
 
         return ValueRef::from(Value::PackageRef(PackageRefValue::new(name)));
+    } else if let Some(qual) = qualifier {
+        if ctx.symtab().is_package_blackbox(qual.content()) {
+            // we don't know any details about this package, so we just assume
+            // that the requested member (`name`) exists within it
+
+            return ValueRef::new_unknown();
+        }
     }
 
     let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
