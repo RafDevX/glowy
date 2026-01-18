@@ -38,7 +38,10 @@ pub enum LabelTag<'a> {
         /// A reference to the associated function.
         func: FunctionRef<'a>,
         /// The parameter's index within the function's signature.
-        index: usize,
+        ///
+        /// This value is [`None`] if and only if the synthetic tag refers to a
+        /// receiver parameter, rather than a normal function parameter.
+        index: Option<usize>,
         /// The parameter's assigned identifier, if any.
         ///
         /// Note that this is redundant with [`LabelTag::Synthetic::index`], but
@@ -53,13 +56,24 @@ impl fmt::Display for LabelTag<'_> {
             Self::Concrete(tag) => write!(f, "{tag}"),
             Self::Synthetic {
                 func,
-                index,
+                index: Some(index),
                 identifier,
             } => {
                 if let Some(id) = identifier {
                     write!(f, "<{func}#{index}:{}>", id.content())
                 } else {
                     write!(f, "<{func}#{index}>")
+                }
+            }
+            Self::Synthetic {
+                func,
+                index: None,
+                identifier,
+            } => {
+                if let Some(id) = identifier {
+                    write!(f, "<{func}$RECEIVER:{}>", id.content())
+                } else {
+                    write!(f, "<{func}$RECEIVER>")
                 }
             }
         }
@@ -217,7 +231,7 @@ impl<'a> Label<'a> {
     pub(crate) fn is_synthetic_func_param_decl(
         &self,
         param_func: &FunctionRef<'a>,
-        param_index: usize,
+        param_index: Option<usize>,
     ) -> bool {
         let Self::Tags(tags) = self else {
             return false;
@@ -462,7 +476,7 @@ impl<'a> LabelBacktrace<'a> {
     pub(crate) fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>, // None for receiver
         concrete: Option<&Self>,
     ) -> Option<Self> {
         if self.kind == LabelBacktraceKind::FunctionParameter {

@@ -3,7 +3,8 @@ use std::iter;
 use parser::{
     Location, Span,
     ast::{
-        BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionResultNode, FunctionSignatureNode,
+        BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode,
+        FunctionSignatureNode,
     },
 };
 
@@ -27,6 +28,7 @@ fn visit_function_def<'a>(
     r#ref: FunctionRef<'a>,
     decl_symbol: Option<Pinned<Span<'a>>>,
     signature: &FunctionSignatureNode<'a>,
+    receiver: Option<&FunctionParamDeclNode<'a>>,
     body: &BlockNode<'a>,
 ) -> ValueRef<'a> {
     let mut func_val = FunctionValue::new(
@@ -60,34 +62,45 @@ fn visit_function_def<'a>(
 
     ctx.symtab_mut().select_next_child_scope(); // push
 
-    let mut param_index = 0;
-
-    for param in &signature.params {
-        for &id in &param.ids {
-            if id.content() == "_" {
-                // blank identifier, ignore
-                param_index += 1;
-                continue;
-            }
-
+    macro_rules! declare_param {
+        ($id:expr, $index:expr) => {
             let synthetic = LabelTag::Synthetic {
                 func: r#ref.clone(),
-                index: param_index,
-                identifier: Some(id),
+                index: $index,
+                identifier: Some($id),
             };
 
             let param_backtrace = LabelBacktrace::new_root(
                 LabelBacktraceKind::FunctionParameter,
                 Label::from_single(synthetic),
-                id.content(),
-                ctx.pin(id.location()),
+                $id.content(),
+                ctx.pin($id.location()),
             );
 
             ctx.declare_new_symbol(Symbol::new_ref(
-                ctx.pin(id),
+                ctx.pin($id),
                 true,
                 ValueRef::from(Some(param_backtrace)),
             ));
+        };
+    }
+
+    if let Some(receiver) = receiver {
+        if let [id] = receiver.ids.as_slice() {
+            if id.content() != "_" {
+                declare_param!(*id, None);
+            }
+        }
+    }
+
+    let mut param_index = 0;
+
+    for param in &signature.params {
+        for &id in &param.ids {
+            // only ignore if blank identifier
+            if id.content() != "_" {
+                declare_param!(id, Some(param_index));
+            }
 
             param_index += 1;
         }
@@ -123,7 +136,14 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
 
     let r#ref = FunctionRef::Named(func_name.clone());
 
-    visit_function_def(ctx, r#ref, Some(func_name), &node.signature, &node.body);
+    visit_function_def(
+        ctx,
+        r#ref,
+        Some(func_name),
+        &node.signature,
+        node.receiver.as_ref(),
+        &node.body,
+    );
 }
 
 pub fn visit_function_literal<'a>(
@@ -134,7 +154,7 @@ pub fn visit_function_literal<'a>(
 ) -> ValueRef<'a> {
     let r#ref = FunctionRef::Anonymous(ctx.pin(location.clone()));
 
-    visit_function_def(ctx, r#ref, None, signature, body)
+    visit_function_def(ctx, r#ref, None, signature, None, body)
 }
 
 pub fn visit_return<'a>(
@@ -419,7 +439,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 exprs::get_expr_backtrace(ctx, arg)
             };
 
-            realized = Some(base.realize(func.r#ref(), index, concrete.as_ref()));
+            realized = Some(base.realize(func.r#ref(), Some(index), concrete.as_ref()));
         }
 
         result.push(realized.unwrap_or_else(|| component.clone()));

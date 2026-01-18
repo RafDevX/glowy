@@ -252,7 +252,7 @@ pub trait SelfAwareBacktraceContainer<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>, // None for receiver
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self;
 
@@ -271,7 +271,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         let borrowed = self.0.borrow();
@@ -313,7 +313,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         if let Some(bt) = self {
@@ -391,7 +391,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         macro_rules! recurs {
@@ -510,7 +510,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         let primary = self.primary.realize(from_func, from_index, concrete);
@@ -589,7 +589,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         Self::new(self.0.realize(from_func, from_index, concrete))
@@ -643,7 +643,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
     fn realize(
         &self,
         _from_func: &FunctionRef<'a>,
-        _from_index: usize,
+        _from_index: Option<usize>,
         _concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         self.clone()
@@ -815,7 +815,7 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         let r#const = self
@@ -1044,7 +1044,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: usize,
+        from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         // we need to recursively realize everything in the outcome, for example
