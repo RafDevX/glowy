@@ -89,6 +89,21 @@ impl<'a> ValueRef<'a> {
         }
     }
 
+    pub fn coerce_mobius_unknown_to_unknown(&mut self) {
+        // we need to use an aux bool because otherwise we'd get a runtime error
+        // when attempting to borrow_mut *self.0 while it is still borrowed
+        // until the end of the if statement
+        let coerce = if let Value::Mobius(MobiusValue(inner)) = &*self.0.borrow() {
+            matches!(*inner.0.borrow(), Value::Unknown(_))
+        } else {
+            false
+        };
+
+        if coerce {
+            *self.0.borrow_mut() = Value::Unknown(UnknownValue)
+        }
+    }
+
     pub fn as_expandable(&self) -> Option<Ref<ExpandableValue<'a>>> {
         self.coerce_unknown_to(|| {
             Value::Expandable(ExpandableValue::new(Self::new_unknown(), Vec::new()))

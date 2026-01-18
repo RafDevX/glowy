@@ -73,7 +73,11 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
             location: get_expr_location(node),
         });
     } else {
-        return result.pop().unwrap(); // already checked
+        let mut value = result.pop().unwrap(); // already checked
+
+        value.coerce_mobius_unknown_to_unknown();
+
+        return value;
     }
 
     ValueRef::from(None)
