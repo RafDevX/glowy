@@ -388,7 +388,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     let mut result = vec![];
 
     'components: for component in outcome {
-        let mut realized = None;
+        let mut realized = component.clone();
 
         // vvv cannot actually do this because if/else would have diff types,
         // vvv so we must create it manually instead...
@@ -405,18 +405,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         //     .enumerate();
 
         for (index, (id, variadic)) in ids.iter().copied().enumerate() {
-            let base = if let Some(value) = realized {
-                // this is not the first iteration; continue where we left off
-                value
-            } else {
-                // this is the first iteration; start from the outcome component
-                component.clone()
-            };
-
-            if base.is_bottom() {
+            if realized.is_bottom() {
                 // no sense in continuing, we'll never evolve from this state
 
-                result.push(base);
+                result.push(realized);
 
                 continue 'components;
             }
@@ -439,10 +431,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 exprs::get_expr_backtrace(ctx, arg)
             };
 
-            realized = Some(base.realize(func.r#ref(), Some(index), concrete.as_ref()));
+            realized = realized.realize(func.r#ref(), Some(index), concrete.as_ref());
         }
 
-        result.push(realized.unwrap_or_else(|| component.clone()));
+        result.push(realized);
     }
 
     // need to nest the function's backtrace into the result because the
