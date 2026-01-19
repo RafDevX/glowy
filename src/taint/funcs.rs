@@ -385,10 +385,20 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // will never panic if all assumptions hold
     let ids = ids.unwrap();
 
+    let receiver = if let ExprNode::Selection(selection) = &*node.func {
+        Some(exprs::get_expr_backtrace(ctx, &selection.base))
+    } else {
+        None
+    };
+
     let mut result = vec![];
 
     'components: for component in outcome {
         let mut realized = component.clone();
+
+        if let Some(receiver) = &receiver {
+            realized = realized.realize(func.r#ref(), None, receiver.as_ref())
+        }
 
         // vvv cannot actually do this because if/else would have diff types,
         // vvv so we must create it manually instead...
