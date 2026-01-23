@@ -386,7 +386,18 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     let ids = ids.unwrap();
 
     let receiver = if let ExprNode::Selection(selection) = &*node.func {
-        Some(exprs::get_expr_backtrace(ctx, &selection.base))
+        // we cannot use exprs::get_expr_backtrace since we need to rule out the
+        // case that the ""selection"" is actually just a qualified identifier
+        // and so the ""receiver"" is really just a qualifier (package ref)
+        let value = exprs::visit_single_expr(ctx, &selection.base);
+
+        if value.as_package_ref().is_some() {
+            None
+        } else {
+            let location = ctx.pin(exprs::get_expr_location(&selection.base));
+
+            Some(value.backtrace_at_location(location))
+        }
     } else {
         None
     };
