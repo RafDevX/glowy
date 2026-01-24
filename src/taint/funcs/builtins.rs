@@ -70,7 +70,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 .as_ref()
                 .map(|expr| exprs::visit_single_expr(ctx, expr));
 
-            ValueRef::from(Value::Map(CompositeValue::empty()))
+            ValueRef::from(Value::Map(CompositeValue::empty(None)))
         }
         TypeNode::Channel { .. } => {
             if let Some(m) = &node.m {

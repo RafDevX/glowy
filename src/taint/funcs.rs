@@ -366,12 +366,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             // so the best we can do is return a Möbius value that can be
             // expanded to however many values the invoker expects
 
-            let inner = if bt.is_some() {
-                ValueRef::from(bt)
-            } else {
-                ValueRef::new_unknown()
-            };
-            let mobius = MobiusValue::new(inner);
+            let mobius = MobiusValue::new(ValueRef::from(bt));
 
             return vec![ValueRef::from(Value::Mobius(mobius))];
         }

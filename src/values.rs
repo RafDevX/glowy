@@ -27,10 +27,6 @@ use crate::{
 pub struct ValueRef<'a>(Rc<RefCell<Value<'a>>>);
 
 impl<'a> ValueRef<'a> {
-    pub fn new_unknown() -> Self {
-        Self::from(Value::Unknown(UnknownValue {}))
-    }
-
     /// Copy by value or by reference according to Go aliasing rules
     pub fn copy(&self) -> Self {
         let borrowed = self.0.borrow();
@@ -60,7 +56,7 @@ impl<'a> ValueRef<'a> {
     pub fn uninitialized_from_type(r#type: Option<&TypeNode<'a>>) -> Self {
         if let Some(TypeNode::Array { element, .. }) = r#type {
             // TODO: support nested array types
-            let mut composite = CompositeValue::empty();
+            let mut composite = CompositeValue::empty(None);
 
             if let TypeNode::Array { .. } = &**element {
                 let inner = Self::uninitialized_from_type(Some(element));
@@ -82,32 +78,37 @@ impl<'a> ValueRef<'a> {
         matches!(*self.0.borrow(), Value::Map(_))
     }
 
-    // force a Value::Unknown to take a concrete shape when used
-    fn coerce_unknown_to(&self, f: impl FnOnce() -> Value<'a>) {
-        if matches!(*self.0.borrow(), Value::Unknown(_)) {
-            *self.0.borrow_mut() = f();
+    // coerce a Value::Simple to take a complex shape when used
+    fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
+        let borrow = self.0.borrow();
+
+        if let Value::Simple(backtrace) = &*borrow {
+            let inner = C::upgrade(backtrace.clone());
+
+            drop(borrow); // release the immutable borrow
+
+            *self.0.borrow_mut() = f(inner);
         }
     }
 
-    pub fn coerce_mobius_unknown_to_unknown(&mut self) {
-        // we need to use an aux bool because otherwise we'd get a runtime error
-        // when attempting to borrow_mut *self.0 while it is still borrowed
-        // until the end of the if statement
-        let coerce = if let Value::Mobius(MobiusValue(inner)) = &*self.0.borrow() {
-            matches!(*inner.0.borrow(), Value::Unknown(_))
+    pub fn try_singularize_simple_mobius(&mut self) {
+        let new = if let Value::Mobius(MobiusValue(inner)) = &*self.0.borrow() {
+            if let value @ Value::Simple(_) = &*inner.0.borrow() {
+                Some(value.clone())
+            } else {
+                None
+            }
         } else {
-            false
+            None
         };
 
-        if coerce {
-            *self.0.borrow_mut() = Value::Unknown(UnknownValue)
+        if let Some(new) = new {
+            *self.0.borrow_mut() = new;
         }
     }
 
     pub fn as_expandable(&self) -> Option<Ref<ExpandableValue<'a>>> {
-        self.coerce_unknown_to(|| {
-            Value::Expandable(ExpandableValue::new(Self::new_unknown(), Vec::new()))
-        });
+        self.try_upgrade_to(Value::Expandable);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Expandable(exp) => Some(exp),
@@ -117,7 +118,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_mobius(&self) -> Option<Ref<MobiusValue<'a>>> {
-        self.coerce_unknown_to(|| Value::Mobius(MobiusValue::new(Self::new_unknown())));
+        self.try_upgrade_to(Value::Mobius);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Mobius(mobius) => Some(mobius),
@@ -137,7 +138,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_slice_mut(&mut self) -> Option<RefMut<CompositeValue<'a, u64>>> {
-        self.coerce_unknown_to(|| Value::Slice(CompositeValue::empty()));
+        self.try_upgrade_to(Value::Slice);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Slice(composite) => Some(composite),
@@ -147,7 +148,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_composite(&self) -> Option<Ref<dyn CompositeValueAdapter<'a>>> {
-        self.coerce_unknown_to(|| Value::Array(CompositeValue::empty()));
+        self.try_upgrade_to(Value::Array);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {
@@ -160,7 +161,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_composite_mut(&mut self) -> Option<RefMut<dyn CompositeValueAdapter<'a>>> {
-        self.coerce_unknown_to(|| Value::Array(CompositeValue::empty()));
+        self.try_upgrade_to(Value::Array);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {
@@ -173,7 +174,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_struct(&self) -> Option<Ref<CompositeValue<'a, String>>> {
-        self.coerce_unknown_to(|| Value::Struct(CompositeValue::empty()));
+        self.try_upgrade_to(Value::Struct);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Struct(r#struct) => Some(r#struct),
@@ -183,7 +184,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_struct_mut(&self) -> Option<RefMut<CompositeValue<'a, String>>> {
-        self.coerce_unknown_to(|| Value::Struct(CompositeValue::empty()));
+        self.try_upgrade_to(Value::Struct);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Struct(r#struct) => Some(r#struct),
@@ -193,7 +194,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_function(&self) -> Option<Ref<FunctionValue<'a>>> {
-        self.coerce_unknown_to(|| Value::Function(FunctionValue::new_unknown()));
+        self.try_upgrade_to(Value::Function);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
             Value::Function(func) => Some(func),
@@ -203,7 +204,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_function_mut(&mut self) -> Option<RefMut<FunctionValue<'a>>> {
-        self.coerce_unknown_to(|| Value::Function(FunctionValue::new_unknown()));
+        self.try_upgrade_to(Value::Function);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
             Value::Function(func) => Some(func),
@@ -342,7 +343,8 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Value<'a> {
     Simple(Option<LabelBacktrace<'a>>),
-    Unknown(UnknownValue), // output from a blackbox; becomes concrete when used
+    // ^^^ a Value::Simple might be automatically coerced into one of the more
+    // complex shapes below when used (or it might always just be Simple)
     Expandable(ExpandableValue<'a>),
     Mobius(MobiusValue<'a>),
     PackageRef(PackageRefValue<'a>),
@@ -362,7 +364,6 @@ impl<'a> Value<'a> {
     fn sub_container(&self) -> &dyn BacktraceContainer<'a> {
         match self {
             Self::Simple(opt) => opt,
-            Self::Unknown(unknown) => unknown,
             Self::Expandable(exp) => exp,
             Self::Mobius(mobius) => mobius,
             Self::PackageRef(pkg) => pkg,
@@ -402,7 +403,6 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
 
         match self {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
-            Self::Unknown(_) => self.clone(),
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
@@ -429,14 +429,6 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
 
         match self {
             Self::Simple(bt) => Self::Simple(recurs!(bt)),
-            Self::Unknown(_) if extra_children.clone().into_iter().next().is_some() => {
-                // this is the only case where next_backtrace will actually have
-                // some effect, since otherwise LabelBacktrace::fold will
-                // ultimately return None (because of no children, as Unknown
-                // will always be coerced into a None backtrace)
-                recurs!(Self::Simple(None))
-            }
-            Self::Unknown(_) => self.clone(), // we keep the Unknown shape
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
@@ -449,20 +441,9 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
     }
 }
 
-// This struct serves no purpose, but it makes Value::Unknown fit better with
-// how all other variants are structured (always around some sub-container of
-// sorts). It also helps keep all relevant methods in one place.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct UnknownValue;
-
-impl<'a> BacktraceContainer<'a> for UnknownValue {
-    fn backtrace_at_location(&self, _location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
-        None
-    }
-
-    fn is_bottom(&self) -> bool {
-        true
-    }
+trait Upgrade<'a> {
+    // Coerce from a Value::Simple to Self, preserving inner backtrace
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self;
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -555,6 +536,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
     }
 }
 
+impl<'a> Upgrade<'a> for ExpandableValue<'a> {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+        Self::new(ValueRef::from(backtrace), Vec::new())
+    }
+}
+
 // represents a value of unknown, adaptable cardinality -- similar to an
 // ExpandableValue, but more flexible, able to become any number of the same
 // inner value, in a sort of illusion like a Möbius strip.
@@ -608,6 +595,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
             parent_location,
             extra_children,
         ))
+    }
+}
+
+impl<'a> Upgrade<'a> for MobiusValue<'a> {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+        Self::new(ValueRef::from(backtrace))
     }
 }
 
@@ -671,10 +664,10 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
 }
 
 impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
-    pub fn empty() -> Self {
+    pub fn empty(r#dyn: Option<LabelBacktrace<'a>>) -> Self {
         Self {
             r#const: HashMap::new(),
-            r#dyn: None,
+            r#dyn,
             default_value: None,
         }
     }
@@ -720,7 +713,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
                 .default_value
                 .as_ref()
                 .map(ValueRef::clone_inner)
-                .unwrap_or_else(ValueRef::new_unknown),
+                .unwrap_or_else(|| ValueRef::from(None)),
         };
 
         value.nest_backtrace(
@@ -851,6 +844,12 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             r#dyn,
             default_value: self.default_value.clone(), // ref-clone is fine here
         }
+    }
+}
+
+impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+        Self::empty(backtrace)
     }
 }
 
@@ -994,10 +993,10 @@ impl<'a> FunctionValue<'a> {
         Self::new(r#ref, Some(signature), None)
     }
 
-    fn new_unknown() -> Self {
+    fn new_unknown(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, None)
+        Self::new(r#ref, None, backtrace)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -1086,6 +1085,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
         }
+    }
+}
+
+impl<'a> Upgrade<'a> for FunctionValue<'a> {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+        Self::new_unknown(backtrace)
     }
 }
 

@@ -75,7 +75,7 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
     } else {
         let mut value = result.pop().unwrap(); // already checked
 
-        value.coerce_mobius_unknown_to_unknown();
+        value.try_singularize_simple_mobius();
 
         return value;
     }
@@ -133,13 +133,13 @@ pub fn visit_operand_name<'a>(
             // we don't know any details about this package, so we just assume
             // that the requested member (`name`) exists within it
 
-            return ValueRef::new_unknown();
+            return ValueRef::from(None);
         }
     }
 
     let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
         // error already reported
-        return ValueRef::new_unknown();
+        return ValueRef::from(None);
     };
 
     let borrowed = symbol.borrow();
