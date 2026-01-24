@@ -43,9 +43,7 @@ fn visit_binding_decl_spec<'a>(
         // (branch label is irrelevant in this case)
 
         for name in &node.ids {
-            let value = ValueRef::uninitialized_from_type(node.r#type.as_ref());
-
-            let symbol = Symbol::new_ref(ctx.pin(*name), mutable, value);
+            let symbol = Symbol::new_ref(ctx.pin(*name), mutable, ValueRef::from(None));
 
             ctx.declare_new_symbol(symbol);
         }

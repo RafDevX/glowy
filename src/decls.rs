@@ -72,9 +72,7 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
 ) {
     for &id in &node.ids {
-        let value = ValueRef::uninitialized_from_type(node.r#type.as_ref());
-
-        let symbol = Symbol::new_ref(ctx.pin(id), mutable, value);
+        let symbol = Symbol::new_ref(ctx.pin(id), mutable, ValueRef::from(None));
 
         ctx.declare_new_symbol(symbol);
     }

@@ -45,31 +45,6 @@ impl<'a> ValueRef<'a> {
         Self::from(borrowed.clone())
     }
 
-    /// Generate a new value just from type information, without init expression
-    ///
-    /// In most cases, Go's zero value corresponds to a `Value::Simple(None)`,
-    /// usually from `nil`, but for array types we need to have an actual
-    /// `Value::Array(...)` since they can be used from the get-go and otherwise
-    /// we would later not recognize the value as a valid indexing base.
-    ///
-    /// Input is an `Option` for easier compatibility with invoking code.
-    pub fn uninitialized_from_type(r#type: Option<&TypeNode<'a>>) -> Self {
-        if let Some(TypeNode::Array { element, .. }) = r#type {
-            // TODO: support nested array types
-            let mut composite = CompositeValue::empty(None);
-
-            if let TypeNode::Array { .. } = &**element {
-                let inner = Self::uninitialized_from_type(Some(element));
-
-                composite.set_default_value(inner);
-            }
-
-            Self::from(Value::Array(composite))
-        } else {
-            Self::from(None)
-        }
-    }
-
     pub fn is_simple(&self) -> bool {
         matches!(*self.0.borrow(), Value::Simple(_))
     }

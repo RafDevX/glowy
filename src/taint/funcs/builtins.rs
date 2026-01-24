@@ -28,7 +28,7 @@ use crate::{
 
 pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> ValueRef<'a> {
     match &node.r#type {
-        TypeNode::Slice { element } => {
+        TypeNode::Slice { .. } => {
             let n = node
                 .n
                 .as_ref()
@@ -44,7 +44,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 ctx.pin(node.location.clone()),
             );
 
-            let default = ValueRef::uninitialized_from_type(Some(element));
+            let default = ValueRef::from(None);
             if !default.is_simple() {
                 composite.set_default_value(default);
             }
