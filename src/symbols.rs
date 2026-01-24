@@ -270,7 +270,7 @@ impl<'a> SymbolTable<'a> {
 
         let qualifier = match qualifier {
             Some(qual) => qual,
-            None if infer_from_path => path.rsplit('/').next().unwrap().to_owned(),
+            None if infer_from_path => Self::infer_qualifier_from_import_path(&path),
             None => return None,
         };
 
@@ -285,6 +285,35 @@ impl<'a> SymbolTable<'a> {
         };
 
         Some(conflicted)
+    }
+
+    fn infer_qualifier_from_import_path(path: &FullPackagePath) -> String {
+        let mut components = path.rsplit('/'); // rev. ordered
+
+        if ["github.com", "bitbucket.com"]
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+        {
+            // special case: for Go-recognized remote git repositories, we can
+            // mitigate the biggest pitfall of the general case's heuristic by
+            // ignoring tag/branch/rev name if that's the last component of the
+            // package's import path
+            // see docs: https://pkg.go.dev/cmd/go#hdr-Remote_import_paths
+
+            if components.clone().count() == 4 {
+                // the last component is the rev ("sub"), so we need to skip
+                // that and use the penultimate component instead
+                // (e.g., `github.com/user/pkg/v3` should have its native name
+                // inferred as `pkg` and not as `v3`)
+                components.next();
+            }
+        }
+
+        // general case: infer that the package's native name corresponds to the
+        // last component of the path (e.g., `net/http` -> `http`)
+        // [evidently, this is not a foolproof heuristic, but it should
+        // work for the overwhelming majority of cases, including stdlib]
+        components.next().unwrap().to_owned()
     }
 
     pub fn qualifier_exists(&self, qualifier: &str) -> bool {
