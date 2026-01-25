@@ -1,4 +1,4 @@
-use std::iter;
+use std::{borrow::Cow, iter};
 
 use parser::{
     Location, Span,
@@ -14,7 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
     symbols::Symbol,
-    taint::exprs,
+    taint::{SinkDescriptor, SinkKind, enforcement, exprs},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, MobiusValue, SelfAwareBacktraceContainer,
         Value, ValueRef,
@@ -330,6 +330,24 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             }
         }
     }
+
+    if let Some(annotation) = &node.annotation {
+        match annotation.directive {
+            "sink" => {
+                let sink = SinkDescriptor::new(SinkKind::Call, &annotation.tags);
+
+                for arg in &node.args {
+                    let backtrace = exprs::get_expr_backtrace(ctx, arg);
+
+                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), backtrace);
+                }
+            }
+            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
+                directive: annotation.directive.to_owned(),
+                location: annotation.location.clone(),
+            }),
+        }
+    };
 
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must

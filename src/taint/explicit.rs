@@ -1,4 +1,4 @@
-use std::cmp;
+use std::{borrow::Cow, cmp};
 
 use parser::{
     Annotation, Location, Span,
@@ -132,7 +132,14 @@ pub fn visit_raw_binding_decl_spec<'a>(
                 "sink" => {
                     let sink = SinkDescriptor::new(SinkKind::Declaration, &annotation.tags);
 
-                    enforcement::trigger_sink(ctx, sink, location, rhs.clone());
+                    // FIXME: this location is probably wrong for what we want
+                    // to report; i.e. we want to highlight a specific expr
+                    // rather than an entire declaration, but we just don't have
+                    // that information here
+                    let rhs_location = ctx.pin(location.clone());
+                    let backtrace = rhs.backtrace_at_location(rhs_location);
+
+                    enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
                 }
                 _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
                     directive: annotation.directive.to_owned(),
