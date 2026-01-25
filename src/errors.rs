@@ -21,7 +21,7 @@ use std::path::Path;
 
 use parser::{Location, ParsingError, Span};
 
-use crate::Pinned;
+use crate::{Pinned, labels::LabelBacktrace, taint::SinkDescriptor};
 
 /// Represents an issue arising from Glowy analysis.
 ///
@@ -73,6 +73,17 @@ pub enum AnalysisErrorKind<'a> {
         directive: String,
         /// The offending annotation's location.
         location: Location,
+    },
+
+    /// Insecure value passed into security sink.
+    ///
+    /// A value with incompatible label was fed into a sink without abiding the
+    /// defined security policy.
+    InsecureFlow {
+        /// The sink that the unauthorized information flowed into.
+        sink: SinkDescriptor<'a>,
+        /// The incompatible label backtrace of the value in question.
+        backtrace: Option<LabelBacktrace<'a>>,
     },
 
     /// Declared package name different from expectation.
@@ -279,6 +290,7 @@ impl AnalysisErrorKind<'_> {
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
+            Self::InsecureFlow { .. } => AnalysisErrorCategory::SecurityPolicyViolation,
         }
     }
 }

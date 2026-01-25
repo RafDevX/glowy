@@ -14,6 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
+    taint::{SinkDescriptor, SinkKind, enforcement},
     values::{BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
@@ -127,6 +128,11 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         name.content(),
                         ctx.pin(location.clone()),
                     ));
+                }
+                "sink" => {
+                    let sink = SinkDescriptor::new(SinkKind::Declaration, &annotation.tags);
+
+                    enforcement::trigger_sink(ctx, sink, location, rhs.clone());
                 }
                 _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
                     directive: annotation.directive.to_owned(),

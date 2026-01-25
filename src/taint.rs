@@ -11,13 +11,36 @@ use crate::{
     FullPackagePath,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
+    labels::Label,
 };
 
 mod channels;
+mod enforcement;
 mod explicit;
 mod exprs;
 mod funcs;
 mod implicit;
+
+#[derive(Clone, Debug)]
+pub struct SinkDescriptor<'a> {
+    pub kind: SinkKind,
+    pub label: Label<'a>,
+}
+
+impl<'a> SinkDescriptor<'a> {
+    fn new(kind: SinkKind, tags: &[&'a str]) -> Self {
+        let label = Label::from_tags(tags);
+
+        Self { kind, label }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SinkKind {
+    Declaration,
+    Call,
+    Send,
+}
 
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
