@@ -27,6 +27,11 @@ use crate::{
 pub struct ValueRef<'a>(Rc<RefCell<Value<'a>>>);
 
 impl<'a> ValueRef<'a> {
+    #[inline]
+    pub fn new_bottom() -> Self {
+        Self::from(None)
+    }
+
     /// Copy by value or by reference according to Go aliasing rules
     pub fn copy(&self) -> Self {
         let borrowed = self.0.borrow();
@@ -688,7 +693,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
                 .default_value
                 .as_ref()
                 .map(ValueRef::clone_inner)
-                .unwrap_or_else(|| ValueRef::from(None)),
+                .unwrap_or_else(ValueRef::new_bottom),
         };
 
         value.nest_backtrace(

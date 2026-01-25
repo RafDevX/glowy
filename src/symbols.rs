@@ -404,7 +404,7 @@ impl<'a> Scope<'a> {
                 $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
             };
             ($scope:expr, $id:expr) => {
-                predeclared_constant!($scope, $id, ValueRef::from(None))
+                predeclared_constant!($scope, $id, ValueRef::new_bottom())
             };
         }
 

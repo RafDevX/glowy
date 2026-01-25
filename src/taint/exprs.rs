@@ -80,7 +80,7 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
         return value;
     }
 
-    ValueRef::from(None)
+    ValueRef::new_bottom()
 }
 
 pub fn visit_multi_exprs<'a>(
@@ -133,13 +133,13 @@ pub fn visit_operand_name<'a>(
             // we don't know any details about this package, so we just assume
             // that the requested member (`name`) exists within it
 
-            return ValueRef::from(None);
+            return ValueRef::new_bottom();
         }
     }
 
     let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
         // error already reported
-        return ValueRef::from(None);
+        return ValueRef::new_bottom();
     };
 
     let borrowed = symbol.borrow();
@@ -193,7 +193,7 @@ fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> V
         LiteralNode::Int { .. }
         | LiteralNode::Float { .. }
         | LiteralNode::Rune { .. }
-        | LiteralNode::String { .. } => ValueRef::from(None),
+        | LiteralNode::String { .. } => ValueRef::new_bottom(),
         LiteralNode::Function {
             signature,
             body,
@@ -418,7 +418,7 @@ fn visit_array_literal_element<'a>(
 
             if values.is_empty() {
                 // quicker escape to avoid clones et al. if they're unnecessary
-                ValueRef::from(None)
+                ValueRef::new_bottom()
             } else if values.len() == 1 {
                 values.pop().unwrap()
             } else {
@@ -452,7 +452,7 @@ fn visit_selection<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectionNode<'a>) 
             location: node.location.clone(),
         });
 
-        return ValueRef::from(None);
+        return ValueRef::new_bottom();
     };
 
     r#struct.get_const(
@@ -469,7 +469,7 @@ fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) ->
             location: node.location.clone(),
         });
 
-        return ValueRef::from(None);
+        return ValueRef::new_bottom();
     };
 
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);

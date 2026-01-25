@@ -37,7 +37,7 @@ fn visit_function_def<'a>(
         None, // TODO: support annotations
     );
 
-    // cannot use `vec![ValueRef::from(None); signature.result.len()]`, since
+    // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
     // the vec! macro would clone the ValueRef (and so they'd all point to the
     // same value, which is not what we want; they should be independent)
     let bottom_outcome = iter::once(Value::Simple(None))

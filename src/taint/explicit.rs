@@ -43,7 +43,7 @@ fn visit_binding_decl_spec<'a>(
         // (branch label is irrelevant in this case)
 
         for name in &node.ids {
-            let symbol = Symbol::new_ref(ctx.pin(*name), mutable, ValueRef::from(None));
+            let symbol = Symbol::new_ref(ctx.pin(*name), mutable, ValueRef::new_bottom());
 
             ctx.declare_new_symbol(symbol);
         }
@@ -131,7 +131,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             // TODO: `match` other scopes
         };
 
-        let symbol = Symbol::new_ref(ctx.pin(name), mutable, ValueRef::from(None));
+        let symbol = Symbol::new_ref(ctx.pin(name), mutable, ValueRef::new_bottom());
         // ^ we don't need to use ValueRef::uninitialized_from_type here, since
         // we know an initialization expression does exist
 

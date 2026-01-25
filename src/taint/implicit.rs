@@ -265,7 +265,7 @@ fn get_for_range_values<'a>(
         // this does not catch all the ints (see below), but it does catch some
         // of them (directly passed integer literals)
 
-        vec![ValueRef::from(None)] // (literals necessarily have no label)
+        vec![ValueRef::new_bottom()] // (literals necessarily have no label)
     } else {
         // the only options remaining (if this is a valid Go program) is either
         // a string or a (non-literal) integer, but we can't know which this is,
