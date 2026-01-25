@@ -119,16 +119,20 @@ pub fn visit_raw_binding_decl_spec<'a>(
         let mut explicit_backtrace = None;
 
         if let Some(annotation) = annotation {
-            if annotation.scope == "label" {
-                explicit_backtrace = Some(LabelBacktrace::new_root(
-                    LabelBacktraceKind::ExplicitAnnotation,
-                    Label::from_tags(&annotation.tags),
-                    name.content(),
-                    ctx.pin(location.clone()),
-                ));
+            match annotation.scope {
+                "label" => {
+                    explicit_backtrace = Some(LabelBacktrace::new_root(
+                        LabelBacktraceKind::ExplicitAnnotation,
+                        Label::from_tags(&annotation.tags),
+                        name.content(),
+                        ctx.pin(location.clone()),
+                    ));
+                }
+                _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationScope {
+                    scope: annotation.scope.to_owned(),
+                    location: annotation.location.clone(),
+                }),
             }
-
-            // TODO: `match` other scopes
         };
 
         let symbol = Symbol::new_ref(ctx.pin(name), mutable, ValueRef::new_bottom());

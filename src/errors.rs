@@ -64,6 +64,17 @@ pub enum AnalysisErrorKind<'a> {
     /// analyzer, potentially with distinct content.
     DuplicateVirtualFilePath,
 
+    /// Unrecognized scope specified for Glowy annotation.
+    ///
+    /// A correctly-formatted Glowy annotation includes a scope that is not
+    /// known to this analyzer and thus was ignored.
+    UnknownAnnotationScope {
+        /// The unrecognized scope in question.
+        scope: String,
+        /// The offending annotation's location.
+        location: Location,
+    },
+
     /// Declared package name different from expectation.
     ///
     /// A Go file's package clause defines a package name different from
@@ -267,6 +278,7 @@ impl AnalysisErrorKind<'_> {
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
+            Self::UnknownAnnotationScope { .. } => AnalysisErrorCategory::UnrecognizedFeature,
         }
     }
 }
@@ -287,6 +299,8 @@ impl<'a> From<ParsingError<'a>> for AnalysisErrorKind<'a> {
 pub enum AnalysisErrorCategory {
     /// Glowy analyzer not configured correctly.
     Misconfiguration,
+    /// Attempt to use a Glowy feature not known to this analyzer version.
+    UnrecognizedFeature,
     /// Incorrect or malformed Go construct.
     InvalidGo,
     /// Security fault or potential vulnerability detected in the program.
