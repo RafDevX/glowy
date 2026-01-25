@@ -239,17 +239,31 @@ impl<'a> Lexer<'a> {
                     // line comment
 
                     self.read_n::<2>(); // step over //
+
+                    let start = self.offset;
+
                     let text = self.read_while(|ch| ch != '\n').content;
 
                     if let Some(captures) = self.annotation_regex.captures(text) {
-                        let scope = &text[captures.name("scope").unwrap().range()];
-                        let tags = text[captures.name("tags").unwrap().range()]
+                        let scope = captures.name("scope").unwrap().as_str();
+
+                        let tags = captures
+                            .name("tags")
+                            .unwrap()
+                            .as_str()
                             .split(',')
                             .map(str::trim)
                             .filter(|tag| !tag.is_empty())
                             .collect();
 
-                        self.last_annotation = Some(Annotation { scope, tags });
+                        let location = captures.get(0).unwrap().range();
+                        let location = (start + location.start)..(start + location.end);
+
+                        self.last_annotation = Some(Annotation {
+                            scope,
+                            tags,
+                            location,
+                        });
                     }
                 }
                 Some('*') => {

@@ -1,4 +1,4 @@
-use crate::Span;
+use crate::{Location, Span};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
@@ -155,4 +155,5 @@ impl<'a> Token<'a> {
 pub struct Annotation<'a> {
     pub scope: &'a str,
     pub tags: Vec<&'a str>,
+    pub location: Location,
 }
