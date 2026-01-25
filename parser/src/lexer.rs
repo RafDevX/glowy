@@ -13,6 +13,8 @@ use crate::{
     token::{Annotation, Token, TokenKind},
 };
 
+const ANNOTATION_REGEX: &str = r"glowy::(?P<directive>\w+)::\{(?P<tags>[^}]*)\}";
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LexingError<'a> {
     UnknownChar(Span<'a>),
@@ -129,7 +131,7 @@ impl<'a> Lexer<'a> {
             last_token_kind: None,
             queue: VecDeque::new(),
 
-            annotation_regex: Regex::new(r"glowy::(?P<scope>\w+)::\{(?P<tags>[^}]*)\}").unwrap(),
+            annotation_regex: Regex::new(ANNOTATION_REGEX).unwrap(),
             last_annotation: None,
 
             enable_implicit_semicolon: true,
@@ -245,7 +247,7 @@ impl<'a> Lexer<'a> {
                     let text = self.read_while(|ch| ch != '\n').content;
 
                     if let Some(captures) = self.annotation_regex.captures(text) {
-                        let scope = captures.name("scope").unwrap().as_str();
+                        let directive = captures.name("directive").unwrap().as_str();
 
                         let tags = captures
                             .name("tags")
@@ -260,7 +262,7 @@ impl<'a> Lexer<'a> {
                         let location = (start + location.start)..(start + location.end);
 
                         self.last_annotation = Some(Annotation {
-                            scope,
+                            directive,
                             tags,
                             location,
                         });

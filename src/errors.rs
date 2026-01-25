@@ -64,13 +64,13 @@ pub enum AnalysisErrorKind<'a> {
     /// analyzer, potentially with distinct content.
     DuplicateVirtualFilePath,
 
-    /// Unrecognized scope specified for Glowy annotation.
+    /// Unrecognized directive specified for Glowy annotation.
     ///
-    /// A correctly-formatted Glowy annotation includes a scope that is not
+    /// A correctly-formatted Glowy annotation includes a directive that is not
     /// known to this analyzer and thus was ignored.
-    UnknownAnnotationScope {
-        /// The unrecognized scope in question.
-        scope: String,
+    UnknownAnnotationDirective {
+        /// The unrecognized directive in question.
+        directive: String,
         /// The offending annotation's location.
         location: Location,
     },
@@ -278,7 +278,7 @@ impl AnalysisErrorKind<'_> {
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
-            Self::UnknownAnnotationScope { .. } => AnalysisErrorCategory::UnrecognizedFeature,
+            Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
         }
     }
 }

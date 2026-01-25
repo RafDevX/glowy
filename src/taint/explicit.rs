@@ -119,7 +119,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
         let mut explicit_backtrace = None;
 
         if let Some(annotation) = annotation {
-            match annotation.scope {
+            match annotation.directive {
                 "label" => {
                     explicit_backtrace = Some(LabelBacktrace::new_root(
                         LabelBacktraceKind::ExplicitAnnotation,
@@ -128,8 +128,8 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         ctx.pin(location.clone()),
                     ));
                 }
-                _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationScope {
-                    scope: annotation.scope.to_owned(),
+                _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
+                    directive: annotation.directive.to_owned(),
                     location: annotation.location.clone(),
                 }),
             }
