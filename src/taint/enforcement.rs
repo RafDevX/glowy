@@ -26,3 +26,22 @@ pub fn trigger_sink<'a>(
         backtrace,
     });
 }
+
+pub fn trigger_assertion<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    expected: Cow<Label<'a>>,
+    backtrace: Option<LabelBacktrace<'a>>,
+) {
+    let real = backtrace
+        .as_ref()
+        .map_or(&Label::Bottom, LabelBacktrace::label);
+
+    if *real == *expected {
+        // all good! value's label matches the assertion
+    }
+
+    ctx.report_error(AnalysisErrorKind::FalseAssertion {
+        expected: expected.into_owned(),
+        found: backtrace,
+    });
+}

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use parser::{
     Location, Span,
     ast::{
@@ -12,6 +14,7 @@ use crate::{
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
     labels::Label,
+    values::BacktraceContainer,
 };
 
 mod channels;
@@ -159,8 +162,38 @@ fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNo
 fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) {
     match node {
         StatementNode::Empty { .. } => {}
-        StatementNode::Expr(expr) => {
-            exprs::visit_expr(ctx, expr);
+        StatementNode::Expr { expr, annotation } => {
+            let values = exprs::visit_expr(ctx, expr);
+
+            if let Some(annotation) = annotation {
+                match annotation.directive {
+                    "assert" => {
+                        let location = exprs::get_expr_location(expr);
+
+                        if values.is_empty() {
+                            ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
+                                location,
+                            });
+                            return;
+                        }
+
+                        let location = ctx.pin(location.clone());
+                        let label = Label::from_tags(&annotation.tags);
+
+                        for value in values {
+                            enforcement::trigger_assertion(
+                                ctx,
+                                Cow::Borrowed(&label),
+                                value.backtrace_at_location(location.clone()),
+                            );
+                        }
+                    }
+                    _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
+                        directive: annotation.directive.to_owned(),
+                        location: annotation.location.clone(),
+                    }),
+                }
+            }
         }
         StatementNode::Send(send) => channels::visit_send(ctx, send),
         StatementNode::Inc { operand, location } | StatementNode::Dec { operand, location } => {
@@ -231,7 +264,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Break { location, .. }
         | StatementNode::Return { location, .. }
         | StatementNode::Go { location, .. } => location,
-        StatementNode::Expr(expr) => return exprs::get_expr_location(expr),
+        StatementNode::Expr { expr, .. } => return exprs::get_expr_location(expr),
         StatementNode::Labeled { label, inner } => {
             let loc = get_statement_location(inner);
 
