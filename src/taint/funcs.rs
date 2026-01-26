@@ -73,7 +73,7 @@ fn visit_function_def<'a>(
             let param_backtrace = LabelBacktrace::new_root(
                 LabelBacktraceKind::FunctionParameter,
                 Label::from_single(synthetic),
-                $id.content(),
+                Some($id.content()),
                 ctx.pin($id.location()),
             );
 

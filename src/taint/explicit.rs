@@ -125,7 +125,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     explicit_backtrace = Some(LabelBacktrace::new_root(
                         LabelBacktraceKind::ExplicitAnnotation,
                         Label::from_tags(&annotation.tags),
-                        name.content(),
+                        Some(name.content()),
                         ctx.pin(location.clone()),
                     ));
                 }

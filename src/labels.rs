@@ -329,13 +329,13 @@ impl<'a> LabelBacktrace<'a> {
     pub(crate) fn new_root(
         kind: LabelBacktraceKind,
         label: Label<'a>,
-        symbol: &'a str,
+        symbol: Option<&'a str>,
         location: Pinned<Location>,
     ) -> Self {
         Self {
             kind,
             label,
-            symbol: Some(symbol),
+            symbol,
             location,
             children: vec![],
         }

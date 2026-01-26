@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use parser::{
     Location,
     ast::{ExprNode, SendNode},
@@ -6,8 +8,9 @@ use parser::{
 use super::exprs;
 use crate::{
     context::AnalysisContext,
-    labels::LabelBacktraceKind,
-    taint::explicit::LeftValue,
+    errors::AnalysisErrorKind,
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    taint::{SinkDescriptor, SinkKind, enforcement, explicit::LeftValue},
     values::{SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -29,8 +32,31 @@ pub fn visit_receive<'a>(
 }
 
 pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
-    // vvv TODO: deal with annotation
-    let explicit_backtrace = None;
+    let mut explicit_backtrace = None;
+
+    if let Some(annotation) = &node.annotation {
+        match annotation.directive {
+            "label" => {
+                explicit_backtrace = Some(LabelBacktrace::new_root(
+                    LabelBacktraceKind::ExplicitAnnotation,
+                    Label::from_tags(&annotation.tags),
+                    None,
+                    ctx.pin(node.location.clone()),
+                ));
+            }
+            "sink" => {
+                let sink = SinkDescriptor::new(SinkKind::Send, &annotation.tags);
+
+                let backtrace = exprs::get_expr_backtrace(ctx, &node.expr);
+
+                enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
+            }
+            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
+                directive: annotation.directive.to_owned(),
+                location: annotation.location.clone(),
+            }),
+        }
+    }
 
     let base = exprs::visit_single_expr(ctx, &node.expr);
 
@@ -40,7 +66,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
         LabelBacktraceKind::Send,
         base,
         false, // don't overwrite ever
-        explicit_backtrace,
+        explicit_backtrace.as_ref(),
         &node.location,
     );
 }
