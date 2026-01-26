@@ -783,11 +783,15 @@ impl<'a> Iterator for Lexer<'a> {
         }
 
         if let Some(queued) = self.queue.pop_front() {
-            self.last_token_kind = Some(queued.kind.clone());
-
-            if queued.kind == TokenKind::SemiColon {
+            if self.last_token_kind == Some(TokenKind::SemiColon) {
                 self.last_annotation.take(); // clear
             }
+            // ^ we check last token kind instead of the new `queued`'s kind
+            // since otherwise .peek()'ing on a SemiColon would trigger an
+            // annotation flush; this should defer the clearing until after
+            // any potential annotation has had time to be extracted
+
+            self.last_token_kind = Some(queued.kind.clone());
 
             return Some(Ok(queued));
         }

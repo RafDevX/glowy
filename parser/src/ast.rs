@@ -396,7 +396,10 @@ pub enum StatementNode<'a> {
     Empty {
         location: Location, // for better error messages
     },
-    Expr(ExprNode<'a>),
+    Expr {
+        expr: ExprNode<'a>,
+        annotation: Option<Box<Annotation<'a>>>,
+    },
     Send(SendNode<'a>),
     Inc {
         operand: ExprNode<'a>,
@@ -438,12 +441,6 @@ pub enum StatementNode<'a> {
         expr: ExprNode<'a>, // should be a Call, but hard for parser to ensure
         location: Location, // for better error messages
     },
-}
-
-impl<'a> From<ExprNode<'a>> for StatementNode<'a> {
-    fn from(node: ExprNode<'a>) -> Self {
-        Self::Expr(node)
-    }
 }
 
 impl<'a> From<SendNode<'a>> for StatementNode<'a> {

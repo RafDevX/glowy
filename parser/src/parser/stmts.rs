@@ -73,11 +73,20 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
 
     let lhs = parse_expression(s)?;
 
-    // this needs to be separate so we don't consume the semicolon,
-    // and to avoid using peek on the match (would require .next in every branch)
+    // this needs to be separate so we don't consume the semicolon, as well as
+    // to avoid using peek on the match (would require .next in every branch)
     if let Some(Ok(of_kind!(kind))) = s.peek() {
         if terminal_token(kind) {
-            return Ok(StatementNode::Expr(lhs));
+            let stmt = StatementNode::Expr {
+                expr: lhs,
+                annotation: s.take_last_annotation(),
+                // ^ FIXME: in some cases, e.g. if lhs is a function call, this
+                // take_last_annotation won't return anything since any
+                // annotation will have already been taken by the expression
+                // upon its parsing (sometimes desired, sometimes not)
+            };
+
+            return Ok(stmt);
         }
     }
 
@@ -318,18 +327,21 @@ mod tests {
     fn block() {
         assert_eq!(
             vec![
-                StatementNode::Expr(ExprNode::BinaryOp {
-                    kind: BinaryOpKind::Sum,
-                    left: Box::new(ExprNode::Literal(LiteralNode::Int {
-                        value: 2,
-                        location: 39..40
-                    })),
-                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                        value: 7,
-                        location: 43..44
-                    })),
-                    location: 39..44,
-                }),
+                StatementNode::Expr {
+                    expr: ExprNode::BinaryOp {
+                        kind: BinaryOpKind::Sum,
+                        left: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 2,
+                            location: 39..40
+                        })),
+                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                            value: 7,
+                            location: 43..44
+                        })),
+                        location: 39..44,
+                    },
+                    annotation: None,
+                },
                 StatementNode::Empty { location: 66..67 },
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
