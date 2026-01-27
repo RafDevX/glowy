@@ -204,6 +204,29 @@ impl Analyzer {
         self.files.insert(index, file);
     }
 
+    /// Retrieves a reference to a registered file's source code contents.
+    ///
+    /// This method allows its invoker to access the contents under analysis for
+    /// a specific file by specifying its virtual path, as long as the file has
+    /// been previously registered to the analyzer via [`Analyzer::add_file`] or
+    /// another indirect method (such as the recommended
+    /// [`Analyzer::from_directory`]).
+    ///
+    /// A return value of [`None`] indicates that no file was found matching the
+    /// specified virtual path.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// let src = analyzer.file_contents("/main.go").expect("Not yet registered");
+    /// ```
+    pub fn file_contents(&self, virtual_path: &path::Path) -> Option<&str> {
+        self.files
+            .binary_search_by_key(&virtual_path, SourceFile::virtual_path)
+            .ok()
+            .map(|index| self.files[index].contents())
+    }
+
     /// Inspects the registered files for security policy violations.
     ///
     /// This encapsulates all principal logic in Glowy. All Go source code files
