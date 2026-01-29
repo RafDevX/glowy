@@ -52,7 +52,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                 enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
             }
             _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                directive: annotation.directive.to_owned(),
+                directive: annotation.directive,
                 location: annotation.location.clone(),
             }),
         }

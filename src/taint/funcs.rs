@@ -343,7 +343,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 }
             }
             _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                directive: annotation.directive.to_owned(),
+                directive: annotation.directive,
                 location: annotation.location.clone(),
             }),
         }

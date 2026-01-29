@@ -189,7 +189,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                         }
                     }
                     _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                        directive: annotation.directive.to_owned(),
+                        directive: annotation.directive,
                         location: annotation.location.clone(),
                     }),
                 }

@@ -142,7 +142,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
                 }
                 _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                    directive: annotation.directive.to_owned(),
+                    directive: annotation.directive,
                     location: annotation.location.clone(),
                 }),
             }

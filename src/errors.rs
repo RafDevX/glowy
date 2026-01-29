@@ -74,7 +74,7 @@ pub enum AnalysisErrorKind<'a> {
     /// known to this analyzer and thus was ignored.
     UnknownAnnotationDirective {
         /// The unrecognized directive in question.
-        directive: String,
+        directive: &'a str,
         /// The offending annotation's location.
         location: Location,
     },
