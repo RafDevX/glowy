@@ -167,7 +167,7 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the extraneous return statement was found.
         location: Location,
     },
-    /// Illegal statement present after a return statement.
+    /// Illegal statement present after a block-terminating statement.
     Unreachable {
         /// Where the offending statement was found.
         location: Location,
