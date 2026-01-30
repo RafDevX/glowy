@@ -423,8 +423,11 @@ mod tests {
                     })
                 })
             },
-            parse("func(a int, f, g func() (x int, y p.A[T]), ...func(x float32) bool) func(result int)")
-                .unwrap()
+            parse(
+                "func(a int, f, g func() (x int, y p.A[T]), ...func(x float32) bool) func(result \
+                 int)"
+            )
+            .unwrap()
         )
     }
 }

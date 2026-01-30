@@ -90,8 +90,8 @@ pub fn visit_multi_exprs<'a>(
     if let [single] = nodes {
         // only one expression, which might end up being:
         // - a function call returning multiple values, e.g. `x, y := f()`; or
-        // - just a normal expression, corresponding to a single value, but in
-        //   that case visit_expr will wrap it in a vec so we're all good
+        // - just a normal expression, corresponding to a single value, but in that case
+        //   visit_expr will wrap it in a vec so we're all good
 
         visit_expr(ctx, single)
     } else {

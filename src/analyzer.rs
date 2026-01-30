@@ -218,7 +218,9 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```
-    /// let src = analyzer.file_contents("/main.go").expect("Not yet registered");
+    /// let src = analyzer
+    ///     .file_contents("/main.go")
+    ///     .expect("Not yet registered");
     /// ```
     pub fn file_contents(&self, virtual_path: &path::Path) -> Option<&str> {
         self.files
