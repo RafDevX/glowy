@@ -31,6 +31,7 @@ use std::{
 pub use analyzer::Analyzer;
 pub use files::SourceFile;
 use parser::{Location, Span};
+pub use taint::{SinkDescriptor, SinkKind};
 
 mod analyzer;
 mod context;

@@ -24,9 +24,15 @@ mod exprs;
 mod funcs;
 mod implicit;
 
+/// Structured information representing a declared sink.
+///
+/// This is a lightweight descriptor capturing the essential details of an
+/// information flow sink as declared by the security policy in effect.
 #[derive(Clone, Debug)]
 pub struct SinkDescriptor<'a> {
+    /// The type of sink in question.
     pub kind: SinkKind,
+    /// The sink's declared expected information label.
     pub label: Label<'a>,
 }
 
@@ -38,10 +44,17 @@ impl<'a> SinkDescriptor<'a> {
     }
 }
 
+/// Represents a specific type of information flow sinks.
+///
+/// This is useful to know, for example, to provide more personalized error
+/// messages when a sink's information flow invariant is violated.
 #[derive(Clone, Copy, Debug)]
 pub enum SinkKind {
+    /// A variable/constant declaration.
     Declaration,
+    /// A function call.
     Call,
+    /// A send statement.
     Send,
 }
 
