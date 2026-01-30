@@ -23,7 +23,7 @@ pub fn trigger_sink<'a>(
 
     ctx.report_error(AnalysisErrorKind::InsecureFlow {
         sink: sink.into_owned(),
-        backtrace,
+        backtrace: backtrace.expect("insecure backtrace should not be bottom"),
     });
 }
 

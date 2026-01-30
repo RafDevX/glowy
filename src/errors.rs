@@ -87,7 +87,7 @@ pub enum AnalysisErrorKind<'a> {
         /// The sink that the unauthorized information flowed into.
         sink: SinkDescriptor<'a>,
         /// The incompatible label backtrace of the value in question.
-        backtrace: Option<LabelBacktrace<'a>>,
+        backtrace: LabelBacktrace<'a>,
     },
     /// Expression with differing label from declared expectation.
     ///
