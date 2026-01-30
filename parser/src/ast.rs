@@ -92,6 +92,9 @@ pub enum TypeNode<'a> {
     Struct {
         fields: Vec<FieldDeclNode<'a>>,
     },
+    Interface {
+        elements: Vec<InterfaceElementNode<'a>>,
+    },
     Function {
         signature: Box<FunctionSignatureNode<'a>>,
     },
@@ -162,6 +165,21 @@ pub struct FunctionParamDeclNode<'a> {
     pub ids: Vec<Span<'a>>,
     pub variadic: bool, // whether type is ...T
     pub r#type: TypeNode<'a>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InterfaceElementNode<'a> {
+    Method {
+        name: Span<'a>,
+        signature: FunctionSignatureNode<'a>,
+    },
+    TypeUnion(Vec<InterfaceTypeTermNode<'a>>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InterfaceTypeTermNode<'a> {
+    Simple(TypeNode<'a>),
+    Underlying(TypeNode<'a>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

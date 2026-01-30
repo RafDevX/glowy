@@ -23,6 +23,7 @@ pub enum TokenKind {
     Percent, // %
     Caret,   // ^
     Excl,    //_!
+    Tilde,   // ~
 
     Amp,        // &
     Pipe,       // |
@@ -78,6 +79,7 @@ pub enum TokenKind {
     Go,
     If,
     Import,
+    Interface,
     Map,
     Package,
     Range,
@@ -136,6 +138,7 @@ impl<'a> Token<'a> {
             "go" => TokenKind::Go,
             "if" => TokenKind::If,
             "import" => TokenKind::Import,
+            "interface" => TokenKind::Interface,
             "map" => TokenKind::Map,
             "package" => TokenKind::Package,
             "range" => TokenKind::Range,

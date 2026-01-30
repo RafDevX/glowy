@@ -1,8 +1,8 @@
 use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
     ParsingError, TokenStream,
-    ast::{ChannelDirection, FieldDeclNode, TypeNode},
-    parser::decls,
+    ast::{ChannelDirection, FieldDeclNode, InterfaceElementNode, InterfaceTypeTermNode, TypeNode},
+    parser::{BacktrackingContext, decls},
     token::{Token, TokenKind},
 };
 
@@ -181,6 +181,75 @@ fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     Ok(TypeNode::Struct { fields })
 }
 
+fn parse_interface_method_element<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, InterfaceElementNode<'a>> {
+    let name = expect(s, TokenKind::Ident, Some("interface method element"))?.span;
+
+    let signature = decls::funcs::parse_signature(s)?;
+
+    Ok(InterfaceElementNode::Method { name, signature })
+}
+
+fn parse_interface_type_union_element<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, InterfaceElementNode<'a>> {
+    let mut terms = vec![];
+
+    loop {
+        let builder = if let Some(Ok(of_kind!(TokenKind::Tilde))) = s.peek() {
+            s.next(); // advance
+
+            InterfaceTypeTermNode::Underlying
+        } else {
+            InterfaceTypeTermNode::Simple
+        };
+
+        let r#type = parse_type(s)?;
+
+        terms.push(builder(r#type));
+
+        if let Some(Ok(of_kind!(TokenKind::Pipe))) = s.peek() {
+            s.next(); // advance
+        } else {
+            break;
+        }
+    }
+
+    Ok(InterfaceElementNode::TypeUnion(terms))
+}
+
+fn parse_interface_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+    expect(s, TokenKind::Interface, Some("interface type"))?;
+
+    expect(s, TokenKind::CurlyL, Some("interface type"))?;
+
+    let mut elements = vec![];
+
+    while !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::CurlyR)))) {
+        let mut context = BacktrackingContext::new(s);
+        let b = context.stream();
+
+        match parse_interface_method_element(b) {
+            Ok(method) => {
+                context.commit()?;
+                elements.push(method)
+            }
+            Err(_) => elements.push(parse_interface_type_union_element(s)?),
+        }
+
+        if let Some(Ok(of_kind!(TokenKind::CurlyR))) = s.peek() {
+            break;
+        } else {
+            expect(s, TokenKind::SemiColon, Some("interface type"))?;
+        }
+    }
+
+    expect(s, TokenKind::CurlyR, Some("interface type"))?;
+
+    Ok(TypeNode::Interface { elements })
+}
+
 fn parse_function_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
     expect(s, TokenKind::Func, Some("function type"))?;
 
@@ -207,6 +276,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
         Some(of_kind!(TokenKind::SquareL)) => parse_array_or_slice_type(s),
         Some(of_kind!(TokenKind::Map)) => parse_map_type(s),
         Some(of_kind!(TokenKind::Struct)) => parse_struct_type(s),
+        Some(of_kind!(TokenKind::Interface)) => parse_interface_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
         Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
         found => Err(ParsingError::UnexpectedConstruct {
