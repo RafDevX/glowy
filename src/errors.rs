@@ -325,7 +325,7 @@ impl<'a> From<ParsingError<'a>> for AnalysisErrorKind<'a> {
 /// proceed (or what merit to assign to a given set of results) depending on
 /// the high-level semantic associated with an error, without needing to delve
 /// into what in specific happened.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum AnalysisErrorCategory {
     /// Glowy analyzer not configured correctly.
     Misconfiguration,
