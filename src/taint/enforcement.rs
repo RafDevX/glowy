@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use parser::Location;
+
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
@@ -31,6 +33,7 @@ pub fn trigger_assertion<'a>(
     ctx: &mut AnalysisContext<'a>,
     expected: Cow<Label<'a>>,
     backtrace: Option<LabelBacktrace<'a>>,
+    location: Location,
 ) {
     let real = backtrace
         .as_ref()
@@ -43,5 +46,6 @@ pub fn trigger_assertion<'a>(
     ctx.report_error(AnalysisErrorKind::FalseAssertion {
         expected: expected.into_owned(),
         found: backtrace,
+        location,
     });
 }

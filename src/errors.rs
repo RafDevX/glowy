@@ -98,6 +98,8 @@ pub enum AnalysisErrorKind<'a> {
         expected: Label<'a>,
         /// The real (incompatible) label backtrace calculated for the value.
         found: Option<LabelBacktrace<'a>>,
+        /// The false assertion's location.
+        location: Location,
     },
 
     /// Declared package name different from expectation.

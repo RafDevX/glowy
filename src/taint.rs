@@ -185,6 +185,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                                 ctx,
                                 Cow::Borrowed(&label),
                                 value.backtrace_at_location(location.clone()),
+                                location.inner().clone(),
                             );
                         }
                     }
