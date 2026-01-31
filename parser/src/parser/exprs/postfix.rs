@@ -1,7 +1,7 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     ParsingError, TokenStream,
-    ast::{CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode},
+    ast::{CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode, TypeAssertionNode},
     parser::{
         BacktrackingContext, PResult, expect, of_kind,
         types::{parse_channel_type, parse_type},
@@ -144,6 +144,27 @@ fn parse_indexing<'a>(
     })
 }
 
+fn parse_type_assertion<'a>(
+    s: &mut TokenStream<'a>,
+    base: ExprNode<'a>,
+) -> PResult<'a, TypeAssertionNode<'a>> {
+    let start = expect(s, TokenKind::Period, Some("type assertion"))?;
+
+    expect(s, TokenKind::ParenL, Some("type assertion"))?;
+
+    let r#type = parse_type(s)?;
+    // ^^ this will intentionally fail if the next token is a `type` keyword
+    // (in which case this is not actually a type assertion)
+
+    expect(s, TokenKind::ParenR, Some("type assertion"))?;
+
+    Ok(TypeAssertionNode {
+        expr: Box::new(base),
+        r#type,
+        location: s.location_since(&start),
+    })
+}
+
 pub fn parse_postfix_if_exists<'a>(
     s: &mut TokenStream<'a>,
     operand: ExprNode<'a>,
@@ -152,17 +173,16 @@ pub fn parse_postfix_if_exists<'a>(
         Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?,
         Some(of_kind!(TokenKind::SquareL)) => parse_indexing(s, operand)?.into(),
         Some(of_kind!(TokenKind::Period)) => {
-            // this is only a postfix (selection) if the token after the period
-            // is an identifier, otherwise it could be something else, such as
-            // a `.(type)` in a type switch, and in that case we need to leave
-            // that part alone
+            // this might be a postfix (selection/type assertion), but we cannot
+            // know for sure at this point since it depends on the token(s)
+            // after the period -- otherwise it might be something else, such as
+            // the `.(type)` in a type switch, and in that case we need to leave
+            // that part alone to be parsed later
 
             let mut context = BacktrackingContext::new(s);
             let b = context.stream();
 
-            let original = operand.clone();
-
-            match parse_selection(b, operand) {
+            match parse_selection(b, operand.clone()) {
                 Ok(selection) => {
                     // all good, this is really a selection
                     context.commit()?;
@@ -172,7 +192,21 @@ pub fn parse_postfix_if_exists<'a>(
                 Err(ParsingError::UnexpectedTokenKind {
                     expected: TokenKind::Ident,
                     ..
-                }) => return Ok(original), // just return what we had before
+                }) => {
+                    // ok, it wasn't a selection, let's try a type assertion
+                    let mut context2 = BacktrackingContext::new(s);
+                    let b2 = context2.stream();
+
+                    match parse_type_assertion(b2, operand.clone()) {
+                        Ok(assertion) => {
+                            // all right, it was a type assertion
+                            context2.commit()?;
+
+                            assertion.into()
+                        }
+                        Err(_) => return Ok(operand), // just return what we had before
+                    }
+                }
                 Err(err) => return Err(err),
             }
         }

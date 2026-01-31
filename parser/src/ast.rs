@@ -197,7 +197,7 @@ pub enum ExprNode<'a> {
     Selection(SelectionNode<'a>),
     Indexing(IndexingNode<'a>),
     Conversion(ConversionNode<'a>),
-    // TODO: more primary expressions...
+    TypeAssertion(TypeAssertionNode<'a>),
     UnaryOp {
         kind: UnaryOpKind,
         operand: Box<ExprNode<'a>>,
@@ -278,6 +278,12 @@ impl<'a> From<IndexingNode<'a>> for ExprNode<'a> {
 impl<'a> From<ConversionNode<'a>> for ExprNode<'a> {
     fn from(node: ConversionNode<'a>) -> Self {
         Self::Conversion(node)
+    }
+}
+
+impl<'a> From<TypeAssertionNode<'a>> for ExprNode<'a> {
+    fn from(node: TypeAssertionNode<'a>) -> Self {
+        Self::TypeAssertion(node)
     }
 }
 
@@ -403,6 +409,13 @@ pub struct IndexingNode<'a> {
 pub struct ConversionNode<'a> {
     pub r#type: TypeNode<'a>,
     pub expr: Box<ExprNode<'a>>,
+    pub location: Location, // for better error messages
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeAssertionNode<'a> {
+    pub expr: Box<ExprNode<'a>>,
+    pub r#type: TypeNode<'a>,
     pub location: Location, // for better error messages
 }
 
