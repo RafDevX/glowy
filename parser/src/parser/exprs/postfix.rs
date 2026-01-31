@@ -1,7 +1,9 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
-    ParsingError, TokenStream,
-    ast::{CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode, TypeAssertionNode},
+    ParsingError, Token, TokenStream,
+    ast::{
+        CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode, SlicingNode, TypeAssertionNode,
+    },
     parser::{
         BacktrackingContext, PResult, expect, of_kind,
         types::{parse_channel_type, parse_type},
@@ -122,13 +124,59 @@ fn parse_selection<'a>(
     })
 }
 
-fn parse_indexing<'a>(
+fn parse_slicing<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
-) -> PResult<'a, IndexingNode<'a>> {
-    let open = expect(s, TokenKind::SquareL, Some("indexing expression"))?;
+    low: Option<ExprNode<'a>>,
+    start: &Token<'a>,
+) -> PResult<'a, SlicingNode<'a>> {
+    expect(s, TokenKind::Colon, Some("slicing expression"))?;
+
+    let (high, max) = if let Some(Ok(of_kind!(TokenKind::SquareR))) = s.peek() {
+        // slicing of the form a[low:] (or a[:] is low is None)
+        (None, None)
+    } else {
+        let high = parse_expression(s)?;
+
+        if let Some(Ok(of_kind!(TokenKind::SquareR))) = s.peek() {
+            // a[low:high] or a[:high]
+            (Some(high), None)
+        } else {
+            // a[low:high:max] or a[:high:max]
+            expect(s, TokenKind::Colon, Some("full slicing expression"))?;
+
+            let max = parse_expression(s)?;
+
+            (Some(high), Some(max))
+        }
+    };
+
+    expect(s, TokenKind::SquareR, Some("slicing expression"))?;
+
+    Ok(SlicingNode {
+        base: Box::new(base),
+        low: low.map(Box::new),
+        high: high.map(Box::new),
+        max: max.map(Box::new),
+        location: s.location_since(start),
+    })
+}
+
+fn parse_indexing_or_slice<'a>(
+    s: &mut TokenStream<'a>,
+    base: ExprNode<'a>,
+) -> PResult<'a, ExprNode<'a>> {
+    let open = expect(s, TokenKind::SquareL, Some("indexing/slicing expression"))?;
+
+    if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
+        return parse_slicing(s, base, None, &open).map(Into::into);
+    }
 
     let index = parse_expression(s)?;
+
+    if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
+        return parse_slicing(s, base, Some(index), &open).map(Into::into);
+    }
 
     // optional trailing comma
     if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
@@ -137,11 +185,13 @@ fn parse_indexing<'a>(
 
     expect(s, TokenKind::SquareR, Some("indexing expression"))?;
 
-    Ok(IndexingNode {
+    let indexing = IndexingNode {
         base: Box::new(base),
         index: Box::new(index),
         location: s.location_since(&open),
-    })
+    };
+
+    Ok(indexing.into())
 }
 
 fn parse_type_assertion<'a>(
@@ -171,7 +221,7 @@ pub fn parse_postfix_if_exists<'a>(
 ) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?,
-        Some(of_kind!(TokenKind::SquareL)) => parse_indexing(s, operand)?.into(),
+        Some(of_kind!(TokenKind::SquareL)) => parse_indexing_or_slice(s, operand)?,
         Some(of_kind!(TokenKind::Period)) => {
             // this might be a postfix (selection/type assertion), but we cannot
             // know for sure at this point since it depends on the token(s)

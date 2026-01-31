@@ -196,6 +196,7 @@ pub enum ExprNode<'a> {
     Make(MakeNode<'a>),
     Selection(SelectionNode<'a>),
     Indexing(IndexingNode<'a>),
+    Slicing(SlicingNode<'a>),
     Conversion(ConversionNode<'a>),
     TypeAssertion(TypeAssertionNode<'a>),
     UnaryOp {
@@ -272,6 +273,12 @@ impl<'a> From<SelectionNode<'a>> for ExprNode<'a> {
 impl<'a> From<IndexingNode<'a>> for ExprNode<'a> {
     fn from(node: IndexingNode<'a>) -> Self {
         Self::Indexing(node)
+    }
+}
+
+impl<'a> From<SlicingNode<'a>> for ExprNode<'a> {
+    fn from(node: SlicingNode<'a>) -> Self {
+        Self::Slicing(node)
     }
 }
 
@@ -402,6 +409,15 @@ pub struct SelectionNode<'a> {
 pub struct IndexingNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub index: Box<ExprNode<'a>>,
+    pub location: Location, // for better error messages
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlicingNode<'a> {
+    pub base: Box<ExprNode<'a>>,
+    pub low: Option<Box<ExprNode<'a>>>,
+    pub high: Option<Box<ExprNode<'a>>>,
+    pub max: Option<Box<ExprNode<'a>>>,
     pub location: Location, // for better error messages
 }
 
