@@ -3,6 +3,7 @@ use std::ops::Range;
 use ast::SourceFileNode;
 pub use errors::{Diagnostics, ErrorDiagnosticInfo, ParsingError};
 use lexer::Lexer;
+pub use lexer::LexingError;
 use stream::TokenStream;
 pub use token::Annotation;
 
