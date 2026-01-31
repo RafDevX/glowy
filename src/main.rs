@@ -600,9 +600,24 @@ fn get_structured_error_info<'a>(
             ],
             help: Some("check whether the specified selection base is an array/slice"),
         },
+        AnalysisErrorKind::InvalidSlicingBase { location } => StructuredErrorInfo {
+            title: "illegal or unsupported expression used as a slicing base".into(),
+            code: "G019".into(),
+            elements: vec![
+                builder
+                    .snippet()
+                    .annotation(
+                        AnnotationKind::Primary
+                            .span(location.clone())
+                            .label("this expression cannot be resolved to a valid slicing base"),
+                    )
+                    .into(),
+            ],
+            help: Some("check whether the specified slicing base is a string/array/slice"),
+        },
         AnalysisErrorKind::IllegalChannelExpression { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a channel in a send statement".into(),
-            code: "G019".into(),
+            code: "G020".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -617,7 +632,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::GoNotCall { location } => StructuredErrorInfo {
             title: "illegal `go` statement with a non-call expression".into(),
-            code: "G020".into(),
+            code: "G021".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -632,7 +647,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedFallthrough { location } => StructuredErrorInfo {
             title: "unexpected fallthrough statement".into(),
-            code: "G021".into(),
+            code: "G022".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -647,7 +662,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::DuplicateStructFieldName { duplicate } => StructuredErrorInfo {
             title: "duplicate field name in struct literal expression".into(),
-            code: "G022".into(),
+            code: "G023".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -662,7 +677,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedVoidExpression { location } => StructuredErrorInfo {
             title: "invalid void expression when a single value was expected".into(),
-            code: "G023".into(),
+            code: "G024".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -677,7 +692,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedMultiValueExpression { location } => StructuredErrorInfo {
             title: "invalid multi-value expression when a single value was expected".into(),
-            code: "G024".into(),
+            code: "G025".into(),
             elements: vec![
                 builder
                     .snippet()

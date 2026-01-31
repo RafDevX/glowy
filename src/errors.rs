@@ -239,6 +239,11 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the indexing was found.
         location: Location,
     },
+    /// Illegal or unsupported expression used as base for a slicing.
+    InvalidSlicingBase {
+        /// Where the slicing was found.
+        location: Location,
+    },
     /// Invalid or unsupported expression used as channel in a send statement.
     IllegalChannelExpression {
         /// Where the illegal expression was found.
@@ -298,6 +303,7 @@ impl AnalysisErrorKind<'_> {
             | Self::ImmutableLeftValue { .. }
             | Self::InvalidSelectionBase { .. }
             | Self::InvalidIndexingBase { .. }
+            | Self::InvalidSlicingBase { .. }
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
             | Self::UnexpectedFallthrough { .. }

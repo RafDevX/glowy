@@ -127,6 +127,17 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
+    // (complex because Simple is also sliceable but not supported here due to upgrade)
+    pub fn as_complex_sliceable(&self) -> Option<Ref<CompositeValue<'a, u64>>> {
+        self.try_upgrade_to(Value::Slice);
+
+        Ref::filter_map(self.0.borrow(), |value| match value {
+            Value::Array(composite) | Value::Slice(composite) => Some(composite),
+            _ => None,
+        })
+        .ok()
+    }
+
     pub fn as_composite(&self) -> Option<Ref<dyn CompositeValueAdapter<'a>>> {
         self.try_upgrade_to(Value::Array);
 
@@ -755,6 +766,30 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             LabelBacktraceKind::Assignment,
             at_location,
         );
+    }
+}
+
+impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
+    pub fn slice_const(
+        &self,
+        low: Option<K>,
+        high: Option<K>,
+        at_location: Pinned<Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        let children: Vec<_> = self
+            .r#const
+            .iter()
+            .filter(|(k, _)| low.as_ref().is_none_or(|l| *k >= l))
+            .filter(|(k, _)| high.as_ref().is_none_or(|h| *k < h))
+            .filter_map(|(_, v)| v.backtrace_at_location(at_location.clone()))
+            .chain(self.r#dyn.clone())
+            .collect();
+
+        LabelBacktrace::fold(&children, LabelBacktraceKind::Expression, None, at_location)
+    }
+
+    pub fn slice_dyn(&self, at_location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+        self.backtrace_at_location(at_location)
     }
 }
 
