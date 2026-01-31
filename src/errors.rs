@@ -254,6 +254,16 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
+    /// Unsupported `defer` statement executed immediately.
+    ///
+    /// This analyzer version does not support `defer` statements and so just
+    /// considers the provided function call as executing immediately (rather
+    /// than at the end of the current function), which can have unexpected
+    /// implications regarding its side-effects.
+    DeferNotDeferred {
+        /// Where the statement was found.
+        location: Location,
+    },
     /// Illegal `fallthrough` statement in unexpected location.
     ///
     /// Fallthrough statements are only permitted as the last statement of an
@@ -306,6 +316,7 @@ impl AnalysisErrorKind<'_> {
             | Self::InvalidSlicingBase { .. }
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
+            | Self::DeferNotDeferred { .. }
             | Self::UnexpectedFallthrough { .. }
             | Self::DuplicateStructFieldName { .. }
             | Self::UnexpectedVoidExpression { .. }

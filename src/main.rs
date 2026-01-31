@@ -645,9 +645,24 @@ fn get_structured_error_info<'a>(
             ],
             help: Some("check whether the specified expression is a function call"),
         },
+        AnalysisErrorKind::DeferNotDeferred { location } => StructuredErrorInfo {
+            title: "unsupported `defer` statement was not deferred".into(),
+            code: "G022".into(),
+            elements: vec![
+                builder
+                    .snippet()
+                    .annotation(
+                        AnnotationKind::Primary
+                            .span(location.clone())
+                            .label("this expression was considered to execute immediately"),
+                    )
+                    .into(),
+            ],
+            help: Some("this analyzer version does not support `defer` statements"),
+        },
         AnalysisErrorKind::UnexpectedFallthrough { location } => StructuredErrorInfo {
             title: "unexpected fallthrough statement".into(),
-            code: "G022".into(),
+            code: "G023".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -662,7 +677,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::DuplicateStructFieldName { duplicate } => StructuredErrorInfo {
             title: "duplicate field name in struct literal expression".into(),
-            code: "G023".into(),
+            code: "G024".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -677,7 +692,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedVoidExpression { location } => StructuredErrorInfo {
             title: "invalid void expression when a single value was expected".into(),
-            code: "G024".into(),
+            code: "G025".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -692,7 +707,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedMultiValueExpression { location } => StructuredErrorInfo {
             title: "invalid multi-value expression when a single value was expected".into(),
-            code: "G025".into(),
+            code: "G026".into(),
             elements: vec![
                 builder
                     .snippet()

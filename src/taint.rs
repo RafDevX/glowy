@@ -250,6 +250,20 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                 });
             }
         },
+        StatementNode::Defer { expr, location } => {
+            // FIXME: defer statements are currently not supported (the
+            // expression is just visited normally instead of later), since
+            // there is currently a very tight coupling between 'pre-processing'
+            // a call (e.g., visiting function value and arguments, checking if
+            // everything is valid, determining when a built-in was called) and
+            // actually committing the call (realizing the outcome according to
+            // the provided arguments)
+            ctx.report_error(AnalysisErrorKind::DeferNotDeferred {
+                location: location.clone(),
+            });
+
+            exprs::visit_expr(ctx, expr);
+        }
     }
 }
 
@@ -277,7 +291,8 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Continue { location, .. }
         | StatementNode::Break { location, .. }
         | StatementNode::Return { location, .. }
-        | StatementNode::Go { location, .. } => location,
+        | StatementNode::Go { location, .. }
+        | StatementNode::Defer { location, .. } => location,
         StatementNode::Expr { expr, .. } => return exprs::get_expr_location(expr),
         StatementNode::Labeled { label, inner } => {
             let loc = get_statement_location(inner);
@@ -302,8 +317,8 @@ fn get_statement_location(node: &StatementNode) -> Location {
     location.clone()
     // it would be preferable if this function could return &'a Location, but
     // this doesn't work for expressions, since get_expr_location returns a
-    // Location and we can't a reference to it (since this function owns it).
-    // in addition, block needs to create a new location altogether
+    // Location and we can't rt a reference to it (since this function owns it).
+    // in addition, block & labeled need to create a new location altogether
 }
 
 fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
