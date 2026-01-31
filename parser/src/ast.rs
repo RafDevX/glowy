@@ -488,6 +488,10 @@ pub enum StatementNode<'a> {
         expr: ExprNode<'a>, // should be a Call, but hard for parser to ensure
         location: Location, // for better error messages
     },
+    Defer {
+        expr: ExprNode<'a>, // should be a Call, but hard for parser to ensure
+        location: Location, // for better error messages
+    },
 }
 
 impl<'a> From<SendNode<'a>> for StatementNode<'a> {
