@@ -154,7 +154,10 @@ fn error_to_group<'a>(
         .id_url(format!(
             "{}/errors/enum.AnalysisErrorKind.html#variant.{}",
             DOCS_ROOT_URL,
-            format!("{:?}", error.kind).split(' ').next().unwrap()
+            format!("{:?}", error.kind)
+                .split(|ch: char| !ch.is_alphabetic())
+                .next()
+                .unwrap()
         ))
         .elements(info.elements.into_iter().chain(help_msg))
 }
