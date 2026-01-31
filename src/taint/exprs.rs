@@ -29,6 +29,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         ExprNode::Selection(selection) => visit_selection(ctx, selection),
         ExprNode::Indexing(indexing) => visit_indexing(ctx, indexing),
         ExprNode::Conversion(conversion) => visit_single_expr(ctx, &conversion.expr),
+        ExprNode::TypeAssertion(assertion) => visit_single_expr(ctx, &assertion.expr),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
@@ -503,6 +504,7 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
         ExprNode::Selection(selection) => selection.location.clone(),
         ExprNode::Indexing(indexing) => indexing.location.clone(),
         ExprNode::Conversion(conversion) => conversion.location.clone(),
+        ExprNode::TypeAssertion(assertion) => assertion.location.clone(),
         ExprNode::UnaryOp { location, .. } | ExprNode::BinaryOp { location, .. } => {
             location.clone()
         }
