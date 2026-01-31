@@ -91,7 +91,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
-    pub fn allows_implicit_semicolon(&self) -> bool {
+    pub(crate) fn allows_implicit_semicolon(&self) -> bool {
         matches!(
             self,
             TokenKind::Ident
@@ -119,11 +119,11 @@ pub struct Token<'a> {
 }
 
 impl<'a> Token<'a> {
-    pub fn new(kind: TokenKind, span: Span<'a>) -> Self {
+    pub(crate) fn new(kind: TokenKind, span: Span<'a>) -> Self {
         Self { kind, span }
     }
 
-    pub fn from_identifier_or_keyword(span: Span<'a>) -> Self {
+    pub(crate) fn from_identifier_or_keyword(span: Span<'a>) -> Self {
         let kind = match span.content {
             "break" => TokenKind::Break,
             "case" => TokenKind::Case,

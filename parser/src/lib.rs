@@ -5,7 +5,7 @@ pub use errors::{Diagnostics, ErrorDiagnosticInfo, ParsingError};
 use lexer::Lexer;
 pub use lexer::LexingError;
 use stream::TokenStream;
-pub use token::Annotation;
+pub use token::{Annotation, Token, TokenKind};
 
 use crate::parser::parse_source_file;
 
