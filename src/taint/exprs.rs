@@ -74,7 +74,12 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
 
         value.try_singularize_simple_mobius();
 
-        return value;
+        return if let Some(expandable) = value.as_expandable() {
+            // collapse into single value
+            expandable.primary()
+        } else {
+            value
+        };
     }
 
     ValueRef::new_bottom()
