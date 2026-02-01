@@ -368,6 +368,11 @@ impl<'a> LeftValue<'a> for Span<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
+        if simple && self.content() == "_" {
+            // blank identifier, so we just ignore this
+            return;
+        }
+
         let Some(symbol) = exprs::resolve_operand_name(ctx, *self, None) else {
             // no symbol found, but error already reported
             return;
