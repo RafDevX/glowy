@@ -264,6 +264,15 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
+    /// Invalid or unsupported communications case in `select` statement.
+    ///
+    /// If specified (i.e., not `default`), a case within a `select` may only
+    /// take the form of a send or a receive statement, with any other
+    /// morphology resulting in this error due to being illegal Go code.
+    IllegalSelectCase {
+        /// Where the communications case was found.
+        location: Location,
+    },
     /// Illegal `fallthrough` statement in unexpected location.
     ///
     /// Fallthrough statements are only permitted as the last statement of an
@@ -317,6 +326,7 @@ impl AnalysisErrorKind<'_> {
             | Self::IllegalChannelExpression { .. }
             | Self::GoNotCall { .. }
             | Self::DeferNotDeferred { .. }
+            | Self::IllegalSelectCase { .. }
             | Self::UnexpectedFallthrough { .. }
             | Self::DuplicateStructFieldName { .. }
             | Self::UnexpectedVoidExpression { .. }

@@ -4,8 +4,8 @@ use parser::{
     Location, Span,
     ast::{
         AssignmentNode, BlockNode, DeclNode, ExprNode, ExprSwitchNode, ForNode, FunctionDeclNode,
-        IfNode, ImportSpecNode, SendNode, ShortVarDeclNode, SourceFileNode, StatementNode,
-        SwitchNode, TypeSwitchNode,
+        IfNode, ImportSpecNode, SelectNode, SendNode, ShortVarDeclNode, SourceFileNode,
+        StatementNode, SwitchNode, TypeSwitchNode,
     },
 };
 
@@ -226,6 +226,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => implicit::visit_if(ctx, r#if),
         StatementNode::For(r#for) => implicit::visit_for(ctx, r#for),
+        StatementNode::Select(select) => channels::visit_select(ctx, select),
         StatementNode::Switch(switch) => implicit::visit_switch(ctx, switch),
         StatementNode::Fallthrough { location } => {
             // if we reached it in visit_statement, it's not supposed to be here
@@ -283,6 +284,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
         )
         | StatementNode::If(IfNode { location, .. })
         | StatementNode::For(ForNode { location, .. })
+        | StatementNode::Select(SelectNode { location, .. })
         | StatementNode::Switch(
             SwitchNode::Expr(ExprSwitchNode { location, .. })
             | SwitchNode::Type(TypeSwitchNode { location, .. }),
