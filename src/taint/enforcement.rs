@@ -41,6 +41,7 @@ pub fn trigger_assertion<'a>(
 
     if *real == *expected {
         // all good! value's label matches the assertion
+        return;
     }
 
     ctx.report_error(AnalysisErrorKind::FalseAssertion {
