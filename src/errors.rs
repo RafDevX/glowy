@@ -249,28 +249,8 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the illegal expression was found.
         location: Location,
     },
-    /// Unsupported usage of a `goto` statement.
-    ///
-    /// This analyzer version does not support `goto` statement and so simply
-    /// ignores them completely, which in most cases should be a rather
-    /// unreasonable assumption and so undoubtedly puts into question the
-    /// analysis result's credibility.
-    GotoNotSupported {
-        /// Where the statement was found.
-        location: Location,
-    },
     /// Illegal `go` statement with a non-call expression.
     GoNotCall {
-        /// Where the statement was found.
-        location: Location,
-    },
-    /// Unsupported `defer` statement executed immediately.
-    ///
-    /// This analyzer version does not support `defer` statements and so just
-    /// considers the provided function call as executing immediately (rather
-    /// than at the end of the current function), which can have unexpected
-    /// implications regarding its side-effects.
-    DeferNotDeferred {
         /// Where the statement was found.
         location: Location,
     },
@@ -307,6 +287,27 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the expression was found.
         location: Location,
     },
+
+    /// Unsupported usage of a `goto` statement.
+    ///
+    /// This analyzer version does not support `goto` statement and so simply
+    /// ignores them completely, which in most cases should be a rather
+    /// unreasonable assumption and so undoubtedly puts into question the
+    /// analysis result's credibility.
+    GotoNotSupported {
+        /// Where the statement was found.
+        location: Location,
+    },
+    /// Unsupported `defer` statement executed immediately.
+    ///
+    /// This analyzer version does not support `defer` statements and so just
+    /// considers the provided function call as executing immediately (rather
+    /// than at the end of the current function), which can have unexpected
+    /// implications regarding its side-effects.
+    DeferNotDeferred {
+        /// Where the statement was found.
+        location: Location,
+    },
 }
 
 impl AnalysisErrorKind<'_> {
@@ -334,14 +335,15 @@ impl AnalysisErrorKind<'_> {
             | Self::InvalidIndexingBase { .. }
             | Self::InvalidSlicingBase { .. }
             | Self::IllegalChannelExpression { .. }
-            | Self::GotoNotSupported { .. }
             | Self::GoNotCall { .. }
-            | Self::DeferNotDeferred { .. }
             | Self::IllegalSelectCase { .. }
             | Self::UnexpectedFallthrough { .. }
             | Self::DuplicateStructFieldName { .. }
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
+            Self::GotoNotSupported { .. } | Self::DeferNotDeferred { .. } => {
+                AnalysisErrorCategory::UnsupportedGo
+            }
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
@@ -371,6 +373,8 @@ pub enum AnalysisErrorCategory {
     UnrecognizedFeature,
     /// Incorrect or malformed Go construct.
     InvalidGo,
+    /// Go construct recognized but not supported by this analyzer version.
+    UnsupportedGo,
     /// Security fault or potential vulnerability detected in the program.
     SecurityPolicyViolation,
 }

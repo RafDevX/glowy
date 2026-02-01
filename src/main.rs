@@ -206,7 +206,7 @@ fn get_structured_error_info<'a>(
             location,
         } => StructuredErrorInfo {
             title: format!("unknown Glowy annotation directive `{directive}`").into(),
-            code: "U001".into(),
+            code: "V001".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -630,24 +630,9 @@ fn get_structured_error_info<'a>(
             ],
             help: Some("check whether the specified expression is a channel"),
         },
-        AnalysisErrorKind::GotoNotSupported { location } => StructuredErrorInfo {
-            title: "unsupported `goto` statement was ignored".into(),
-            code: "G021".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this statement was not considered to affect control flow"),
-                    )
-                    .into(),
-            ],
-            help: Some("this analyzer version does not support `goto` statements"),
-        },
         AnalysisErrorKind::GoNotCall { location } => StructuredErrorInfo {
             title: "illegal `go` statement with a non-call expression".into(),
-            code: "G022".into(),
+            code: "G021".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -660,24 +645,9 @@ fn get_structured_error_info<'a>(
             ],
             help: Some("check whether the specified expression is a function call"),
         },
-        AnalysisErrorKind::DeferNotDeferred { location } => StructuredErrorInfo {
-            title: "unsupported `defer` statement was not deferred".into(),
-            code: "G023".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression was considered to execute immediately"),
-                    )
-                    .into(),
-            ],
-            help: Some("this analyzer version does not support `defer` statements"),
-        },
         AnalysisErrorKind::IllegalSelectCase { location } => StructuredErrorInfo {
             title: "illegal case in `select` statement".into(),
-            code: "G024".into(),
+            code: "G022".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -692,7 +662,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedFallthrough { location } => StructuredErrorInfo {
             title: "unexpected fallthrough statement".into(),
-            code: "G025".into(),
+            code: "G023".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -707,7 +677,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::DuplicateStructFieldName { duplicate } => StructuredErrorInfo {
             title: "duplicate field name in struct literal expression".into(),
-            code: "G026".into(),
+            code: "G024".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -722,7 +692,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedVoidExpression { location } => StructuredErrorInfo {
             title: "invalid void expression when a single value was expected".into(),
-            code: "G027".into(),
+            code: "G025".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -737,7 +707,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedMultiValueExpression { location } => StructuredErrorInfo {
             title: "invalid multi-value expression when a single value was expected".into(),
-            code: "G028".into(),
+            code: "G026".into(),
             elements: vec![
                 builder
                     .snippet()
@@ -747,6 +717,37 @@ fn get_structured_error_info<'a>(
                     .into(),
             ],
             help: Some("ensure the expression's value-arity is compatible with where it is used"),
+        },
+
+        AnalysisErrorKind::GotoNotSupported { location } => StructuredErrorInfo {
+            title: "unsupported `goto` statement was ignored".into(),
+            code: "U001".into(),
+            elements: vec![
+                builder
+                    .snippet()
+                    .annotation(
+                        AnnotationKind::Primary
+                            .span(location.clone())
+                            .label("this statement was not considered to affect control flow"),
+                    )
+                    .into(),
+            ],
+            help: Some("this analyzer version does not support `goto` statements"),
+        },
+        AnalysisErrorKind::DeferNotDeferred { location } => StructuredErrorInfo {
+            title: "unsupported `defer` statement was not deferred".into(),
+            code: "U002".into(),
+            elements: vec![
+                builder
+                    .snippet()
+                    .annotation(
+                        AnnotationKind::Primary
+                            .span(location.clone())
+                            .label("this expression was considered to execute immediately"),
+                    )
+                    .into(),
+            ],
+            help: Some("this analyzer version does not support `defer` statements"),
         },
     }
 }
@@ -758,9 +759,9 @@ fn error_category_to_level(category: AnalysisErrorCategory) -> annotate_snippets
     match category {
         AnalysisErrorCategory::Misconfiguration
         | AnalysisErrorCategory::SecurityPolicyViolation => annotate_snippets::Level::ERROR,
-        AnalysisErrorCategory::UnrecognizedFeature | AnalysisErrorCategory::InvalidGo => {
-            annotate_snippets::Level::WARNING
-        }
+        AnalysisErrorCategory::UnrecognizedFeature
+        | AnalysisErrorCategory::InvalidGo
+        | AnalysisErrorCategory::UnsupportedGo => annotate_snippets::Level::WARNING,
     }
 }
 
