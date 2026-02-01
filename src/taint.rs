@@ -34,13 +34,19 @@ pub struct SinkDescriptor<'a> {
     pub kind: SinkKind,
     /// The sink's declared expected information label.
     pub label: Label<'a>,
+    /// Where the sink was found.
+    pub location: Location,
 }
 
 impl<'a> SinkDescriptor<'a> {
-    fn new(kind: SinkKind, tags: &[&'a str]) -> Self {
+    fn new(kind: SinkKind, tags: &[&'a str], location: Location) -> Self {
         let label = Label::from_tags(tags);
 
-        Self { kind, label }
+        Self {
+            kind,
+            label,
+            location,
+        }
     }
 }
 

@@ -859,6 +859,11 @@ fn label_backtrace_to_snippets<'a>(
                 "map element `delete` operation results in operand having label {}",
                 backtrace.label()
             ),
+            LabelBacktraceKind::EnforcementAggregation => format!(
+                // in theory this will never be shown (will always be root)
+                "the composition of all security factors results in label {}",
+                backtrace.label()
+            ),
         };
 
         (AnnotationKind::Context, label)

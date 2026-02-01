@@ -48,7 +48,11 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                 ));
             }
             "sink" => {
-                let sink = SinkDescriptor::new(SinkKind::Send, &annotation.tags);
+                let sink = SinkDescriptor::new(
+                    SinkKind::Send,
+                    &annotation.tags,
+                    node.location.clone(), // statement, not annotation
+                );
 
                 let backtrace = exprs::get_expr_backtrace(ctx, &node.expr);
 

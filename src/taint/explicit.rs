@@ -130,7 +130,11 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     ));
                 }
                 "sink" => {
-                    let sink = SinkDescriptor::new(SinkKind::Declaration, &annotation.tags);
+                    let sink = SinkDescriptor::new(
+                        SinkKind::Declaration,
+                        &annotation.tags,
+                        location.clone(), // spec, not annotation
+                    );
 
                     // FIXME: this location is probably wrong for what we want
                     // to report; i.e. we want to highlight a specific expr

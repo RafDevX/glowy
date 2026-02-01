@@ -598,4 +598,6 @@ pub enum LabelBacktraceKind {
     ChannelClose,
     /// Removal of a map element via the `delete` built-in.
     MapElementDelete,
+    /// Composite label derived from all factors relevant to flow evaluation.
+    EnforcementAggregation,
 }

@@ -334,7 +334,11 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     if let Some(annotation) = &node.annotation {
         match annotation.directive {
             "sink" => {
-                let sink = SinkDescriptor::new(SinkKind::Call, &annotation.tags);
+                let sink = SinkDescriptor::new(
+                    SinkKind::Call,
+                    &annotation.tags,
+                    node.location.clone(), // call, not annotation
+                );
 
                 for arg in &node.args {
                     let backtrace = exprs::get_expr_backtrace(ctx, arg);
