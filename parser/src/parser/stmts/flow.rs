@@ -497,6 +497,17 @@ pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Statem
     })
 }
 
+pub fn parse_goto_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
+    let start = expect(s, TokenKind::Goto, Some("goto statement"))?;
+
+    let label = expect(s, TokenKind::Ident, Some("goto statement"))?.span;
+
+    Ok(StatementNode::Goto {
+        label,
+        location: s.location_since(&start),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

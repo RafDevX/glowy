@@ -485,6 +485,10 @@ pub enum StatementNode<'a> {
         exprs: Vec<ExprNode<'a>>,
         location: Location, // for better error messages
     },
+    Goto {
+        label: Span<'a>,
+        location: Location, // for better error messages
+    },
     Go {
         expr: ExprNode<'a>, // should be a Call, but hard for parser to ensure
         location: Location, // for better error messages
