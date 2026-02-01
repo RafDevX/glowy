@@ -400,18 +400,17 @@ impl<'a> Scope<'a> {
         let mut scope = Self::new(None);
 
         macro_rules! predeclared_constant {
-            ($scope:expr, $id:expr, $value:expr) => {
-                $scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
+            ($id:expr, $value:expr) => {
+                scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
             };
-            ($scope:expr, $id:expr) => {
-                predeclared_constant!($scope, $id, ValueRef::new_bottom())
+            ($id:expr) => {
+                predeclared_constant!($id, ValueRef::new_bottom())
             };
         }
 
         macro_rules! predeclared_function {
-            ($scope:expr, $id:expr, $params:expr, $variadic:expr, $n_returned:expr) => {
+            ($id:expr, $params:expr, $variadic:expr, $n_returned:expr) => {
                 predeclared_constant!(
-                    $scope,
                     $id,
                     ValueRef::from(Value::Function(FunctionValue::new_builtin(
                         $id,
@@ -423,21 +422,21 @@ impl<'a> Scope<'a> {
             };
         }
 
-        predeclared_constant!(scope, "true");
-        predeclared_constant!(scope, "false");
-        predeclared_constant!(scope, "iota");
-        predeclared_constant!(scope, "nil"); // not really a constant, but close enough
+        predeclared_constant!("true");
+        predeclared_constant!("false");
+        predeclared_constant!("iota");
+        predeclared_constant!("nil"); // not really a constant, but close enough
 
-        predeclared_function!(scope, "len", &["s"], false, 1);
-        predeclared_function!(scope, "cap", &["s"], false, 1);
-        predeclared_function!(scope, "min", &["n"], true, 1);
-        predeclared_function!(scope, "max", &["n"], true, 1);
-        predeclared_function!(scope, "panic", &["value"], false, 0);
-        predeclared_function!(scope, "recover", &[], false, 1);
+        predeclared_function!("len", &["s"], false, 1);
+        predeclared_function!("cap", &["s"], false, 1);
+        predeclared_function!("min", &["n"], true, 1);
+        predeclared_function!("max", &["n"], true, 1);
+        predeclared_function!("panic", &["value"], false, 0);
+        predeclared_function!("recover", &[], false, 1);
 
-        predeclared_function!(scope, "complex", &["realPart", "imaginaryPart"], false, 1);
-        predeclared_function!(scope, "real", &["c"], false, 1);
-        predeclared_function!(scope, "imag", &["c"], false, 1);
+        predeclared_function!("complex", &["realPart", "imaginaryPart"], false, 1);
+        predeclared_function!("real", &["c"], false, 1);
+        predeclared_function!("imag", &["c"], false, 1);
 
         scope
     }
