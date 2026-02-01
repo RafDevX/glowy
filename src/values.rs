@@ -449,6 +449,10 @@ impl<'a> ExpandableValue<'a> {
         Self { primary, secondary }
     }
 
+    pub fn primary(&self) -> ValueRef<'a> {
+        self.primary.clone()
+    }
+
     pub fn expand(&self) -> Vec<ValueRef<'a>> {
         iter::once(self.primary.clone())
             .chain(self.secondary.iter().cloned())

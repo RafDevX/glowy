@@ -1,6 +1,6 @@
 use parser::{
     Location, Span,
-    ast::{ExprNode, LiteralNode, UnaryOpKind},
+    ast::{ExprNode, LiteralNode, TypeAssertionNode, UnaryOpKind},
 };
 
 use super::{channels, funcs};
@@ -9,7 +9,10 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::SymbolRef,
-    values::{BacktraceContainer, PackageRefValue, SelfAwareBacktraceContainer, Value, ValueRef},
+    values::{
+        BacktraceContainer, ExpandableValue, PackageRefValue, SelfAwareBacktraceContainer, Value,
+        ValueRef,
+    },
 };
 
 mod component;
@@ -25,7 +28,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         ExprNode::Indexing(indexing) => component::visit_indexing(ctx, indexing),
         ExprNode::Slicing(slicing) => component::visit_slicing(ctx, slicing),
         ExprNode::Conversion(conversion) => visit_single_expr(ctx, &conversion.expr),
-        ExprNode::TypeAssertion(assertion) => visit_single_expr(ctx, &assertion.expr),
+        ExprNode::TypeAssertion(assertion) => visit_type_assertion(ctx, assertion),
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
@@ -188,6 +191,24 @@ pub fn resolve_operand_name<'a>(
     }
 
     symbol
+}
+
+fn visit_type_assertion<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &TypeAssertionNode<'a>,
+) -> ValueRef<'a> {
+    let value = visit_single_expr(ctx, &node.expr);
+
+    // a type assertion is expandable into 2 values: the first is just the value
+    // itself (assuming the assertion is true), and the second is a boolean
+    // indicating whether the assertion succeeded (essentially the same value
+    // but downgraded to simplest shape to remove any complexity)
+    let backtrace = value.backtrace_at_location(ctx.pin(node.location.clone()));
+
+    ValueRef::from(Value::Expandable(ExpandableValue::new(
+        value,
+        vec![ValueRef::from(backtrace)],
+    )))
 }
 
 pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
