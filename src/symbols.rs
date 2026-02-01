@@ -422,6 +422,16 @@ impl<'a> Scope<'a> {
             };
         }
 
+        macro_rules! predeclared_type {
+            ($id:expr) => {
+                // we treat predeclared types as functions for now because the
+                // only context it should matter for them to be defined is when
+                // using their names in conversions (which should be almost
+                // equivalent to invocations of blackbox functions)
+                predeclared_function!($id, &["v"], false, 1)
+            };
+        }
+
         predeclared_constant!("true");
         predeclared_constant!("false");
         predeclared_constant!("iota");
@@ -437,6 +447,29 @@ impl<'a> Scope<'a> {
         predeclared_function!("complex", &["realPart", "imaginaryPart"], false, 1);
         predeclared_function!("real", &["c"], false, 1);
         predeclared_function!("imag", &["c"], false, 1);
+
+        predeclared_type!("any");
+        predeclared_type!("bool");
+        predeclared_type!("byte");
+        predeclared_type!("comparable");
+        predeclared_type!("complex64");
+        predeclared_type!("complex128");
+        predeclared_type!("error");
+        predeclared_type!("float32");
+        predeclared_type!("float64");
+        predeclared_type!("int");
+        predeclared_type!("int8");
+        predeclared_type!("int16");
+        predeclared_type!("int32");
+        predeclared_type!("int64");
+        predeclared_type!("rune");
+        predeclared_type!("string");
+        predeclared_type!("uint");
+        predeclared_type!("uint8");
+        predeclared_type!("uint16");
+        predeclared_type!("uint32");
+        predeclared_type!("uint64");
+        predeclared_type!("uintptr");
 
         scope
     }
