@@ -468,6 +468,7 @@ pub enum StatementNode<'a> {
     Decl(DeclNode<'a>),
     If(IfNode<'a>),
     For(ForNode<'a>),
+    Select(SelectNode<'a>),
     Switch(SwitchNode<'a>),
     Fallthrough {
         location: Location, // for better error messages
@@ -527,6 +528,12 @@ impl<'a> From<IfNode<'a>> for StatementNode<'a> {
 impl<'a> From<ForNode<'a>> for StatementNode<'a> {
     fn from(node: ForNode<'a>) -> Self {
         Self::For(node)
+    }
+}
+
+impl<'a> From<SelectNode<'a>> for StatementNode<'a> {
+    fn from(node: SelectNode<'a>) -> Self {
+        Self::Select(node)
     }
 }
 
@@ -631,6 +638,18 @@ pub enum ForRangeNode<'a> {
     None {
         range_expr: ExprNode<'a>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectNode<'a> {
+    pub clauses: Vec<SelectClauseNode<'a>>,
+    pub location: Location,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectClauseNode<'a> {
+    pub case: Option<StatementNode<'a>>, // None means `default`
+    pub body: Vec<StatementNode<'a>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

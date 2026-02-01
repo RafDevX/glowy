@@ -1,5 +1,5 @@
 use self::{
-    concur::{parse_defer_statement, parse_go_statement},
+    concur::{parse_defer_statement, parse_go_statement, parse_select_statement},
     flow::{
         parse_break_statement, parse_continue_statement, parse_for_statement, parse_if_statement,
         parse_return_statement, parse_switch_statement,
@@ -216,6 +216,7 @@ fn parse_statement<'a>(
         }
         Some(of_kind!(TokenKind::If)) if allow_non_simple => parse_if_statement(s)?.into(),
         Some(of_kind!(TokenKind::For)) if allow_non_simple => parse_for_statement(s)?.into(),
+        Some(of_kind!(TokenKind::Select)) if allow_non_simple => parse_select_statement(s)?.into(),
         Some(of_kind!(TokenKind::Switch)) if allow_non_simple => parse_switch_statement(s)?.into(),
         Some(t @ of_kind!(TokenKind::Fallthrough)) if allow_non_simple => {
             s.next(); // advance
@@ -280,6 +281,7 @@ pub fn terminal_token(kind: &TokenKind) -> bool {
         TokenKind::SemiColon // i++; <---
         | TokenKind::CurlyL // for ...; i++ { <---
         | TokenKind::CurlyR // { ...; i++ } <---
+        | TokenKind::Colon // select { case x = <-c: <---
     )
 }
 

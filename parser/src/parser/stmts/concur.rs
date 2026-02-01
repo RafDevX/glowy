@@ -1,7 +1,7 @@
 use crate::{
     TokenStream,
-    ast::StatementNode,
-    parser::{PResult, expect, exprs::parse_expression},
+    ast::{SelectClauseNode, SelectNode, StatementNode},
+    parser::{PResult, expect, exprs::parse_expression, of_kind},
     token::TokenKind,
 };
 
@@ -36,5 +36,50 @@ pub fn parse_defer_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stateme
     Ok(StatementNode::Defer {
         expr,
         location: s.location_since(&token),
+    })
+}
+
+pub fn parse_select_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, SelectNode<'a>> {
+    let start = expect(s, TokenKind::Select, Some("select statement"))?;
+
+    expect(s, TokenKind::CurlyL, Some("select statement"))?;
+
+    let mut clauses = vec![];
+
+    loop {
+        let case = match s.peek().cloned().transpose()? {
+            Some(of_kind!(TokenKind::CurlyR)) => break,
+            Some(of_kind!(TokenKind::Default)) => {
+                s.next(); // advance
+
+                None
+            }
+            _ => {
+                expect(s, TokenKind::Case, Some("select clause"))?;
+
+                // technically we should only allow send or receive statements
+                // here, but it would be much more awkward to actually worry
+                // about that, so we'll leave any validation to the invoker
+                Some(super::parse_statement(s, false)?)
+            }
+        };
+
+        expect(s, TokenKind::Colon, Some("select clause"))?;
+
+        let body = super::parse_statements_until(s, |t| {
+            matches!(
+                t.kind,
+                TokenKind::CurlyR | TokenKind::Case | TokenKind::Default
+            )
+        })?;
+
+        clauses.push(SelectClauseNode { case, body })
+    }
+
+    expect(s, TokenKind::CurlyR, Some("select statement"))?;
+
+    Ok(SelectNode {
+        clauses,
+        location: s.location_since(&start),
     })
 }
