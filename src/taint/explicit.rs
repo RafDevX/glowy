@@ -148,9 +148,12 @@ pub fn visit_raw_binding_decl_spec<'a>(
             }
         };
 
-        let symbol = Symbol::new_ref(ctx.pin(name), mutable, ValueRef::new_bottom());
-        // ^ we don't need to use ValueRef::uninitialized_from_type here, since
-        // we know an initialization expression does exist
+        let symbol = Symbol::new_ref(
+            ctx.pin(name),
+            true, // we initially always set the symbol as mutable
+            ValueRef::new_bottom(),
+        );
+        let symbol2 = symbol.clone(); // for later use if needed
 
         if short {
             // declare manually to hold errors until we're sure
@@ -188,6 +191,12 @@ pub fn visit_raw_binding_decl_spec<'a>(
             explicit_backtrace.as_ref(),
             location,
         );
+
+        // now, after assigning, we can set the symbol to immutable if that was
+        // the case (before we created it as mutable to allow the assignment)
+        if !mutable {
+            symbol2.borrow_mut().mark_immutable();
+        }
     }
 
     if !redeclarations.is_empty() && !any_new {

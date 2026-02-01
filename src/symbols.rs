@@ -558,6 +558,10 @@ impl<'a> Symbol<'a> {
         self.mutable
     }
 
+    pub fn mark_immutable(&mut self) {
+        self.mutable = false;
+    }
+
     pub fn value(&self) -> ValueRef<'a> {
         self.value.clone()
     }
