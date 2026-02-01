@@ -10,10 +10,12 @@ use std::{
 ///
 /// # Example Usage
 ///
-/// ```
+/// ```no_run
 /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
 /// let file = glowy::SourceFile::read_from_disk("/main.go", "./proj/main.go")?;
 /// analyzer.add_file(file);
+///
+/// # Ok::<(), std::io::Error>(())
 /// ```
 pub struct SourceFile {
     virtual_path: PathBuf, // relative to module base
@@ -35,8 +37,8 @@ impl SourceFile {
     /// # Example Usage
     ///
     /// ```
-    /// let file1 = glowy::SourceFile::new("/main.go", "package something;")
-    /// let file2 = glowy::SourceFile::new("/auth/oidc.go", "package auth;")
+    /// let file1 = glowy::SourceFile::new("/main.go", "package something;");
+    /// let file2 = glowy::SourceFile::new("/auth/oidc.go", "package auth;");
     /// ```
     ///
     /// # See Also
@@ -80,11 +82,13 @@ impl SourceFile {
     ///
     /// # Example usage
     ///
-    /// ```
+    /// ```no_run
     /// let file = glowy::SourceFile::read_from_disk(
     ///     "/auth/oidc.go",       // virtual path (relative to module base)
     ///     "./proj/auth/oidc.go", // real path on disk (relative to cwd)
     /// )?;
+    ///
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn read_from_disk<V: Into<PathBuf>, R: AsRef<Path>>(
         virtual_path: V,

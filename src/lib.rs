@@ -14,10 +14,12 @@
 //!
 //! ## Example Usage
 //!
-//! ```
+//! ```no_run
 //! let mut analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
 //!
 //! let result = analyzer.analyze();
+//! #
+//! # Ok::<(), std::io::Error>(())
 //! ```
 
 #![warn(missing_docs)]

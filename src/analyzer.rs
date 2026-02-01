@@ -23,10 +23,12 @@ use crate::{
 ///
 /// # Example Usage
 ///
-/// ```
+/// ```no_run
 /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
 ///
 /// let result = analyzer.analyze();
+///
+/// # Ok::<(), std::io::Error>(())
 /// ```
 pub struct Analyzer {
     /// Go module path base, such as `example.com/company-name/proj`
@@ -87,8 +89,10 @@ impl Analyzer {
     ///
     /// # Example Usage
     ///
-    /// ```
+    /// ```no_run
     /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+    ///
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn from_directory<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let mut analyzer = match Self::from_go_mod(path.as_ref().join("go.mod"))? {
@@ -121,8 +125,10 @@ impl Analyzer {
     ///
     /// # Example Usage
     ///
-    /// ```
-    /// let mut analyzer = glowy::Analyzer::from_go_mod("./proj/go.mod")?;
+    /// ```no_run
+    /// let analyzer = glowy::Analyzer::from_go_mod("./proj/go.mod")?;
+    ///
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn from_go_mod<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let file = fs::File::open(path)?;
@@ -185,9 +191,13 @@ impl Analyzer {
     ///
     /// # Example Usage
     ///
-    /// ```
+    /// ```no_run
+    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    ///
     /// let file = glowy::SourceFile::read_from_disk("/main.go", "./proj/main.go")?;
     /// analyzer.add_file(file);
+    ///
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     ///
     /// # See Also
@@ -218,6 +228,10 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```
+    /// # let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    /// # let file = glowy::SourceFile::new("/main.go", "package blueberry;");
+    /// # analyzer.add_file(file);
+    /// #
     /// let src = analyzer
     ///     .file_contents("/main.go")
     ///     .expect("Not yet registered");
@@ -249,7 +263,7 @@ impl Analyzer {
     ///
     /// # Example Usage
     ///
-    /// ```
+    /// ```no_run
     /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
     ///
     /// if let Err(errors) = analyzer.analyze() {
@@ -257,6 +271,8 @@ impl Analyzer {
     ///         // interpret results
     ///     }
     /// }
+    ///
+    /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
         let mut parsed = BTreeMap::new();
