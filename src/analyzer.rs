@@ -222,9 +222,9 @@ impl Analyzer {
     ///     .file_contents("/main.go")
     ///     .expect("Not yet registered");
     /// ```
-    pub fn file_contents(&self, virtual_path: &path::Path) -> Option<&str> {
+    pub fn file_contents<P: AsRef<path::Path>>(&self, virtual_path: P) -> Option<&str> {
         self.files
-            .binary_search_by_key(&virtual_path, SourceFile::virtual_path)
+            .binary_search_by_key(&virtual_path.as_ref(), SourceFile::virtual_path)
             .ok()
             .map(|index| self.files[index].contents())
     }
