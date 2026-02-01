@@ -249,6 +249,16 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the illegal expression was found.
         location: Location,
     },
+    /// Unsupported usage of a `goto` statement.
+    ///
+    /// This analyzer version does not support `goto` statement and so simply
+    /// ignores them completely, which in most cases should be a rather
+    /// unreasonable assumption and so undoubtedly puts into question the
+    /// analysis result's credibility.
+    GotoNotSupported {
+        /// Where the statement was found.
+        location: Location,
+    },
     /// Illegal `go` statement with a non-call expression.
     GoNotCall {
         /// Where the statement was found.
@@ -324,6 +334,7 @@ impl AnalysisErrorKind<'_> {
             | Self::InvalidIndexingBase { .. }
             | Self::InvalidSlicingBase { .. }
             | Self::IllegalChannelExpression { .. }
+            | Self::GotoNotSupported { .. }
             | Self::GoNotCall { .. }
             | Self::DeferNotDeferred { .. }
             | Self::IllegalSelectCase { .. }

@@ -239,6 +239,14 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             implicit::visit_continue_break(ctx, *label, location)
         }
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
+        StatementNode::Goto { location, .. } => {
+            // FIXME: goto statements are currently not supported since they can
+            // almost completely break the control flow and are extremely rare
+            // in real-life Go programs (hopefully)
+            ctx.report_error(AnalysisErrorKind::GotoNotSupported {
+                location: location.clone(),
+            });
+        }
         StatementNode::Go { expr, location } => match expr {
             ExprNode::Call(call) => {
                 // for our purposes, a `go` statement is functionally equivalent
@@ -293,6 +301,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Continue { location, .. }
         | StatementNode::Break { location, .. }
         | StatementNode::Return { location, .. }
+        | StatementNode::Goto { location, .. }
         | StatementNode::Go { location, .. }
         | StatementNode::Defer { location, .. } => location,
         StatementNode::Expr { expr, .. } => return exprs::get_expr_location(expr),
