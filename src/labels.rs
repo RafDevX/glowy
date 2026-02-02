@@ -157,6 +157,16 @@ impl<'a> Label<'a> {
     ///
     /// This returns [`Label::Bottom`] if the slice is empty, or otherwise a
     /// [`Label::Tags`] with all elements converted to a [`LabelTag::Concrete`].
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// assert_eq!(Label::from_tags(&["dog", "cat"]).to_string(), "{cat, dog}");
+    ///
+    /// assert_eq!(Label::from_tags(&[]), Label::Bottom);
+    /// ```
     pub fn from_tags(tags: &[&'a str]) -> Self {
         if tags.is_empty() {
             Self::Bottom
@@ -172,6 +182,15 @@ impl<'a> Label<'a> {
     ///
     /// This is a convenience method particularly useful for dealing with a
     /// [`LabelTag::Synthetic`]. For other uses, prefer [`Label::from_tags`].
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::{Label, LabelTag};
+    /// #
+    /// let tag = LabelTag::Concrete("secret");
+    /// assert_eq!(Label::from_single(tag).to_string(), "{secret}");
+    /// ```
     pub fn from_single(tag: LabelTag<'a>) -> Self {
         let mut set = BTreeSet::new();
         set.insert(tag);
@@ -183,6 +202,17 @@ impl<'a> Label<'a> {
     ///
     /// For example, `{a, b, c}` intersected with `{b, d}` yields
     /// `{a, b, c, d}`.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let x = Label::from_tags(&["alice", "charlie"]);
+    /// let y = Label::from_tags(&["bob", "david", "eve"]);
+    ///
+    /// assert_eq!(x.union(&y).to_string(), "{alice, bob, charlie, david, eve}");
+    /// ```
     pub fn union(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, l) | (l, Self::Bottom) => l.clone(),
@@ -194,6 +224,20 @@ impl<'a> Label<'a> {
     ///
     /// For example, `{a, b, c}` intersected with `{b, d, e}` yields `{b}`.
     /// If the intersection is null, [`Label::Bottom`] is returned as expected.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let x = Label::from_tags(&["alice", "bob", "frank"]);
+    /// let y = Label::from_tags(&["bob", "charlie", "david"]);
+    /// let z = Label::from_tags(&["alice", "eve", "frank"]);
+    ///
+    /// assert_eq!(x.intersect(&y).to_string(), "{bob}");
+    /// assert_eq!(x.intersect(&z).to_string(), "{alice, frank}");
+    /// assert_eq!(y.intersect(&z).to_string(), "{}");
+    /// ```
     pub fn intersect(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, _) | (_, Self::Bottom) => Self::Bottom,
@@ -213,6 +257,20 @@ impl<'a> Label<'a> {
     ///
     /// For example, `{a, c}` subtracted from `{a, b, c}` yields `{b}`.
     /// If the difference is null, [`Label::Bottom`] is returned as expected.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let x = Label::from_tags(&["alice", "bob", "charlie", "david"]);
+    /// let y = Label::from_tags(&["alice", "david"]);
+    ///
+    /// assert_eq!(x.difference(&y).to_string(), "{bob, charlie}");
+    /// assert_eq!(y.difference(&x).to_string(), "{}");
+    /// assert_eq!(x.difference(&Label::Bottom), x);
+    /// assert_eq!(Label::Bottom.difference(&x), Label::Bottom);
+    /// ```
     pub fn difference(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, _) => Self::Bottom,
@@ -299,11 +357,11 @@ impl fmt::Display for Label<'_> {
 /// been assigned a specific [`Label`], particularly in the sense of what
 /// operations occurred and compounded to result in a final label.
 ///
-/// The following invariants are strictly enforced:
-///     1. No [`LabelBacktrace`] ever has a label [`Label::Bottom`];
+/// The following invariants are strictly enforced: \
+///     1. No [`LabelBacktrace`] ever has a label [`Label::Bottom`]; \
 ///     2. Children's labels are always a subset of their parent's label (e.g.,
 ///     a backtrace `{blue, violet}` can have a child `{blue}` and another
-///     `{violet}`, but never a `{yellow}` child); and
+///     `{violet}`, but never a `{yellow}` child); and \
 ///     3. All children's labels are always disjoint (e.g., if a first child
 ///     has label `{blue, violet}`, a second child can never have label
 ///     `{blue, yellow}` -- it will instead be trimmed to just `{yellow}` to
