@@ -127,7 +127,8 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    // (complex because Simple is also sliceable but not supported here due to upgrade)
+    // (complex because Simple is technically also sliceable but not supported
+    // here due to the upgrade that would change it to a complex shape)
     pub fn as_complex_sliceable(&self) -> Option<Ref<CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 
