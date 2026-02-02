@@ -161,7 +161,8 @@ impl<'a> Label<'a> {
         if tags.is_empty() {
             Self::Bottom
         } else {
-            let set = BTreeSet::from_iter(tags.iter().map(|tag| LabelTag::Concrete(tag)));
+            let iter = tags.iter().copied().map(LabelTag::Concrete);
+            let set = BTreeSet::from_iter(iter);
 
             Self::Tags(set)
         }
