@@ -28,6 +28,7 @@ pub struct Span<'a> {
 }
 
 impl<'a> Span<'a> {
+    #[must_use]
     pub fn new(content: &'a str, offset: usize, line: usize) -> Self {
         Self {
             content,
@@ -36,10 +37,12 @@ impl<'a> Span<'a> {
         }
     }
 
+    #[must_use]
     pub fn content(&self) -> &'a str {
         self.content
     }
 
+    #[must_use]
     pub fn location(&self) -> Range<usize> {
         self.offset..(self.offset + self.content.len())
     }

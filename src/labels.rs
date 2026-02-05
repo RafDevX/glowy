@@ -191,6 +191,7 @@ impl<'a> Label<'a> {
     /// let tag = LabelTag::Concrete("secret");
     /// assert_eq!(Label::from_single(tag).to_string(), "{secret}");
     /// ```
+    #[must_use]
     pub fn from_single(tag: LabelTag<'a>) -> Self {
         let mut set = BTreeSet::new();
         set.insert(tag);
@@ -213,6 +214,7 @@ impl<'a> Label<'a> {
     ///
     /// assert_eq!(x.union(&y).to_string(), "{alice, bob, charlie, david, eve}");
     /// ```
+    #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, l) | (l, Self::Bottom) => l.clone(),
@@ -238,6 +240,7 @@ impl<'a> Label<'a> {
     /// assert_eq!(x.intersect(&z).to_string(), "{alice, frank}");
     /// assert_eq!(y.intersect(&z).to_string(), "{}");
     /// ```
+    #[must_use]
     pub fn intersect(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, _) | (_, Self::Bottom) => Self::Bottom,
@@ -271,6 +274,7 @@ impl<'a> Label<'a> {
     /// assert_eq!(x.difference(&Label::Bottom), x);
     /// assert_eq!(Label::Bottom.difference(&x), Label::Bottom);
     /// ```
+    #[must_use]
     pub fn difference(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, _) => Self::Bottom,
@@ -597,26 +601,31 @@ impl<'a> LabelBacktrace<'a> {
     }
 
     /// Returns the kind of operation that caused the label assignment.
+    #[must_use]
     pub fn kind(&self) -> &LabelBacktraceKind {
         &self.kind
     }
 
     /// Returns the label in question described by this backtrace.
+    #[must_use]
     pub fn label(&self) -> &Label<'a> {
         &self.label
     }
 
     /// Returns the name of the symbol with this label, if any/applicable.
+    #[must_use]
     pub fn symbol(&self) -> Option<&'a str> {
         self.symbol
     }
 
     /// Returns the location where the operation took place.
+    #[must_use]
     pub fn location(&self) -> &Pinned<Location> {
         &self.location
     }
 
     /// Returns the backtraces that compound to yield and justify this one.
+    #[must_use]
     pub fn children(&self) -> &[Self] {
         &self.children
     }

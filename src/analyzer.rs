@@ -58,6 +58,7 @@ impl Analyzer {
     /// It's often more convenient to instead use the
     /// [`Analyzer::from_directory`] utility or [`Analyzer::from_go_mod`], which
     /// are helpful wrappers around this method.
+    #[must_use]
     pub fn new(module_base: &str) -> Self {
         Self {
             module_base: module_base.to_owned(),

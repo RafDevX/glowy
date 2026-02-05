@@ -99,6 +99,7 @@ impl<'a> Pinned<Span<'a>> {
     /// This method is simply a convenient short-hand for invoking
     /// [`Span::content`] on the result of [`Pinned::inner`] when the inner type
     /// is [`Span`].
+    #[must_use]
     pub fn content(&self) -> &'a str {
         self.inner().content()
     }
@@ -107,6 +108,7 @@ impl<'a> Pinned<Span<'a>> {
     ///
     /// This method uses [`Span::location`] to construct a new [`Pinned`] with
     /// inner type [`Location`]. The same virtual file path is used (cloned).
+    #[must_use]
     pub fn pinned_location(&self) -> Pinned<Location> {
         Pinned {
             virtual_file_path: self.virtual_file_path.clone(),

@@ -146,6 +146,7 @@ pub enum FunctionResultNode<'a> {
 }
 
 impl FunctionResultNode<'_> {
+    #[must_use]
     pub fn len(&self) -> usize {
         match self {
             Self::None => 0,
@@ -155,6 +156,7 @@ impl FunctionResultNode<'_> {
     }
 
     // make clippy happy (clippy::len_without_is_empty)
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::None)
     }

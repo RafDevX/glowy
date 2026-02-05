@@ -105,6 +105,7 @@ impl SourceFile {
     /// For example, `/auth/oidc.go` or `/main.go` correspond to specific Go
     /// files within the module hierarchy, but do not (necessarily) match the
     /// files' real paths on disk.
+    #[must_use]
     pub fn virtual_path(&self) -> &Path {
         &self.virtual_path
     }
@@ -114,6 +115,7 @@ impl SourceFile {
     /// Note that each file is only read from the filesystem at most one time
     /// (if ever), so any changes to some underlying real file on disk will not
     /// be reflected here.
+    #[must_use]
     pub fn contents(&self) -> &str {
         &self.contents
     }
