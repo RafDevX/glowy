@@ -42,12 +42,12 @@ pub enum DeclNode<'a> {
         specs: Vec<TypeDeclSpecNode<'a>>,
         location: Location,
     },
-    Function(FunctionDeclNode<'a>),
+    Function(Box<FunctionDeclNode<'a>>),
 }
 
 impl<'a> From<FunctionDeclNode<'a>> for DeclNode<'a> {
     fn from(node: FunctionDeclNode<'a>) -> Self {
-        Self::Function(node)
+        Self::Function(Box::new(node))
     }
 }
 

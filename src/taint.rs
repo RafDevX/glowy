@@ -3,9 +3,9 @@ use std::borrow::Cow;
 use parser::{
     Location, Span,
     ast::{
-        AssignmentNode, BlockNode, DeclNode, ExprNode, ExprSwitchNode, ForNode, FunctionDeclNode,
-        IfNode, ImportSpecNode, SelectNode, SendNode, ShortVarDeclNode, SourceFileNode,
-        StatementNode, SwitchNode, TypeSwitchNode,
+        AssignmentNode, BlockNode, DeclNode, ExprNode, ExprSwitchNode, ForNode, IfNode,
+        ImportSpecNode, SelectNode, SendNode, ShortVarDeclNode, SourceFileNode, StatementNode,
+        SwitchNode, TypeSwitchNode,
     },
 };
 
@@ -293,8 +293,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Decl(
             DeclNode::Const { location, .. }
             | DeclNode::Var { location, .. }
-            | DeclNode::Type { location, .. }
-            | DeclNode::Function(FunctionDeclNode { location, .. }),
+            | DeclNode::Type { location, .. },
         )
         | StatementNode::If(IfNode { location, .. })
         | StatementNode::For(ForNode { location, .. })
@@ -310,6 +309,7 @@ fn get_statement_location(node: &StatementNode) -> Location {
         | StatementNode::Goto { location, .. }
         | StatementNode::Go { location, .. }
         | StatementNode::Defer { location, .. } => location,
+        StatementNode::Decl(DeclNode::Function(function)) => &function.location,
         StatementNode::Expr { expr, .. } => return exprs::get_expr_location(expr),
         StatementNode::Labeled { label, inner } => {
             let loc = get_statement_location(inner);
