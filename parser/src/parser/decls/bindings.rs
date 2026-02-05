@@ -7,35 +7,35 @@ use crate::{
 
 // bindings is our term for constants and variables,
 // since their declarations look the same, allowing code reuse
-
+#[derive(Clone, Copy)]
 enum BindingKind {
     Const,
     Var,
 }
 
 impl BindingKind {
-    fn keyword(&self) -> TokenKind {
+    fn keyword(self) -> TokenKind {
         match self {
             Self::Const => TokenKind::Const,
             Self::Var => TokenKind::Var,
         }
     }
 
-    fn decl_context(&self) -> &'static str {
+    fn decl_context(self) -> &'static str {
         match self {
             Self::Const => "constant declaration",
             Self::Var => "variable declaration",
         }
     }
 
-    fn spec_construct(&self) -> &'static str {
+    fn spec_construct(self) -> &'static str {
         match self {
             Self::Const => "a constant specification",
             Self::Var => "a variable specification",
         }
     }
 
-    fn spec_context(&self) -> &'static str {
+    fn spec_context(self) -> &'static str {
         match self {
             Self::Const => "constant specification",
             Self::Var => "variable specification",
@@ -43,7 +43,7 @@ impl BindingKind {
     }
 
     fn build_node<'a>(
-        &self,
+        self,
         specs: Vec<BindingDeclSpecNode<'a>>,
         location: Location,
         annotation: Option<Box<Annotation<'a>>>,
@@ -65,7 +65,7 @@ impl BindingKind {
 
 fn parse_spec<'a>(
     s: &mut TokenStream<'a>,
-    kind: &BindingKind,
+    kind: BindingKind,
 ) -> PResult<'a, BindingDeclSpecNode<'a>> {
     let mut ids = vec![];
     let mut r#type = None;
@@ -117,7 +117,7 @@ fn parse_spec<'a>(
 
 fn parse_specs_list<'a>(
     s: &mut TokenStream<'a>,
-    kind: &BindingKind,
+    kind: BindingKind,
 ) -> PResult<'a, Vec<BindingDeclSpecNode<'a>>> {
     expect(s, TokenKind::ParenL, Some(kind.decl_context()))?;
 
@@ -156,8 +156,8 @@ fn parse_binding_decl<'a>(s: &mut TokenStream<'a>, kind: BindingKind) -> PResult
     let annotation = s.take_last_annotation();
 
     let specs = match s.peek().cloned().transpose()? {
-        Some(of_kind!(TokenKind::Ident)) => vec![parse_spec(s, &kind)?],
-        Some(of_kind!(TokenKind::ParenL)) => parse_specs_list(s, &kind)?,
+        Some(of_kind!(TokenKind::Ident)) => vec![parse_spec(s, kind)?],
+        Some(of_kind!(TokenKind::ParenL)) => parse_specs_list(s, kind)?,
         found => {
             return Err(ParsingError::UnexpectedConstruct {
                 expected: kind.spec_construct(),

@@ -7,7 +7,7 @@ use crate::{
 
 // adapted from https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 
-fn infix_binding_power(op: &BinaryOpKind) -> (u8, u8) {
+fn infix_binding_power(op: BinaryOpKind) -> (u8, u8) {
     // (low, high) means left-to-right associativity
     match op {
         BinaryOpKind::LogicalOr => (1, 2),
@@ -58,7 +58,7 @@ pub fn parse_expression_bp<'a>(s: &mut TokenStream<'a>, min_bp: u8) -> PResult<'
             Err(_) => break,
         };
 
-        let (l_bp, r_bp) = infix_binding_power(&op);
+        let (l_bp, r_bp) = infix_binding_power(op);
         if l_bp < min_bp {
             // operator to the left of this one is stronger than us,
             // so we need to let the lhs go to be with them...
