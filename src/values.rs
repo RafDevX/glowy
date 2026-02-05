@@ -87,7 +87,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub fn as_expandable(&self) -> Option<Ref<ExpandableValue<'a>>> {
+    pub fn as_expandable(&self) -> Option<Ref<'_, ExpandableValue<'a>>> {
         self.try_upgrade_to(Value::Expandable);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -97,7 +97,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_mobius(&self) -> Option<Ref<MobiusValue<'a>>> {
+    pub fn as_mobius(&self) -> Option<Ref<'_, MobiusValue<'a>>> {
         self.try_upgrade_to(Value::Mobius);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -107,7 +107,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_package_ref(&self) -> Option<Ref<PackageRefValue<'a>>> {
+    pub fn as_package_ref(&self) -> Option<Ref<'_, PackageRefValue<'a>>> {
         // no coercion because there's no 'blank' package ref
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -117,7 +117,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_slice_mut(&mut self) -> Option<RefMut<CompositeValue<'a, u64>>> {
+    pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
@@ -129,7 +129,7 @@ impl<'a> ValueRef<'a> {
 
     // (complex because Simple is technically also sliceable but not supported
     // here due to the upgrade that would change it to a complex shape)
-    pub fn as_complex_sliceable(&self) -> Option<Ref<CompositeValue<'a, u64>>> {
+    pub fn as_complex_sliceable(&self) -> Option<Ref<'_, CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -139,7 +139,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_composite(&self) -> Option<Ref<dyn CompositeValueAdapter<'a>>> {
+    pub fn as_composite(&self) -> Option<Ref<'_, dyn CompositeValueAdapter<'a>>> {
         self.try_upgrade_to(Value::Array);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -152,7 +152,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_composite_mut(&mut self) -> Option<RefMut<dyn CompositeValueAdapter<'a>>> {
+    pub fn as_composite_mut(&mut self) -> Option<RefMut<'_, dyn CompositeValueAdapter<'a>>> {
         self.try_upgrade_to(Value::Array);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
@@ -165,7 +165,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_struct(&self) -> Option<Ref<CompositeValue<'a, String>>> {
+    pub fn as_struct(&self) -> Option<Ref<'_, CompositeValue<'a, String>>> {
         self.try_upgrade_to(Value::Struct);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -175,7 +175,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_struct_mut(&self) -> Option<RefMut<CompositeValue<'a, String>>> {
+    pub fn as_struct_mut(&self) -> Option<RefMut<'_, CompositeValue<'a, String>>> {
         self.try_upgrade_to(Value::Struct);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {
@@ -185,7 +185,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_function(&self) -> Option<Ref<FunctionValue<'a>>> {
+    pub fn as_function(&self) -> Option<Ref<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
         Ref::filter_map(self.0.borrow(), |value| match value {
@@ -195,7 +195,7 @@ impl<'a> ValueRef<'a> {
         .ok()
     }
 
-    pub fn as_function_mut(&mut self) -> Option<RefMut<FunctionValue<'a>>> {
+    pub fn as_function_mut(&mut self) -> Option<RefMut<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
         RefMut::filter_map(self.0.borrow_mut(), |value| match value {

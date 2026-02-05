@@ -45,7 +45,7 @@ impl<'a> Span<'a> {
     }
 }
 
-pub fn parse(input: &str) -> Result<SourceFileNode, ParsingError> {
+pub fn parse(input: &str) -> Result<SourceFileNode<'_>, ParsingError<'_>> {
     let mut stream = TokenStream::new(Lexer::new(input));
 
     parse_source_file(&mut stream)
