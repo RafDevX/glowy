@@ -1,3 +1,7 @@
+// Clippy lint configuration
+#![warn(clippy::all, clippy::pedantic)]
+#![allow(clippy::option_option, clippy::missing_errors_doc)]
+
 use std::ops::Range;
 
 use ast::SourceFileNode;

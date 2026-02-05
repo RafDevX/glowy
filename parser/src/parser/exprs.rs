@@ -26,6 +26,7 @@ fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprN
 
     let operand = expect(b, TokenKind::Ident, Some("identifier first expression"))?;
 
+    #[allow(clippy::if_not_else)] // code is arguably more readable like this
     let expr = if !matches!(b.peek(), Some(Ok(of_kind!(TokenKind::CurlyL)))) {
         // ok, we got it right, this was for sure an operand name
         context.commit()?;
@@ -485,6 +486,6 @@ where
 {
     Ok(
         parse_expressions_list(s, |token| (!cond(token)).then_some(()).ok_or(()))?
-            .map(|(exprs, _)| exprs),
+            .map(|(exprs, ())| exprs),
     )
 }

@@ -7,7 +7,7 @@ use crate::{
 
 fn parse_spec<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ImportSpecNode<'a>> {
     let identifier = match s.peek() {
-        Some(Ok(of_kind!(TokenKind::Ident))) | Some(Ok(of_kind!(TokenKind::Period))) => {
+        Some(Ok(of_kind!(TokenKind::Ident | TokenKind::Period))) => {
             let token = s.next().unwrap()?; // advance
             Some(token)
         }
@@ -42,9 +42,7 @@ fn parse_specs_list<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<ImportSpecNo
     loop {
         match s.peek().cloned().transpose()? {
             Some(of_kind!(TokenKind::ParenR)) => break,
-            Some(of_kind!(TokenKind::Ident))
-            | Some(of_kind!(TokenKind::Period))
-            | Some(of_kind!(TokenKind::String(_))) => {
+            Some(of_kind!(TokenKind::Ident | TokenKind::Period | TokenKind::String(_))) => {
                 specs.push(parse_spec(s)?);
 
                 // spec allows omitting semicolon before closing (
@@ -60,7 +58,7 @@ fn parse_specs_list<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<ImportSpecNo
                     found,
                 });
             }
-        };
+        }
     }
 
     s.next(); // consume )
@@ -73,9 +71,9 @@ pub fn try_parse_import<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Option<Impor
         s.next(); // advance
 
         let specs = match s.peek().cloned().transpose()? {
-            Some(of_kind!(TokenKind::Ident))
-            | Some(of_kind!(TokenKind::Period))
-            | Some(of_kind!(TokenKind::String(_))) => vec![parse_spec(s)?],
+            Some(of_kind!(TokenKind::Ident | TokenKind::Period | TokenKind::String(_))) => {
+                vec![parse_spec(s)?]
+            }
             Some(of_kind!(TokenKind::ParenL)) => parse_specs_list(s)?,
             found => {
                 return Err(ParsingError::UnexpectedConstruct {

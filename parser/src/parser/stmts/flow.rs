@@ -64,6 +64,7 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
     })
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'a>> {
     let beginning = expect(s, TokenKind::For, Some("for loop"))?;
 
@@ -202,7 +203,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
                                 expect_comma = true;
                             }
                             Some(of_kind!(TokenKind::Comma)) if expect_comma => {
-                                expect_comma = false
+                                expect_comma = false;
                             }
                             Some(of_kind!(TokenKind::ColonAssign)) if !lhs.is_empty() => break,
                             found => {
@@ -450,8 +451,7 @@ pub fn parse_continue_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stat
         .peek()
         .cloned()
         .transpose()?
-        .map(|t| terminal_token(&t.kind))
-        .unwrap_or(true)
+        .is_none_or(|t| terminal_token(&t.kind))
     // ^ eof is arguably terminal
     {
         None
@@ -471,8 +471,7 @@ pub fn parse_break_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stateme
         .peek()
         .cloned()
         .transpose()?
-        .map(|t| terminal_token(&t.kind))
-        .unwrap_or(true)
+        .is_none_or(|t| terminal_token(&t.kind))
     // ^ eof is arguably terminal
     {
         None
@@ -529,6 +528,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn if_chain() {
         assert_eq!(
             vec![StatementNode::If(IfNode {
@@ -635,7 +635,7 @@ mod tests {
                 ",
             )
             .unwrap(),
-        )
+        );
     }
 
     #[test]
@@ -700,10 +700,11 @@ mod tests {
                 ",
             )
             .unwrap(),
-        )
+        );
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn switch_expr() {
         assert_eq!(
             vec![
@@ -902,10 +903,11 @@ mod tests {
         "
             )
             .unwrap()
-        )
+        );
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn switch_type() {
         assert_eq!(
             vec![
@@ -1045,10 +1047,11 @@ mod tests {
                 ",
             )
             .unwrap(),
-        )
+        );
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn for_clause() {
         assert_eq!(
             vec![
@@ -1160,10 +1163,11 @@ mod tests {
         "
             )
             .unwrap()
-        )
+        );
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn for_range() {
         assert_eq!(
             vec![
@@ -1210,10 +1214,11 @@ mod tests {
         "
             )
             .unwrap()
-        )
+        );
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn for_continue_break() {
         assert_eq!(
             vec![StatementNode::Labeled {
@@ -1324,6 +1329,6 @@ mod tests {
         "
             )
             .unwrap()
-        )
+        );
     }
 }

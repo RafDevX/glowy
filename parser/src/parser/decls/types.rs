@@ -37,9 +37,9 @@ pub fn parse_type_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, DeclNode<'a>>
             if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
                 s.next(); // advance
                 break;
-            } else {
-                expect(s, TokenKind::SemiColon, Some("type declaration specs list"))?;
             }
+
+            expect(s, TokenKind::SemiColon, Some("type declaration specs list"))?;
 
             // need to check for ) again after ;
             if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {

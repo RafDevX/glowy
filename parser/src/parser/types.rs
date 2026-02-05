@@ -233,16 +233,16 @@ fn parse_interface_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>
         match parse_interface_method_element(b) {
             Ok(method) => {
                 context.commit()?;
-                elements.push(method)
+                elements.push(method);
             }
             Err(_) => elements.push(parse_interface_type_union_element(s)?),
         }
 
         if let Some(Ok(of_kind!(TokenKind::CurlyR))) = s.peek() {
             break;
-        } else {
-            expect(s, TokenKind::SemiColon, Some("interface type"))?;
         }
+
+        expect(s, TokenKind::SemiColon, Some("interface type"))?;
     }
 
     expect(s, TokenKind::CurlyR, Some("interface type"))?;
@@ -356,7 +356,7 @@ mod tests {
                 direction: None
             },
             parse("chan (<-chan (chan<- pkg.member[chan T, K]))").unwrap()
-        )
+        );
     }
 
     #[test]
@@ -403,7 +403,7 @@ mod tests {
                 })
             },
             parse("[3][4][2 * N + 1]pkg.member[T]").unwrap()
-        )
+        );
     }
 
     #[test]
@@ -498,6 +498,6 @@ mod tests {
                  int)"
             )
             .unwrap()
-        )
+        );
     }
 }

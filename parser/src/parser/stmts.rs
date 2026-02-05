@@ -172,10 +172,10 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
                         expected: "an identifier or an expression",
                         found,
                     });
-                } else {
-                    b.next(); // advance
-                    was_comma = true;
                 }
+
+                b.next(); // advance
+                was_comma = true;
             }
             Some(of_kind!(TokenKind::ColonAssign)) if !was_comma => break, // short var decl!
 
@@ -328,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn block() {
         assert_eq!(
             vec![
@@ -443,6 +444,6 @@ mod tests {
             "
             )
             .unwrap()
-        )
+        );
     }
 }

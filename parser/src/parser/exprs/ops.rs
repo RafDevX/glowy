@@ -53,9 +53,8 @@ pub fn parse_expression_bp<'a>(s: &mut TokenStream<'a>, min_bp: u8) -> PResult<'
     let mut lhs = parse_unary(s)?;
 
     while let Some(token) = s.peek().cloned().transpose()? {
-        let op = match token.kind.try_into() {
-            Ok(kind) => kind,
-            Err(_) => break,
+        let Ok(op) = token.kind.try_into() else {
+            break;
         };
 
         let (l_bp, r_bp) = infix_binding_power(op);

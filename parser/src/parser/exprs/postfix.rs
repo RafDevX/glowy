@@ -342,7 +342,7 @@ mod tests {
                 annotation: None
             }),
             parse("(abc.def + 14)(21 + 7 * -9, 'a'...)()").unwrap()
-        )
+        );
     }
 
     #[test]
@@ -381,7 +381,7 @@ mod tests {
                 annotation: None
             }),
             parse("(abc.def + 14)[k + 2,]()").unwrap()
-        )
+        );
     }
 
     #[test]
@@ -453,6 +453,6 @@ mod tests {
             }),
             // TODO: ... g(<-chan u32), when supported
             parse("p.f(chan int, '\\a', g(chan<- u32, h(chan<- pkg.T[E, x.F]))...)").unwrap()
-        )
+        );
     }
 }

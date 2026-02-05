@@ -73,7 +73,7 @@ pub fn parse_select_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Select
             )
         })?;
 
-        clauses.push(SelectClauseNode { case, body })
+        clauses.push(SelectClauseNode { case, body });
     }
 
     expect(s, TokenKind::CurlyR, Some("select statement"))?;

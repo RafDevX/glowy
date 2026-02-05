@@ -34,11 +34,12 @@ fn expect<'a>(
 ) -> PResult<'a, Token<'a>> {
     let found = if let Some(token) = s.next() {
         let token = token?;
+
         if token.kind == kind {
             return Ok(token);
-        } else {
-            Some(token)
         }
+
+        Some(token)
     } else {
         // eof
         None

@@ -102,7 +102,7 @@ fn parse_spec<'a>(
                     context: Some("list of identifiers"),
                 });
             }
-        };
+        }
 
         break;
     }
@@ -143,7 +143,7 @@ fn parse_specs_list<'a>(
                     found,
                 });
             }
-        };
+        }
     }
 
     s.next(); // consume )

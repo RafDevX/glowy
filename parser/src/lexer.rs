@@ -161,8 +161,7 @@ impl<'a> Lexer<'a> {
                     && self
                         .last_token_kind
                         .as_ref()
-                        .map(TokenKind::allows_implicit_semicolon)
-                        .unwrap_or(false)
+                        .is_some_and(TokenKind::allows_implicit_semicolon)
                 {
                     // newline is guaranteed single-byte, no panic
                     let span = Span::new(&view[..1], original_offset, original_line);
@@ -215,7 +214,7 @@ impl<'a> Lexer<'a> {
     where
         F: Fn(char) -> bool,
     {
-        self.accumulate_while((), |ch, _, _| cond(ch)).0
+        self.accumulate_while((), |ch, (), _| cond(ch)).0
     }
 
     fn read_n<const N: usize>(&mut self) -> Span<'a> {
@@ -291,6 +290,7 @@ impl<'a> Lexer<'a> {
         Token::from_identifier_or_keyword(ident)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn number_literal(&mut self) -> LResult<'a> {
         enum NumberLexMode {
             Unknown,
@@ -301,6 +301,7 @@ impl<'a> Lexer<'a> {
             Hex,
         }
 
+        #[allow(clippy::struct_excessive_bools)]
         struct NumberLexState<'a> {
             mode: NumberLexMode,
             seen_digits: bool, // whether any real digit has been read yet
@@ -342,9 +343,9 @@ impl<'a> Lexer<'a> {
                     if state.last_was_digit {
                         state.last_was_digit = false;
                         return true; // continue to next character
-                    } else {
-                        invalid!(state, lexer);
                     }
+
+                    invalid!(state, lexer);
                 } else if ch.is_ascii_digit() {
                     state.last_was_digit = true;
                 }
@@ -424,7 +425,7 @@ impl<'a> Lexer<'a> {
 
         if let Some(err) = state.err {
             return Err(err);
-        };
+        }
 
         if span.content().ends_with('_') {
             // this is the only case not caught while reading: if the number
@@ -477,6 +478,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn string_like_literal(&mut self) -> LResult<'a> {
         enum StringLexMode {
             Unknown,
@@ -536,7 +538,7 @@ impl<'a> Lexer<'a> {
                     StringLexEscapeMode::Normal => match (ch, &state.mode) {
                         ('\'', StringLexMode::Unknown) => state.mode = StringLexMode::Rune,
                         ('"', StringLexMode::Unknown) => {
-                            state.mode = StringLexMode::InterpretedString
+                            state.mode = StringLexMode::InterpretedString;
                         }
                         ('`', StringLexMode::Unknown) => state.mode = StringLexMode::RawString,
                         (_, StringLexMode::Unknown) => unreachable!(
@@ -562,10 +564,10 @@ impl<'a> Lexer<'a> {
                             }
                             state.finished = true;
                         }
-                        ('\\', StringLexMode::Rune) | ('\\', StringLexMode::InterpretedString) => {
+                        ('\\', StringLexMode::Rune | StringLexMode::InterpretedString) => {
                             state.escape_mode = StringLexEscapeMode::Backslash;
                         }
-                        ('\n', StringLexMode::Rune) | ('\n', StringLexMode::InterpretedString) => {
+                        ('\n', StringLexMode::Rune | StringLexMode::InterpretedString) => {
                             let span = lexer.read_span().unwrap();
                             state.err = Some(LexingError::LineBreakInString(span));
                             return false;
@@ -593,7 +595,7 @@ impl<'a> Lexer<'a> {
                                     read_count: 1,
                                     radix: 8,
                                     expected_count: 3,
-                                    max_value: u8::MAX as u32,
+                                    max_value: u32::from(u8::MAX),
                                 }
                             }
                             ('x', _) => {
@@ -602,7 +604,7 @@ impl<'a> Lexer<'a> {
                                     read_count: 0,
                                     radix: 16,
                                     expected_count: 2,
-                                    max_value: u8::MAX as u32,
+                                    max_value: u32::from(u8::MAX),
                                 }
                             }
                             ('u', _) => {
@@ -639,7 +641,7 @@ impl<'a> Lexer<'a> {
                         expected_count,
                         max_value,
                     } => {
-                        match ch
+                        if let Some((new_value, c)) = ch
                             .to_digit(*radix)
                             .and_then(|digit| {
                                 value.checked_mul(*radix).and_then(|v| v.checked_add(digit))
@@ -647,19 +649,16 @@ impl<'a> Lexer<'a> {
                             .filter(|v| v <= max_value)
                             .and_then(|v| char::from_u32(v).map(|c| (v, c)))
                         {
-                            Some((new_value, c)) => {
-                                *value = new_value;
-                                *read_count += 1;
-                                if read_count >= expected_count {
-                                    push_char!(state, c);
-                                }
+                            *value = new_value;
+                            *read_count += 1;
+                            if read_count >= expected_count {
+                                push_char!(state, c);
                             }
-                            None => {
-                                // error: invalid digit
-                                let span = lexer.read_span().unwrap();
-                                state.err = Some(LexingError::InvalidStringEscapeSequence(span));
-                                return false;
-                            }
+                        } else {
+                            // error: invalid digit
+                            let span = lexer.read_span().unwrap();
+                            state.err = Some(LexingError::InvalidStringEscapeSequence(span));
+                            return false;
                         }
                     }
                 }
@@ -672,7 +671,7 @@ impl<'a> Lexer<'a> {
 
         if let Some(err) = state.err {
             return Err(err);
-        };
+        }
 
         if !state.finished {
             // reached EOF before closing delimiter
@@ -703,13 +702,13 @@ impl<'a> Lexer<'a> {
         let token = if upcoming.len() == 3 && upcoming.iter().all(|x| *x == '.') {
             Token::new(TokenKind::Ellipsis, self.read_n::<3>())
         } else if upcoming.first() == Some(&'.') {
-            if upcoming.get(1).map(char::is_ascii_digit).unwrap_or(false) {
+            if upcoming.get(1).is_some_and(char::is_ascii_digit) {
                 // float literal with elided integer part, such as .25 == 0.25
                 return self.number_literal();
-            } else {
-                // just a normal period
-                Token::new(TokenKind::Period, self.read_span().unwrap())
             }
+
+            // just a normal period
+            Token::new(TokenKind::Period, self.read_span().unwrap())
         } else {
             unreachable!("invoker code did not check for a period!")
         };
@@ -751,6 +750,7 @@ struct TokenOptionsTree<'a> {
 impl<'a> Iterator for Lexer<'a> {
     type Item = LResult<'a>;
 
+    #[allow(clippy::too_many_lines)]
     fn next(&mut self) -> Option<Self::Item> {
         macro_rules! single_char_token {
             ($kind:expr) => {
@@ -887,7 +887,7 @@ impl<'a> Iterator for Lexer<'a> {
                 Ok(token) => token,
                 err @ Err(_) => return Some(err),
             },
-            Some('\'') | Some('"') | Some('`') => match self.string_like_literal() {
+            Some('\'' | '"' | '`') => match self.string_like_literal() {
                 Ok(token) => token,
                 err @ Err(_) => return Some(err),
             },
@@ -948,6 +948,7 @@ fn parse_hexadecimal_float(s: &str) -> f64 {
 
     let mut mantissa = 0.0;
 
+    #[allow(clippy::cast_precision_loss)]
     if !int_part.is_empty() {
         mantissa += u64::from_str_radix(int_part, 16).unwrap() as f64;
     }
@@ -956,11 +957,12 @@ fn parse_hexadecimal_float(s: &str) -> f64 {
         for (i, ch) in frac_part.chars().enumerate() {
             let digit = ch.to_digit(16).unwrap();
 
-            mantissa += (digit as f64) / 16f64.powi((i + 1) as i32);
+            // `i` will never be huge (max = # of digits), so unwrap is safe
+            mantissa += f64::from(digit) / 16f64.powi(i32::try_from(i + 1).unwrap());
         }
     }
 
-    mantissa * exp.map(|e| 2f64.powi(e)).unwrap_or(1.0)
+    mantissa * exp.map_or(1.0, |e| 2f64.powi(e))
 }
 
 #[cfg(test)]
@@ -980,7 +982,7 @@ mod tests {
                 Token::new(TokenKind::Ident, Span::new("hello", 16, 3))
             ],
             lex("  package    \t\n\nhello").unwrap(),
-        )
+        );
     }
 
     #[test]
@@ -997,7 +999,7 @@ mod tests {
                 Token::new(TokenKind::Int(0), Span::new("0", 33, 2))
             ],
             lex("\t 3 50 0b11101 0o771 0xf45\n 0123 0").unwrap()
-        )
+        );
     }
 
     #[test]
@@ -1022,7 +1024,7 @@ mod tests {
                 Token::new(TokenKind::Float(1.9375), Span::new("0x1.Fp+0", 91, 2)),
                 Token::new(TokenKind::Float(0.5), Span::new("0X.8p-0", 100, 2)),
                 Token::new(
-                    TokenKind::Float(0.1249847412109375),
+                    TokenKind::Float(0.124_984_741_210_937_5),
                     Span::new("0X1FFFP-16", 108, 2)
                 ),
             ],
@@ -1031,7 +1033,7 @@ mod tests {
                 "\t 0x1p-2 0x2.p10 0x1.Fp+0 0X.8p-0 0X1FFFP-16"
             ))
             .unwrap()
-        )
+        );
     }
 
     #[test]
@@ -1040,16 +1042,16 @@ mod tests {
             vec![
                 Token::new(TokenKind::Int(42), Span::new("4_2", 2, 1)),
                 Token::new(TokenKind::Int(600), Span::new("0_600", 6, 1)),
-                Token::new(TokenKind::Int(195951310), Span::new("0xBad_Face", 12, 1)),
+                Token::new(TokenKind::Int(195_951_310), Span::new("0xBad_Face", 12, 1)),
                 Token::new(
-                    TokenKind::Int(170141183460469),
+                    TokenKind::Int(170_141_183_460_469),
                     Span::new("170_141183_460469", 23, 1)
                 ),
                 Token::new(TokenKind::SemiColon, Span::new("\n", 40, 1)),
                 Token::new(TokenKind::Float(15.0), Span::new("1_5.", 41, 2)),
                 Token::new(TokenKind::Float(15.0), Span::new("0.15e+0_2", 46, 2)),
                 Token::new(
-                    TokenKind::Float(0.1249847412109375),
+                    TokenKind::Float(0.124_984_741_210_937_5),
                     Span::new("0X_1FFFP-16", 56, 2)
                 ),
             ],
@@ -1058,7 +1060,7 @@ mod tests {
                 "1_5. 0.15e+0_2 0X_1FFFP-16"
             ))
             .unwrap()
-        )
+        );
     }
 
     #[test]
@@ -1234,6 +1236,6 @@ mod tests {
                 Token::new(TokenKind::Gt, Span::new(">", 21, 1))
             ],
             lex("> ! == != &^ &^= , >>>").unwrap()
-        )
+        );
     }
 }
