@@ -67,7 +67,7 @@ pub enum SinkKind {
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SourceFileNode<'a>,
-    package_path: FullPackagePath,
+    package_path: &FullPackagePath,
 ) {
     let package_name = ctx.pin(node.package_clause.id);
 
@@ -104,7 +104,7 @@ pub fn visit_source_file<'a>(
         visit_decl(ctx, decl);
     }
 
-    ctx.symtab_mut().save_package_progress(&package_path);
+    ctx.symtab_mut().save_package_progress(package_path);
 }
 
 fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a>) {
@@ -135,14 +135,14 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
             location,
             annotation,
         } => {
-            explicit::visit_binding_decl(ctx, specs, false, location, annotation);
+            explicit::visit_binding_decl(ctx, specs, false, location, annotation.as_deref());
         }
         DeclNode::Var {
             specs,
             location,
             annotation,
         } => {
-            explicit::visit_binding_decl(ctx, specs, true, location, annotation);
+            explicit::visit_binding_decl(ctx, specs, true, location, annotation.as_deref());
         }
         DeclNode::Type { .. } => {} // we just ignore these
         DeclNode::Function(func_node) => funcs::visit_function_decl(ctx, func_node),
@@ -242,7 +242,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             });
         }
         StatementNode::Continue { label, location } | StatementNode::Break { label, location } => {
-            implicit::visit_continue_break(ctx, *label, location)
+            implicit::visit_continue_break(ctx, *label, location);
         }
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Goto { location, .. } => {
@@ -345,8 +345,7 @@ fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
         | StatementNode::Return { .. } => true,
         StatementNode::Block(statements) => statements
             .last()
-            .map(|last| disallows_subsequent_statements(last))
-            .unwrap_or(false),
+            .is_some_and(disallows_subsequent_statements),
         _ => false,
     }
 }

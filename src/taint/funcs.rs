@@ -25,7 +25,7 @@ pub mod builtins;
 
 fn visit_function_def<'a>(
     ctx: &mut AnalysisContext<'a>,
-    r#ref: FunctionRef<'a>,
+    r#ref: &FunctionRef<'a>,
     decl_symbol: Option<Pinned<Span<'a>>>,
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
@@ -138,7 +138,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
 
     visit_function_def(
         ctx,
-        r#ref,
+        &r#ref,
         Some(func_name),
         &node.signature,
         node.receiver.as_ref(),
@@ -154,7 +154,7 @@ pub fn visit_function_literal<'a>(
 ) -> ValueRef<'a> {
     let r#ref = FunctionRef::Anonymous(ctx.pin(location.clone()));
 
-    visit_function_def(ctx, r#ref, None, signature, None, body)
+    visit_function_def(ctx, &r#ref, None, signature, None, body)
 }
 
 pub fn visit_return<'a>(
@@ -242,6 +242,7 @@ fn calculate_outcome<'a>(
     outcome
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec<ValueRef<'a>> {
     // we treat some built-in functions specially, not as function calls but as
     // independent quasi-types of expressions. if they don't look like a real
@@ -317,7 +318,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // otherwise we just assume everything is fine (would be wrong to error)
     if let Some(ids) = &ids {
         if node.args.len() != ids.len() {
-            let variadic = ids.last().map(|(_, variadic)| *variadic).unwrap_or(false);
+            let variadic = ids.last().is_some_and(|(_, variadic)| *variadic);
 
             if !(variadic && node.args.len() > ids.len()) {
                 ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
@@ -365,7 +366,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 location: annotation.location.clone(),
             }),
         }
-    };
+    }
 
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must
@@ -397,15 +398,15 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 // only after cycle otherwise Clone would just make many refs
                 .map(ValueRef::from)
                 .collect();
-        } else {
-            // we have no way of knowing how many values this function returns,
-            // so the best we can do is return a Möbius value that can be
-            // expanded to however many values the invoker expects
-
-            let mobius = MobiusValue::new(ValueRef::from(bt));
-
-            return vec![ValueRef::from(Value::Mobius(mobius))];
         }
+
+        // we have no way of knowing how many values this function returns, so
+        // the best we can do is return a Möbius value that can be expanded to
+        // however many values the invoker expects
+
+        let mobius = MobiusValue::new(ValueRef::from(bt));
+
+        return vec![ValueRef::from(Value::Mobius(mobius))];
     };
 
     // by this point, we know `func.outcome()` is `Some`, which means we have
@@ -439,7 +440,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         let mut realized = component.clone();
 
         if let Some(receiver) = &receiver {
-            realized = realized.realize(func.r#ref(), None, receiver.as_ref())
+            realized = realized.realize(func.r#ref(), None, receiver.as_ref());
         }
 
         // vvv cannot actually do this because if/else would have diff types,
@@ -498,7 +499,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 None,
                 ctx.pin(node.location.clone()),
                 [bt.clone()],
-            )
+            );
         }
     }
 

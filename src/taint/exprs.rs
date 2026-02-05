@@ -214,6 +214,17 @@ fn visit_type_assertion<'a>(
 pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
     match node {
         ExprNode::Name(name) => name.location(),
+        ExprNode::Literal(
+            LiteralNode::Int { location, .. }
+            | LiteralNode::Float { location, .. }
+            | LiteralNode::Rune { location, .. }
+            | LiteralNode::String { location, .. }
+            | LiteralNode::Function { location, .. }
+            | LiteralNode::Array { location, .. }
+            | LiteralNode::Slice { location, .. }
+            | LiteralNode::Map { location, .. }
+            | LiteralNode::Struct { location, .. },
+        ) => location.clone(),
         ExprNode::Call(call) => call.location.clone(),
         ExprNode::Make(make) => make.location.clone(),
         ExprNode::Selection(selection) => selection.location.clone(),
@@ -224,16 +235,5 @@ pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
         ExprNode::UnaryOp { location, .. } | ExprNode::BinaryOp { location, .. } => {
             location.clone()
         }
-        ExprNode::Literal(lit) => match lit {
-            LiteralNode::Int { location, .. } => location.clone(),
-            LiteralNode::Float { location, .. } => location.clone(),
-            LiteralNode::Rune { location, .. } => location.clone(),
-            LiteralNode::String { location, .. } => location.clone(),
-            LiteralNode::Function { location, .. } => location.clone(),
-            LiteralNode::Array { location, .. } => location.clone(),
-            LiteralNode::Slice { location, .. } => location.clone(),
-            LiteralNode::Map { location, .. } => location.clone(),
-            LiteralNode::Struct { location, .. } => location.clone(),
-        },
     }
 }

@@ -22,6 +22,10 @@
 //! # Ok::<(), std::io::Error>(())
 //! ```
 
+// Clippy lint configuration
+#![warn(clippy::all, clippy::pedantic)]
+#![allow(clippy::option_option)]
+// Documentation lint configuration
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 

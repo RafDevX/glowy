@@ -171,8 +171,7 @@ impl<'a> Label<'a> {
         if tags.is_empty() {
             Self::Bottom
         } else {
-            let iter = tags.iter().copied().map(LabelTag::Concrete);
-            let set = BTreeSet::from_iter(iter);
+            let set = tags.iter().copied().map(LabelTag::Concrete).collect();
 
             Self::Tags(set)
         }
@@ -549,7 +548,7 @@ impl<'a> LabelBacktrace<'a> {
             {
                 Self::new(
                     LabelBacktraceKind::FunctionArgument,
-                    concrete.map(Self::label).unwrap_or(&Label::Bottom).clone(),
+                    concrete.map_or(&Label::Bottom, Self::label).clone(),
                     self.symbol(),
                     self.location().clone(),
                     concrete,
@@ -566,7 +565,7 @@ impl<'a> LabelBacktrace<'a> {
             let children: Vec<_> = self
                 .children()
                 .iter()
-                .flat_map(|child| child.realize(from_func, from_index, concrete))
+                .filter_map(|child| child.realize(from_func, from_index, concrete))
                 .collect();
 
             Self::fold(

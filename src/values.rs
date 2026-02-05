@@ -479,7 +479,7 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
     fn is_bottom(&self) -> bool {
         iter::once(&self.primary)
             .chain(self.secondary.iter())
-            .all(|v| v.is_bottom())
+            .all(BacktraceContainer::is_bottom)
     }
 }
 
@@ -702,14 +702,13 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         self.default_value = None;
     }
 
-    pub fn get_const(&self, key: K, at_location: Pinned<Location>) -> ValueRef<'a> {
-        let value = match self.r#const.get(&key).cloned() {
+    pub fn get_const(&self, key: &K, at_location: Pinned<Location>) -> ValueRef<'a> {
+        let value = match self.r#const.get(key).cloned() {
             Some(value) => value,
             None => self
                 .default_value
                 .as_ref()
-                .map(ValueRef::clone_inner)
-                .unwrap_or_else(ValueRef::new_bottom),
+                .map_or_else(ValueRef::new_bottom, ValueRef::clone_inner),
         };
 
         value.nest_backtrace(
@@ -764,7 +763,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     }
 
     // never overwrites
-    pub fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>) {
+    pub fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
         self.r#dyn = LabelBacktrace::combine_options(
             self.r#dyn.clone(),
             value.backtrace_at_location(at_location.clone()),
@@ -777,8 +776,8 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
 impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
     pub fn slice_const(
         &self,
-        low: Option<K>,
-        high: Option<K>,
+        low: Option<&K>,
+        high: Option<&K>,
         at_location: Pinned<Location>,
     ) -> Option<LabelBacktrace<'a>> {
         let children: Vec<_> = self
@@ -878,7 +877,7 @@ impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
 // re-use code for similar logic whenever possible while maintaining typing
 // guarantees for integer-keyed composite values
 pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
-    fn get_const(&self, key: SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a>;
+    fn get_const(&self, key: &SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a>;
     fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a>;
     fn set_const(
         &mut self,
@@ -887,12 +886,12 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
         overwrite: bool,
         at_location: Pinned<Location>,
     );
-    fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>);
+    fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>);
 }
 
 // trivial implementation
 impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
-    fn get_const(&self, key: SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_const(&self, key: &SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
         self.get_const(key, at_location)
     }
 
@@ -910,14 +909,14 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
         self.set_const(key, value, overwrite, at_location);
     }
 
-    fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>) {
+    fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
         self.set_dyn(value, at_location);
     }
 }
 
 // integer key adapter
 impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
-    fn get_const(&self, key: SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_const(&self, key: &SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
         if let SimpleConstValue::Integer(key) = key {
             self.get_const(key, at_location)
         } else {
@@ -939,11 +938,11 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         if let SimpleConstValue::Integer(key) = key {
             self.set_const(key, value, overwrite, at_location);
         } else {
-            self.set_dyn(value, at_location);
+            self.set_dyn(&value, at_location);
         }
     }
 
-    fn set_dyn(&mut self, value: ValueRef<'a>, at_location: Pinned<Location>) {
+    fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
         self.set_dyn(value, at_location);
     }
 }

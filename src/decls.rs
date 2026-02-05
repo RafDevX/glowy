@@ -1,4 +1,4 @@
-//! Used exclusively for Stage 1: RecordDeclarations
+//! Used exclusively for Stage 1: `RecordDeclarations`
 //! (visit top-level declarations)
 
 use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
@@ -20,9 +20,7 @@ pub fn visit_source_file<'a>(
 
     let package_name = ctx.pin(node.package_clause.id);
 
-    let original_name = ctx
-        .symtab_mut()
-        .enter_package(package_name, package_path.clone());
+    let original_name = ctx.symtab_mut().enter_package(package_name, package_path);
 
     if original_name.content() != node.package_clause.id.content() {
         // the scope already had a different native identifier, meaning that

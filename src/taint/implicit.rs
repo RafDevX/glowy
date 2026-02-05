@@ -67,10 +67,10 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
 
     match &node.header {
         ForHeaderNode::Clause(clause) => {
-            visit_for_clause(ctx, clause, &node.body, &node.header_location)
+            visit_for_clause(ctx, clause, &node.body, &node.header_location);
         }
         ForHeaderNode::Range(range) => {
-            visit_for_range(ctx, range, &node.body, &node.header_location)
+            visit_for_range(ctx, range, &node.body, &node.header_location);
         }
     }
 
@@ -187,7 +187,7 @@ fn visit_for_range<'a>(
             true,
             true,
             header_location,
-            &None,
+            None,
         );
     } else if let ForRangeNode::Assignment { lhs, .. } = range {
         explicit::visit_raw_assignment(
@@ -347,24 +347,22 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
             .filter_map(|expr| exprs::get_expr_backtrace(ctx, expr))
             .collect();
 
+        let start = clause
+            .exprs
+            .first()
+            .map(exprs::get_expr_location)
+            .map_or(0, |l| l.start);
+        let end = clause
+            .exprs
+            .last()
+            .map(exprs::get_expr_location)
+            .map_or(usize::MAX, |l| l.end);
+
         let folded = LabelBacktrace::fold(
             children.iter(),
             LabelBacktraceKind::Branch,
             None,
-            ctx.pin(
-                clause
-                    .exprs
-                    .first()
-                    .map(exprs::get_expr_location)
-                    .map(|l| l.start)
-                    .unwrap_or(0)
-                    ..clause
-                        .exprs
-                        .last()
-                        .map(exprs::get_expr_location)
-                        .map(|l| l.end)
-                        .unwrap_or(usize::MAX),
-            ),
+            ctx.pin(start..end),
         );
 
         if let Some(bt) = folded {

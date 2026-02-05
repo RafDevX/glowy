@@ -163,13 +163,13 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
 
         let value = exprs::visit_single_expr(ctx, other);
 
-        slice.set_dyn(value, ctx.pin(node.location.clone()));
+        slice.set_dyn(&value, ctx.pin(node.location.clone()));
     } else {
         // multiple arguments corresponding to individual elements
         for el in node.args.iter().skip(1) {
             let value = exprs::visit_single_expr(ctx, el);
 
-            slice.set_dyn(value, ctx.pin(node.location.clone()));
+            slice.set_dyn(&value, ctx.pin(node.location.clone()));
         }
     }
 
@@ -218,7 +218,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     };
 
     slice.clear(); // we don't want const info anymore
-    slice.set_dyn(src, ctx.pin(node.location.clone()));
+    slice.set_dyn(&src, ctx.pin(node.location.clone()));
 
     drop(slice);
 
@@ -290,7 +290,7 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
         let backtrace = slice.backtrace_at_location(ctx.pin(node.location.clone()));
         slice.clear();
-        slice.set_dyn(ValueRef::from(backtrace), ctx.pin(node.location.clone()));
+        slice.set_dyn(&ValueRef::from(backtrace), ctx.pin(node.location.clone()));
 
         drop(slice);
 
@@ -372,10 +372,10 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
             ValueRef::new_bottom(),
             true,
             ctx.pin(node.location.clone()),
-        )
+        );
     } else {
-        composite.set_dyn(ValueRef::new_bottom(), ctx.pin(node.location.clone()))
-    };
+        composite.set_dyn(&ValueRef::new_bottom(), ctx.pin(node.location.clone()));
+    }
 
     drop(composite);
 

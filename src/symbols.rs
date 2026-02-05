@@ -145,14 +145,13 @@ impl<'a> SymbolTable<'a> {
         let child = {
             let mut scope = self.current_scope.borrow_mut();
 
-            match scope.children.get(index).cloned() {
-                Some(existing) => existing,
-                None => {
-                    let new_scope = Scope::new_ref(self.current_scope.clone());
-                    scope.children.push(new_scope.clone());
+            if let Some(existing) = scope.children.get(index).cloned() {
+                existing
+            } else {
+                let new_scope = Scope::new_ref(self.current_scope.clone());
+                scope.children.push(new_scope.clone());
 
-                    new_scope
-                }
+                new_scope
             }
         };
 
@@ -175,17 +174,20 @@ impl<'a> SymbolTable<'a> {
     pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
         let mut checking = Some(self.current_scope.clone());
 
-        while let Some(scope) = checking {
+        while let Some(ref scope) = checking {
             let borrowed = scope.borrow();
 
             if let Some(symbol) = borrowed.get_local_symbol(name) {
                 return Some(symbol);
             }
 
-            checking = borrowed.parent.clone();
+            let parent = borrowed.parent.clone();
+            drop(borrowed);
+
+            checking.clone_from(&parent);
         }
 
-        if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
+        if name.chars().next().is_some_and(char::is_uppercase) {
             for path in &self.current_file_wildcard_imports {
                 if let Some(Some(envelope)) = self.package_scopes.get(path) {
                     if let Some(symbol) = envelope.scope.borrow().get_local_symbol(name) {
@@ -210,7 +212,7 @@ impl<'a> SymbolTable<'a> {
     ) -> Option<Option<Option<SymbolRef<'a>>>> {
         if let Some(path) = self.current_file_named_imports.get(qualifier) {
             if let Some(Some(envelope)) = self.package_scopes.get(path) {
-                if name.chars().next().map(char::is_uppercase).unwrap_or(false) {
+                if name.chars().next().is_some_and(char::is_uppercase) {
                     Some(Some(envelope.scope.borrow().get_local_symbol(name)))
                 } else {
                     Some(Some(None))
@@ -239,7 +241,7 @@ impl<'a> SymbolTable<'a> {
             .set_local_symbol(name, symbol)
     }
 
-    pub fn is_symbol_in_current_scope(&self, symbol: SymbolRef<'a>) -> bool {
+    pub fn is_symbol_in_current_scope(&self, symbol: &SymbolRef<'a>) -> bool {
         self.current_scope.borrow().contains_local_symbol(symbol)
     }
 
@@ -482,8 +484,8 @@ impl<'a> Scope<'a> {
         self.symbols.insert(name, symbol)
     }
 
-    fn contains_local_symbol(&self, symbol: SymbolRef<'a>) -> bool {
-        self.symbols.values().any(|s| Rc::ptr_eq(s, &symbol))
+    fn contains_local_symbol(&self, symbol: &SymbolRef<'a>) -> bool {
+        self.symbols.values().any(|s| Rc::ptr_eq(s, symbol))
     }
 }
 
@@ -567,6 +569,6 @@ impl<'a> Symbol<'a> {
     }
 
     pub fn set_value(&mut self, value: ValueRef<'a>) {
-        self.value = value
+        self.value = value;
     }
 }

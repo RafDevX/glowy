@@ -96,9 +96,8 @@ impl Analyzer {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn from_directory<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
-        let mut analyzer = match Self::from_go_mod(path.as_ref().join("go.mod"))? {
-            Some(analyzer) => analyzer,
-            None => return Ok(None),
+        let Some(mut analyzer) = Self::from_go_mod(path.as_ref().join("go.mod"))? else {
+            return Ok(None);
         };
 
         analyzer.add_directory_recurs(path::Component::RootDir, path)?;
@@ -131,6 +130,7 @@ impl Analyzer {
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
+    #[allow(clippy::missing_panics_doc)] // unwrap is guaranteed safe here
     pub fn from_go_mod<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let file = fs::File::open(path)?;
         let reader = io::BufReader::new(file);
@@ -286,7 +286,7 @@ impl Analyzer {
                         parse_errors.push(AnalysisError {
                             file: file.virtual_path(),
                             kind: AnalysisErrorKind::DuplicateVirtualFilePath,
-                        })
+                        });
                     }
                 }
                 Err(e) => parse_errors.push(AnalysisError {
@@ -333,7 +333,7 @@ impl Analyzer {
 
             let package_path = compute_package_path(&self.module_base, path);
 
-            taint::visit_source_file(&mut context, ast, package_path);
+            taint::visit_source_file(&mut context, ast, &package_path);
         }
 
         // Stage #3: EnforceSecurityPolicies

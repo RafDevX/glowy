@@ -31,7 +31,7 @@ pub fn visit_selection<'a>(
     };
 
     r#struct.get_const(
-        node.selector.content().to_owned(),
+        &node.selector.content().to_owned(),
         ctx.pin(node.location.clone()),
     )
 }
@@ -50,7 +50,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);
 
     let result = if let Some(index) = index {
-        composite.get_const(index, ctx.pin(node.location.clone()))
+        composite.get_const(&index, ctx.pin(node.location.clone()))
     } else {
         composite.get_dyn(ctx.pin(node.location.clone()))
     };
@@ -103,19 +103,22 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         // be propagated. this means we need to do some rather unintuitive
         // matching here to essentially swap the Options
         #[inline]
-        fn transform(v: Option<Option<SimpleConstValue>>) -> Option<Option<u64>> {
+        #[allow(clippy::items_after_statements)]
+        fn transform(v: Option<&Option<SimpleConstValue>>) -> Option<Option<u64>> {
             match v {
-                Some(Some(SimpleConstValue::Integer(x))) => Some(Some(x)),
+                Some(Some(SimpleConstValue::Integer(x))) => Some(Some(*x)),
                 Some(_) => None,
                 None => Some(None),
             }
         }
 
-        let low = transform(low);
-        let high = transform(high);
+        let low = transform(low.as_ref());
+        let high = transform(high.as_ref());
 
         match (low, high) {
-            (Some(low), Some(high)) => sliceable.slice_const(low, high, location.clone()),
+            (Some(low), Some(high)) => {
+                sliceable.slice_const(low.as_ref(), high.as_ref(), location.clone())
+            }
             _ => sliceable.slice_dyn(location.clone()),
         }
     } else {

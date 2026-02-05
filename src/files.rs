@@ -49,12 +49,11 @@ impl SourceFile {
     pub fn new<P: Into<PathBuf>, C: Into<String>>(virtual_path: P, contents: C) -> Self {
         let virtual_path = virtual_path.into();
 
-        if !virtual_path.has_root() || virtual_path.extension().filter(|e| *e == "go").is_none() {
-            panic!(
-                "Glowy: could not instantiate SourceFile with invalid virtual_path `{}`",
-                virtual_path.display()
-            );
-        }
+        assert!(
+            virtual_path.has_root() && virtual_path.extension().is_some_and(|e| e == "go"),
+            "Glowy: could not instantiate SourceFile with invalid virtual_path `{}`",
+            virtual_path.display()
+        );
 
         Self {
             virtual_path,

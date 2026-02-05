@@ -23,7 +23,7 @@ pub fn visit_binding_decl<'a>(
     specs: &[BindingDeclSpecNode<'a>],
     mutable: bool,
     location: &Location,
-    annotation: &Option<Box<Annotation<'a>>>,
+    annotation: Option<&Annotation<'a>>,
 ) {
     for spec in specs {
         visit_binding_decl_spec(ctx, spec, mutable, false, location, annotation);
@@ -36,7 +36,7 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
     short: bool, // allows redeclaration in some circumstances
     location: &Location,
-    annotation: &Option<Box<Annotation<'a>>>,
+    annotation: Option<&Annotation<'a>>,
 ) {
     if node.exprs.is_empty() && node.r#type.is_some() && !short {
         // no initialization expression; zero-value is used;
@@ -63,7 +63,7 @@ fn visit_binding_decl_spec<'a>(
                 // rhs_values is borrowed from the if-let, so we do this instead
                 expanded = Some(expandable.expand());
             } else if let Some(mobius) = single.as_mobius() {
-                expanded = Some(mobius.expand_to(node.ids.len()))
+                expanded = Some(mobius.expand_to(node.ids.len()));
             }
         }
     }
@@ -91,7 +91,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
     mutable: bool,
     short: bool, // allows redeclaration in some circumstances
     location: &Location,
-    annotation: &Option<Box<Annotation<'a>>>,
+    annotation: Option<&Annotation<'a>>,
 ) {
     if ids.len() != rhs_values.len() {
         ctx.report_error(AnalysisErrorKind::UnevenBindingDeclSpec {
@@ -166,7 +166,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     location: annotation.location.clone(),
                 }),
             }
-        };
+        }
 
         let symbol = Symbol::new_ref(
             ctx.pin(name),
@@ -241,7 +241,7 @@ pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDe
         true,
         true,
         &node.location,
-        &node.annotation,
+        node.annotation.as_deref(),
     );
 }
 
@@ -266,7 +266,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                 // rhs_values is borrowed from the if-let, so we do this instead
                 expanded = Some(expandable.expand());
             } else if let Some(mobius) = single.as_mobius() {
-                expanded = Some(mobius.expand_to(node.lhs.len()))
+                expanded = Some(mobius.expand_to(node.lhs.len()));
             }
         }
     }
@@ -382,7 +382,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
             simple,
             explicit_backtrace,
             location,
-        )
+        );
     }
 }
 
@@ -413,7 +413,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
             return;
         }
 
-        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(symbol.clone());
+        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(&symbol);
 
         let mut borrowed = symbol.borrow_mut();
 
@@ -494,7 +494,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         if let Some(index) = index {
             composite.set_const(index, value, overwrite, ctx.pin(location.clone()));
         } else {
-            composite.set_dyn(value, ctx.pin(location.clone()));
+            composite.set_dyn(&value, ctx.pin(location.clone()));
         }
     }
 }
@@ -506,7 +506,7 @@ fn root_indexing_in_current_scope<'a>(
     match &*node.base {
         ExprNode::Name(operand) => {
             if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {
-                ctx.symtab().is_symbol_in_current_scope(symbol)
+                ctx.symtab().is_symbol_in_current_scope(&symbol)
             } else {
                 false
             }
@@ -549,7 +549,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         let overwrite = if simple {
             if let ExprNode::Name(operand) = &*self.base {
                 if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {
-                    ctx.symtab().is_symbol_in_current_scope(symbol)
+                    ctx.symtab().is_symbol_in_current_scope(&symbol)
                 } else {
                     false
                 }
