@@ -458,7 +458,7 @@ impl<'a> Lexer<'a> {
 
                 // we thus implement a ridiculous frankenstein conversion
                 // ourselves, under the hope that it shall never be used
-                parse_hexadecimal_float(&num_str)
+                Ok(parse_hexadecimal_float(&num_str))
             } else {
                 unreachable!("unexpected base-{radix} float")
             };
@@ -926,7 +926,7 @@ fn is_whitespace(ch: char) -> bool {
 }
 
 // truly a sign of decaying times; see invoker for more context
-fn parse_hexadecimal_float(s: &str) -> Result<f64, ParseFloatError> {
+fn parse_hexadecimal_float(s: &str) -> f64 {
     // we (perhaps foolishly) assume that the string is structurally correct
     // (i.e., resembles a float in shape), and thus unwrap away -- in theory
     // this should be fine since we manually created the string inside the lexer
@@ -960,7 +960,7 @@ fn parse_hexadecimal_float(s: &str) -> Result<f64, ParseFloatError> {
         }
     }
 
-    Ok(mantissa * exp.map(|e| 2f64.powi(e)).unwrap_or(1.0))
+    mantissa * exp.map(|e| 2f64.powi(e)).unwrap_or(1.0)
 }
 
 #[cfg(test)]
