@@ -23,5 +23,7 @@ jobs:
                   key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
             - name: Build
               run: cargo build --workspace --verbose
+            - name: Lint with Clippy
+              run: cargo clippy -- --deny warnings # treat warnings as errors
             - name: Run tests
               run: cargo test --workspace --verbose
