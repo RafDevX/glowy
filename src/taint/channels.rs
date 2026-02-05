@@ -58,6 +58,17 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
 
                 enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
             }
+            "assert" => {
+                let label = Label::from_tags(&annotation.tags);
+                let backtrace = exprs::get_expr_backtrace(ctx, &node.expr);
+
+                enforcement::trigger_assertion(
+                    ctx,
+                    Cow::Owned(label),
+                    backtrace,
+                    node.location.clone(),
+                );
+            }
             _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
                 directive: annotation.directive,
                 location: annotation.location.clone(),

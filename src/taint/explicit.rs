@@ -145,6 +145,22 @@ pub fn visit_raw_binding_decl_spec<'a>(
 
                     enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
                 }
+                "assert" => {
+                    // FIXME: this location is probably wrong for what we want
+                    // to report; i.e. we want to highlight a specific expr
+                    // rather than an entire declaration, but we just don't have
+                    // that information here
+                    let rhs_location = ctx.pin(location.clone());
+                    let backtrace = rhs.backtrace_at_location(rhs_location);
+                    let label = Label::from_tags(&annotation.tags);
+
+                    enforcement::trigger_assertion(
+                        ctx,
+                        Cow::Owned(label),
+                        backtrace,
+                        location.clone(),
+                    );
+                }
                 _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
                     directive: annotation.directive,
                     location: annotation.location.clone(),

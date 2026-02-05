@@ -346,6 +346,20 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                     enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), backtrace);
                 }
             }
+            "assert" => {
+                let label = Label::from_tags(&annotation.tags);
+
+                for arg in &node.args {
+                    let backtrace = exprs::get_expr_backtrace(ctx, arg);
+
+                    enforcement::trigger_assertion(
+                        ctx,
+                        Cow::Borrowed(&label),
+                        backtrace,
+                        node.location.clone(),
+                    );
+                }
+            }
             _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
                 directive: annotation.directive,
                 location: annotation.location.clone(),
