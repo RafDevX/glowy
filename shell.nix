@@ -1,6 +1,5 @@
 {
   pkgs ? (import <nixpkgs> { }),
-  unstable ? (import <unstable> { }),
 }:
 pkgs.mkShellNoCC {
   buildInputs = with pkgs; [
