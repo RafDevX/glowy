@@ -1,7 +1,7 @@
 use self::postfix::parse_postfix_if_exists;
 use super::{PResult, expect};
 use crate::{
-    ParsingError, TokenStream,
+    ParsingError, Span, TokenStream,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode, ExprNode,
         LiteralNode, OrderedF64, StructLiteralFieldsNode,
@@ -12,58 +12,6 @@ use crate::{
 
 mod ops;
 mod postfix;
-
-fn parse_identifier_first_expr<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
-    // technically we don't really need a BacktrackingContext because we could
-    // try to manually convert an incorrect operand-name into a type-name, but
-    // then there's other complexity (like type args) that we would have to keep
-    // track of and essentially rely on being able to "jump in" into the middle
-    // of lower-level parsing implementations -- it's more sustainable to just
-    // backtrack if it wasn't actually an operand name expression
-
-    let mut context = BacktrackingContext::new(s);
-    let b = context.stream();
-
-    let operand = expect(b, TokenKind::Ident, Some("identifier first expression"))?;
-
-    #[allow(clippy::if_not_else)] // code is arguably more readable like this
-    let expr = if !matches!(b.peek(), Some(Ok(of_kind!(TokenKind::CurlyL)))) {
-        // ok, we got it right, this was for sure an operand name
-        context.commit()?;
-
-        ExprNode::Name(operand.span)
-    } else {
-        // now we know there's a trailing {, but we don't know if that is
-        // because of a composite literal (`x { ... }`) or completely unrelated
-        // (`if x {`), so we need to try parsing a composite literal but be
-        // ready to backtrack (must use the original stream since if correct
-        // then `operand` is wrong)
-        let mut context2 = BacktrackingContext::new(s);
-        let b2 = context2.stream();
-
-        // we default to assume any type is a struct
-        if let Ok(lit) = parse_struct_literal(b2) {
-            // ok, confirmed, everything worked out
-            context2.commit()?;
-
-            lit.into()
-        } else {
-            // nope, if we got this far then our first guess was correct and it
-            // truly is an operand name with an innocent unrelated { after it
-
-            let operand = expect(s, TokenKind::Ident, Some("operand name"))?;
-            // ^^^ note, cannot just re-use the `operand` variable because then
-            // the main stream would not be at the right position, and cannot
-            // use `context.commit()` to fix it because we can only construct
-            // `context2` (&mut s) if the previous `context` (also &mut s) has
-            // already been dropped (way before this point)
-
-            ExprNode::Name(operand.span)
-        }
-    };
-
-    Ok(expr)
-}
 
 fn parse_function_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
     let beginning = expect(s, TokenKind::Func, Some("function literal"))?;
@@ -317,7 +265,11 @@ fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Ex
     }
 
     let expr = match s.peek().cloned().transpose()? {
-        Some(of_kind!(TokenKind::Ident)) => parse_identifier_first_expr(s)?,
+        Some(token @ of_kind!(TokenKind::Ident)) => {
+            s.next(); // advance
+
+            ExprNode::Name(token.span)
+        }
         Some(token @ of_kind!(TokenKind::Int(value))) => {
             s.next(); // advance
 
@@ -401,33 +353,65 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
 
     let inner = parse_inner_primary_expression(b)?;
 
-    let expr = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = b.peek() {
-        // we don't know if there's a trailing { because of a composite
-        // literal (`x { ... }`) or if the { is completely unrelated
-        // (`if x {`), so we need to try parsing a composite literal
-        // on the original stream to find out whether we need to discard
-        // the inner expression we just parsed
+    // heuristic: we assume all composite literals have types starting with an
+    // uppercase character (e.g., `T { ... }` but not `t { ... }`), since
+    // otherwise we cannot distinguish the case `for range ch { };` (which is
+    // not a composite literal). the same applies for `if x { };`, and so on.
+    // in the future it might make sense to consider limiting this assumption to
+    // only empty composite literals (i.e., uppercase is only checked after the
+    // literal has been parsed successfully and yielding an empty literal), but
+    // that would be harder and bring its own disadvantages
+    // (another alternative would be to have a separate parse_primary_expression
+    // just for the case where a block is expected after the expression, but it
+    // would probably be harder since this function exists within a larger
+    // parse_expression pipeline)
+    let operand = match &inner {
+        ExprNode::Name(name) => Some(name),
+        ExprNode::Selection(selection) => {
+            if let ExprNode::Name(name) = &*selection.base {
+                Some(name)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
 
+    let expr = if operand
+        .map(Span::content)
+        .map(str::chars)
+        .as_mut()
+        .and_then(Iterator::next)
+        .is_some_and(char::is_uppercase)
+        && matches!(b.peek(), Some(Ok(of_kind!(TokenKind::CurlyL))))
+    {
+        // now we know there's a trailing {, but we don't know if that is
+        // because of a composite literal (`x { ... }`) or completely unrelated
+        // (`if x {`), so we need to try parsing a composite literal but be
+        // ready to backtrack (must use the original stream since if correct
+        // then `inner` is wrong)
         let mut context2 = BacktrackingContext::new(s);
         let b2 = context2.stream();
 
         // we default to assume any type is a struct
         if let Ok(lit) = parse_struct_literal(b2) {
-            // yup, it was a literal, so just commit and discard inner
+            // ok, confirmed, everything worked out
             context2.commit()?;
 
             lit.into()
         } else {
-            // nope, the { is unrelated, so inner is correct, but here we cannot
-            // just commit `context` and return the already-parsed `inner`,
-            // since that would make the borrow checker upset (cannot have a ref
-            // to `context` here after `context2` was created), so we have to
-            // re-parse from the original stream directly
+            // nope, if we got this far then our first guess was correct and it
+            // truly is a normal expr with an innocent unrelated { after it
 
             parse_inner_primary_expression(s)?
+            // ^^^ note, cannot just re-use the `inner` variable because then
+            // the main stream would not be at the right position, and cannot
+            // use `context.commit()` to fix it because we can only construct
+            // `context2` (&mut s) if the previous `context` (also &mut s) has
+            // already been dropped (way before this point)
         }
     } else {
-        // everything looks good, just commit and return the inner expression
+        // ok, we got it right, this was for sure a normal expression
         context.commit()?;
 
         inner
