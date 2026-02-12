@@ -1,11 +1,13 @@
 use std::{
     borrow::Cow,
+    fmt, fs, io,
     path::{Path, PathBuf},
     process,
 };
 
 use annotate_snippets::AnnotationKind;
 use clap::Parser;
+use colored::{ColoredString, Colorize};
 use glowy::{
     errors::{AnalysisError, AnalysisErrorCategory, AnalysisErrorKind},
     labels::{LabelBacktrace, LabelBacktraceKind},
@@ -19,7 +21,19 @@ const DOCS_ROOT_URL: &str = "file:///home/raf/Documents/KTH/TCYSM/thesis/glowy/t
 fn main() {
     let config = Config::parse();
 
-    let analyzer = glowy::Analyzer::from_directory(&config.directory)
+    let (_warnings, errors) = if config.multi {
+        analyze_multi(&config.directory)
+    } else {
+        analyze_single(&config.directory)
+    };
+
+    if errors > 0 {
+        process::exit(2)
+    }
+}
+
+fn analyze_single<P: AsRef<Path>>(path: P) -> (usize, usize) {
+    let analyzer = glowy::Analyzer::from_directory(path)
         .unwrap_or_else(|_| {
             fatal(
                 "IO error occurred when reading the specified directory.",
@@ -36,18 +50,23 @@ fn main() {
     let result = analyzer.analyze();
 
     match result {
-        Ok(_) => println!("Analysis succeeded with no errors found!"),
+        Ok(_) => {
+            println!("Analysis succeeded with no errors found!");
+
+            (0, 0)
+        }
         Err(errors) => {
             let renderer = annotate_snippets::Renderer::styled();
 
-            let mut exit_failure = false;
+            let mut warning_count = 0;
+            let mut error_count = 0;
 
             for error in errors {
-                if !exit_failure
-                    && error_category_to_level(error.kind.category())
-                        == annotate_snippets::Level::ERROR
-                {
-                    exit_failure = true;
+                let category = error.kind.category();
+                if error_category_to_level(category) == annotate_snippets::Level::ERROR {
+                    error_count += 1;
+                } else {
+                    warning_count += 1;
                 }
 
                 let group = error_to_group(&error, &analyzer);
@@ -56,11 +75,104 @@ fn main() {
                 anstream::eprintln!("{}", renderer.render(report));
             }
 
-            if exit_failure {
-                process::exit(2)
-            }
+            (warning_count, error_count)
         }
     }
+}
+
+fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
+    let mut modules: Vec<_> = fs::read_dir(path)
+        .and_then(Iterator::collect::<Result<Vec<_>, io::Error>>)
+        .unwrap_or_else(|_| {
+            fatal(
+                "IO error occurred when reading the specified directory.",
+                "Does the path provided exist?",
+            )
+        })
+        .into_iter()
+        .filter(|entry| entry.file_type().as_ref().is_ok_and(fs::FileType::is_dir))
+        .map(|entry| entry.path())
+        .collect();
+
+    if modules.is_empty() {
+        fatal(
+            "No directories found in the specified modules directory.",
+            "Is the path provided correct?",
+        )
+    }
+
+    modules.sort_unstable();
+
+    let mut results = vec![];
+
+    for module in modules {
+        let title = ColoredGroup::new()
+            .push("Module @ ".blue())
+            .push(module.to_string_lossy().purple());
+        println!("{}", build_header(title));
+
+        results.push((
+            module.to_string_lossy().into_owned(),
+            analyze_single(module),
+        ));
+
+        println!("\n");
+    }
+
+    println!("{}", build_header("SUMMARY".cyan()));
+
+    let width = 1 + results.len() / 10;
+    let mut n_failed = 0;
+    let mut n_warned = 0;
+    let mut n_passed = 0;
+
+    for (i, (module, (warnings, errors))) in results.iter().enumerate() {
+        let (emoji, label) = if *errors > 0 {
+            n_failed += 1;
+
+            ("❌", "FAIL".bright_red())
+        } else if *warnings > 0 {
+            n_warned += 1;
+
+            ("⚠️", "WARN".yellow())
+        } else {
+            n_passed += 1;
+
+            ("✅", "PASS".green())
+        };
+
+        println!(
+            "\t- {} [{}] #{:0>width$} - {} {}",
+            emoji,
+            label,
+            i + 1,
+            module.bold(),
+            format!("({errors} errors, {warnings} warnings)").italic()
+        );
+    }
+
+    let aggregate = results
+        .iter()
+        .map(|(_, t)| t)
+        .copied()
+        .reduce(|(acc_w, acc_e), (w, e)| (acc_w + w, acc_e + e))
+        .unwrap_or((0, 0));
+
+    println!(
+        "\n{} {} failed, {} warned, {} passed {}",
+        "TOTAL:".bold().blue(),
+        n_failed.to_string().bright_red(),
+        n_warned.to_string().yellow(),
+        n_passed.to_string().green(),
+        format!(
+            "(total {} errors, {} warnings)",
+            aggregate.1.to_string().bright_red(),
+            aggregate.0.to_string().yellow()
+        )
+        .italic()
+    );
+
+    aggregate
 }
 
 #[derive(clap::Parser)]
@@ -69,11 +181,101 @@ struct Config {
     /// Path to a directory containing a Go module, including a `go.mod` file.
     directory: PathBuf,
     // ^ positional because no #[arg]
+    /// Analyze a directory of directories with Go modules, vs. just one module.
+    #[arg(long)]
+    multi: bool,
+}
+
+// group can just be format! ?
+struct ColoredGroup {
+    items: Vec<ColoredString>,
+}
+
+impl ColoredGroup {
+    fn new() -> Self {
+        Self { items: vec![] }
+    }
+
+    fn push<S: Into<ColoredString>>(mut self, item: S) -> Self {
+        self.items.push(item.into());
+
+        self
+    }
+
+    fn space(self) -> Self {
+        self.push(" ")
+    }
+
+    fn newline(self) -> Self {
+        self.push("\n")
+    }
+
+    fn absorb<F: Fn(ColoredString) -> ColoredString>(
+        mut self,
+        other: Self,
+        transformation: Option<F>,
+    ) -> Self {
+        for item in other.items {
+            let transformed = if let Some(f) = &transformation {
+                f(item)
+            } else {
+                item
+            };
+
+            self.items.push(transformed)
+        }
+
+        self
+    }
+
+    fn len(&self) -> usize {
+        self.items.iter().map(|s| s.len()).sum()
+    }
+}
+
+impl fmt::Display for ColoredGroup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for item in &self.items {
+            item.fmt(f)?
+        }
+
+        Ok(())
+    }
+}
+
+impl<T: Into<ColoredString>> From<T> for ColoredGroup {
+    fn from(s: T) -> Self {
+        Self {
+            items: vec![s.into()],
+        }
+    }
 }
 
 fn fatal(msg: &str, hint: &str) -> ! {
-    eprintln!("[FATAL] {msg}\n\n\t{hint}");
+    eprintln!(
+        "{} {}\n\n\t{}",
+        "[FATAL]".bold().bright_red(),
+        msg.bright_red(),
+        hint.italic().cyan()
+    );
     process::exit(1)
+}
+
+fn build_header<T: Into<ColoredGroup>>(title: T) -> ColoredGroup {
+    let title = title.into();
+    let width = title.len() + 2 * 6;
+
+    ColoredGroup::new()
+        .push("#".repeat(width).yellow())
+        .newline()
+        .push("#".repeat(5).yellow())
+        .space()
+        .absorb(title, Some(ColoredString::bold))
+        .space()
+        .push("#".repeat(5).yellow())
+        .newline()
+        .push("#".repeat(width).yellow())
+        .newline()
 }
 
 struct SnippetBuilder<'a> {
