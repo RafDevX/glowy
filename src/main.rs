@@ -104,8 +104,10 @@ fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
 
     let mut results = vec![];
 
-    for module in modules {
+    let width = 1 + modules.len() / 10;
+    for (i, module) in modules.into_iter().enumerate() {
         let title = ColoredGroup::new()
+            .push(format!("#{:0>width$} - ", i + 1).cyan())
             .push("Module @ ".blue())
             .push(module.to_string_lossy().purple());
         println!("{}", build_header(title));
@@ -120,7 +122,6 @@ fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
 
     println!("{}", build_header("SUMMARY".cyan()));
 
-    let width = 1 + results.len() / 10;
     let mut n_failed = 0;
     let mut n_warned = 0;
     let mut n_passed = 0;
