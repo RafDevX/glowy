@@ -12,7 +12,6 @@ use glowy::{
     errors::{AnalysisError, AnalysisErrorCategory, AnalysisErrorKind},
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
-use rayon::prelude::*;
 
 // FIXME: change to proper hosted version
 // (ideally, automatically updated with GitHub actions)
@@ -103,22 +102,21 @@ fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
 
     modules.sort_unstable();
 
-    let results: Vec<_> = modules
-        .into_par_iter()
-        .inspect(|module| {
-            let title = ColoredGroup::new()
-                .push("Module @ ".blue())
-                .push(module.to_string_lossy().purple());
-            println!("{}", build_header(title));
-        })
-        .map(|module| {
-            (
-                module.to_string_lossy().into_owned(),
-                analyze_single(module),
-            )
-        })
-        .inspect(|_| println!("\n"))
-        .collect();
+    let mut results = vec![];
+
+    for module in modules {
+        let title = ColoredGroup::new()
+            .push("Module @ ".blue())
+            .push(module.to_string_lossy().purple());
+        println!("{}", build_header(title));
+
+        results.push((
+            module.to_string_lossy().into_owned(),
+            analyze_single(module),
+        ));
+
+        println!("\n");
+    }
 
     println!("{}", build_header("SUMMARY".cyan()));
 
