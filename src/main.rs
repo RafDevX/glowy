@@ -12,7 +12,6 @@ use glowy::{
     errors::{AnalysisError, AnalysisErrorCategory, AnalysisErrorKind},
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
-use parser::Diagnostics;
 use rayon::prelude::*;
 
 // FIXME: change to proper hosted version
@@ -294,20 +293,17 @@ impl<'a> SnippetBuilder<'a> {
         self.home.to_string_lossy()
     }
 
-    fn snippet(&self) -> annotate_snippets::Snippet<'a, annotate_snippets::Annotation<'a>> {
+    fn snippet(&self) -> StructuredSnippet<'a> {
         self.snippet_for(self.home)
     }
 
-    fn snippet_for(
-        &self,
-        path: &'a Path,
-    ) -> annotate_snippets::Snippet<'a, annotate_snippets::Annotation<'a>> {
+    fn snippet_for(&self, path: &'a Path) -> StructuredSnippet<'a> {
         let source = self
             .analyzer
             .file_contents(path)
             .expect("specified error file not registered");
 
-        annotate_snippets::Snippet::source(source).path(path.to_string_lossy())
+        StructuredSnippet::new(path.to_string_lossy(), source)
     }
 
     fn eof(&self) -> parser::Location {
@@ -330,11 +326,104 @@ impl<'a> SnippetBuilder<'a> {
 
 // we use an intermediate representation (strongly typed) to ensure all errors
 // have the same fields defined and none is ever forgotten/missed
+#[derive(Debug, Clone)]
 struct StructuredErrorInfo<'a> {
     title: Cow<'a, str>,
     code: Cow<'a, str>,
-    elements: Vec<annotate_snippets::Element<'a>>,
+    snippets: Vec<StructuredSnippet<'a>>,
     help: Option<&'a str>,
+}
+
+// intermediate representation (vs. Snippet directly) so we can perform some
+// minor manipulation before rendering (Snippet does not expose its data)
+// [we need this to be able to collapse snippets]
+#[derive(Debug, Clone)]
+struct StructuredSnippet<'a> {
+    path: Cow<'a, str>,
+    source: Cow<'a, str>,
+    annotations: Vec<StructuredAnnotation<'a>>, // deduplicated
+}
+
+impl<'a> StructuredSnippet<'a> {
+    fn new(path: impl Into<Cow<'a, str>>, source: impl Into<Cow<'a, str>>) -> Self {
+        Self {
+            path: path.into(),
+            source: source.into(),
+            annotations: vec![],
+        }
+    }
+
+    fn annotate(mut self, annotation: StructuredAnnotation<'a>) -> Self {
+        if !self.annotations.contains(&annotation) {
+            self.annotations.push(annotation);
+        }
+
+        self
+    }
+
+    fn extend(mut self, annotations: impl IntoIterator<Item = StructuredAnnotation<'a>>) -> Self {
+        for annotation in annotations {
+            self = self.annotate(annotation);
+        }
+
+        self
+    }
+}
+
+impl<'a> From<StructuredSnippet<'a>>
+    for annotate_snippets::Snippet<'a, annotate_snippets::Annotation<'a>>
+{
+    fn from(snippet: StructuredSnippet<'a>) -> Self {
+        annotate_snippets::Snippet::source(snippet.source)
+            .path(snippet.path)
+            .annotations(snippet.annotations.into_iter().map(Into::into))
+    }
+}
+
+// intermediate representation (vs. Annotation directly) so we can perform some
+// minor manipulation before rendering (Annotation does not expose its data)
+// [we need this to be able to deduplicate annotations, since no PartialEq impl]
+#[derive(PartialEq, Debug, Clone)]
+struct StructuredAnnotation<'a> {
+    kind: AnnotationKind,
+    location: parser::Location,
+    label: Option<Cow<'a, str>>,
+    highlight_source: bool,
+}
+
+impl<'a> StructuredAnnotation<'a> {
+    fn new(kind: AnnotationKind, location: parser::Location) -> Self {
+        Self {
+            kind,
+            location,
+            label: None,
+            highlight_source: false,
+        }
+    }
+
+    fn primary(location: parser::Location) -> Self {
+        Self::new(AnnotationKind::Primary, location)
+    }
+
+    fn context(location: parser::Location) -> Self {
+        Self::new(AnnotationKind::Context, location)
+    }
+
+    fn label(mut self, label: impl Into<Cow<'a, str>>) -> Self {
+        self.label = Some(label.into());
+
+        self
+    }
+}
+
+impl<'a> From<StructuredAnnotation<'a>> for annotate_snippets::Annotation<'a> {
+    fn from(annotation: StructuredAnnotation<'a>) -> Self {
+        annotation
+            .kind
+            .span(annotation.location)
+            .label(annotation.label)
+            .highlight_source(annotation.highlight_source)
+    }
 }
 
 fn error_to_group<'a>(
@@ -352,6 +441,11 @@ fn error_to_group<'a>(
         .map(|txt| annotate_snippets::Level::HELP.message(txt))
         .map(annotate_snippets::Element::from);
 
+    let elements = collapse_snippets(info.snippets)
+        .into_iter()
+        .map(annotate_snippets::Snippet::from)
+        .map(annotate_snippets::Element::from);
+
     level
         .primary_title(info.title)
         .id(info.code)
@@ -363,7 +457,7 @@ fn error_to_group<'a>(
                 .next()
                 .unwrap()
         ))
-        .elements(info.elements.into_iter().chain(help_msg))
+        .elements(elements.chain(help_msg))
 }
 
 fn get_structured_error_info<'a>(
@@ -372,7 +466,7 @@ fn get_structured_error_info<'a>(
 ) -> StructuredErrorInfo<'a> {
     match kind {
         AnalysisErrorKind::Parsing(inner) => {
-            let diagnostics = inner.diagnostics();
+            let diagnostics = parser::Diagnostics::diagnostics(inner);
             let location = if let Some(ctx) = diagnostics.context {
                 ctx.location()
             } else {
@@ -382,15 +476,10 @@ fn get_structured_error_info<'a>(
             StructuredErrorInfo {
                 title: diagnostics.overview.into(),
                 code: diagnostics.code.into(),
-                elements: vec![
-                    builder
-                        .snippet()
-                        .annotation(
-                            AnnotationKind::Primary
-                                .span(location)
-                                .label(diagnostics.details),
-                        )
-                        .into(),
+                snippets: vec![
+                    builder.snippet().annotate(
+                        StructuredAnnotation::primary(location).label(diagnostics.details),
+                    ),
                 ],
                 help: None,
             }
@@ -399,7 +488,7 @@ fn get_structured_error_info<'a>(
         AnalysisErrorKind::DuplicateVirtualFilePath => StructuredErrorInfo {
             title: format!("duplicate virtual file path `{}`", builder.home()).into(),
             code: "C001".into(),
-            elements: vec![],
+            snippets: vec![],
             help: Some(
                 "another file with this virtual path had already been registered to the analyzer",
             ),
@@ -411,11 +500,10 @@ fn get_structured_error_info<'a>(
         } => StructuredErrorInfo {
             title: format!("unknown Glowy annotation directive `{directive}`").into(),
             code: "V001".into(),
-            elements: vec![
+            snippets: vec![
                 builder
                     .snippet()
-                    .annotation(AnnotationKind::Primary.span(location.clone()))
-                    .into(),
+                    .annotate(StructuredAnnotation::primary(location.clone())),
             ],
             help: Some("this directive may be unsupported by this version of the analyzer"),
         },
@@ -430,7 +518,7 @@ fn get_structured_error_info<'a>(
             StructuredErrorInfo {
                 title: format!("insecure data flow to sink in {context}").into(),
                 code: format!("F{:0>3}", sink.kind as usize + 1).into(),
-                elements: label_backtrace_to_snippets(
+                snippets: label_backtrace_to_snippets(
                     backtrace,
                     Some(format!(
                         "sink has label {}, but {} has label {}",
@@ -447,40 +535,33 @@ fn get_structured_error_info<'a>(
             expected,
             found,
             location,
-        } => {
-            StructuredErrorInfo {
-                title: "expression label assertion is false".into(),
-                code: "A001".into(),
-                elements: if let Some(backtrace) = found {
-                    label_backtrace_to_snippets(
-                        backtrace,
-                        Some(format!(
-                            "assertion expects label {}, but found label {}",
-                            expected,
-                            backtrace.label()
-                        )),
-                        builder,
-                    )
-                } else {
-                    vec![
-                        builder
-                            .snippet()
-                            .annotation(AnnotationKind::Primary.span(location.clone()).label(
-                                format!(
-                                    "assertion expects label {}, but found Bottom (i.e., {})",
-                                    expected,
-                                    glowy::labels::Label::Bottom
-                                ),
-                            ))
-                            .into(),
-                    ]
-                },
-                help: Some(
-                    "error reported because the expression label differed from the declared \
+        } => StructuredErrorInfo {
+            title: "expression label assertion is false".into(),
+            code: "A001".into(),
+            snippets: if let Some(backtrace) = found {
+                label_backtrace_to_snippets(
+                    backtrace,
+                    Some(format!(
+                        "assertion expects label {}, but found label {}",
+                        expected,
+                        backtrace.label()
+                    )),
+                    builder,
+                )
+            } else {
+                vec![builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone()).label(format!(
+                        "assertion expects label {}, but found Bottom (i.e., {})",
+                        expected,
+                        glowy::labels::Label::Bottom
+                    )),
+                )]
+            },
+            help: Some(
+                "error reported because the expression label differed from the declared \
                      expectation",
-                ),
-            }
-        }
+            ),
+        },
 
         AnalysisErrorKind::DistinctPackageName { previous, found } => StructuredErrorInfo {
             title: format!(
@@ -490,192 +571,137 @@ fn get_structured_error_info<'a>(
             )
             .into(),
             code: "G001".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(found.location().clone())
-                            .label(
-                                "this package name does not match other files in the same \
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(found.location().clone()).label(
+                        "this package name does not match other files in the same \
                                  directory",
-                            ),
-                    )
-                    .into(),
-                builder
-                    .snippet_for(previous.file())
-                    .annotation(
-                        AnnotationKind::Context
-                            .span(previous.inner().location().clone())
-                            .label("previously found this conflicting package name declaration"),
-                    )
-                    .into(),
+                    ),
+                ),
+                builder.snippet_for(previous.file()).annotate(
+                    StructuredAnnotation::context(previous.inner().location().clone())
+                        .label("previously found this conflicting package name declaration"),
+                ),
             ],
             help: Some("due to the incompatibility, the file was excluded from the analysis"),
         },
-        AnalysisErrorKind::UnresolvableUnqualifiedImport { location } => {
-            StructuredErrorInfo {
-                title: "could not resolve native qualifier for unknown package import".into(),
-                code: "G002".into(),
-                elements: vec![
-                    builder
-                        .snippet()
-                        .annotation(AnnotationKind::Primary.span(location.clone()).label(
-                            "cannot determine native package name, as it has not been analyzed",
-                        ))
-                        .into(),
-                ],
-                help: Some("consider manually specifying an import qualifier"),
-            }
-        }
+        AnalysisErrorKind::UnresolvableUnqualifiedImport { location } => StructuredErrorInfo {
+            title: "could not resolve native qualifier for unknown package import".into(),
+            code: "G002".into(),
+            snippets: vec![
+                builder
+                    .snippet()
+                    .annotate(StructuredAnnotation::primary(location.clone()).label(
+                        "cannot determine native package name, as it has not been analyzed",
+                    )),
+            ],
+            help: Some("consider manually specifying an import qualifier"),
+        },
         AnalysisErrorKind::DuplicateImportQualifier { location } => StructuredErrorInfo {
             title: "duplicate import qualifier within the same file".into(),
             code: "G003".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this illegally conflicts with a previous import declaration"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this illegally conflicts with a previous import declaration"),
+                ),
             ],
             help: Some("consider changing one of the qualifiers"),
         },
         AnalysisErrorKind::IllegalRedeclaration { previous, found } => StructuredErrorInfo {
             title: "illegal symbol redeclaration within same scope".into(),
             code: "G004".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(found.location().clone())
-                            .label("this declaration conflicts with a previous one"),
-                    )
-                    .into(),
-                builder
-                    .snippet_for(previous.file())
-                    .annotation(
-                        AnnotationKind::Context
-                            .span(previous.inner().location().clone())
-                            .label("previously found this declaration"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(found.location().clone())
+                        .label("this declaration conflicts with a previous one"),
+                ),
+                builder.snippet_for(previous.file()).annotate(
+                    StructuredAnnotation::context(previous.inner().location().clone())
+                        .label("previously found this declaration"),
+                ),
             ],
             help: Some("check if your code meets Go's strict criteria for valid redeclarations"),
         },
         AnalysisErrorKind::UnknownSymbol { found } => StructuredErrorInfo {
             title: "invalid access of unknown symbol".into(),
             code: "G005".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(found.location().clone())
-                            .label(
-                                "this operand name could not be resolved within the current scope",
-                            ),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(found.location().clone())
+                        .label("this operand name could not be resolved within the current scope"),
+                ),
             ],
             help: Some("check if the operand name is spelled correctly"),
         },
         AnalysisErrorKind::UnknownQualifier { found } => StructuredErrorInfo {
             title: "invalid reference to unknown qualifier".into(),
             code: "G006".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(found.location().clone())
-                            .label(
-                                "this qualifier does not match any import declaration within the \
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(found.location().clone()).label(
+                    "this qualifier does not match any import declaration within the \
                                  current file",
-                            ),
-                    )
-                    .into(),
-            ],
+                ),
+            )],
             help: Some("check the file's import declarations"),
         },
         AnalysisErrorKind::UnexpectedReturn { location } => StructuredErrorInfo {
             title: "unexpected return statement outside a function definition".into(),
             code: "G007".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this return statement is illegal outside a function context"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this return statement is illegal outside a function context"),
+                ),
             ],
             help: Some("fix the surrounding syntax to encapsulate the return in a function"),
         },
         AnalysisErrorKind::Unreachable { location } => StructuredErrorInfo {
             title: "unreachable statement found after a block-terminating statement".into(),
             code: "G008".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(AnnotationKind::Primary.span(location.clone()).label(
-                        "this statement is unreachable since control flow is diverted before it",
-                    ))
-                    .into(),
-            ],
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(
+                    "this statement is unreachable since control flow is diverted before it",
+                ),
+            )],
             help: Some("consider moving the statement to run earlier in the block"),
         },
-        AnalysisErrorKind::IllegalCallExpression { location } => {
-            StructuredErrorInfo {
-                title: "illegal call expression".into(),
-                code: "G009".into(),
-                elements: vec![
-                    builder
-                        .snippet()
-                        .annotation(AnnotationKind::Primary.span(location.clone()).label(
-                            "the expression being invoked could not be resolved to a function",
-                        ))
-                        .into(),
-                ],
-                help: Some("confirm that a function declaration was provided"),
-            }
-        }
+        AnalysisErrorKind::IllegalCallExpression { location } => StructuredErrorInfo {
+            title: "illegal call expression".into(),
+            code: "G009".into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("the expression being invoked could not be resolved to a function"),
+                ),
+            ],
+            help: Some("confirm that a function declaration was provided"),
+        },
         AnalysisErrorKind::IncorrectCallCardinality {
             expected,
             found,
             location,
-        } => {
-            StructuredErrorInfo {
-                title: format!("expected {expected} arguments in function call, but found {found}")
-                    .into(),
-                code: "G010".into(),
-                elements: vec![
-                    builder
-                        .snippet()
-                        .annotation(AnnotationKind::Primary.span(location.clone()).label(
-                            "incorrect call cardinality with regard to declared function arity",
-                        ))
-                        .into(),
-                ],
-                help: Some("check that the number of arguments is correct"),
-            }
-        }
+        } => StructuredErrorInfo {
+            title: format!("expected {expected} arguments in function call, but found {found}")
+                .into(),
+            code: "G010".into(),
+            snippets: vec![
+                builder
+                    .snippet()
+                    .annotate(StructuredAnnotation::primary(location.clone()).label(
+                        "incorrect call cardinality with regard to declared function arity",
+                    )),
+            ],
+            help: Some("check that the number of arguments is correct"),
+        },
         AnalysisErrorKind::UnexpectedBuiltInArgShape { location } => StructuredErrorInfo {
             title: "unexpected argument shape passed to built-in function".into(),
             code: "G011".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("argument has a type not supported by this Go built-in"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("argument has a type not supported by this Go built-in"),
+                ),
             ],
             help: Some("check that the correct arguments were provided"),
         },
@@ -687,18 +713,11 @@ fn get_structured_error_info<'a>(
             title: "mismatching number of identifiers and expressions in binding declaration spec"
                 .into(),
             code: "G012".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label(format!(
-                                "cannot assign {right} value(s) to {left} identifier(s)"
-                            )),
-                    )
-                    .into(),
-            ],
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(format!(
+                    "cannot assign {right} value(s) to {left} identifier(s)"
+                )),
+            )],
             help: Some("adjust one of the sides to match the other"),
         },
         AnalysisErrorKind::UnevenAssignment {
@@ -709,247 +728,175 @@ fn get_structured_error_info<'a>(
             title: "mismatching number of left-values and expressions in binding declaration spec"
                 .into(),
             code: "G013".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label(format!(
-                                "cannot assign {right} right-value(s) to {left} left-value(s)"
-                            )),
-                    )
-                    .into(),
-            ],
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(format!(
+                    "cannot assign {right} right-value(s) to {left} left-value(s)"
+                )),
+            )],
             help: Some("adjust one of the sides to match the other"),
         },
         AnalysisErrorKind::MultiComplexAssignment { location, num } => StructuredErrorInfo {
             title: "invalid complex assignment with more than one left-value".into(),
             code: "G014".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label(format!(
-                                "cannot perform a complex assignment on {num} left-values \
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(format!(
+                    "cannot perform a complex assignment on {num} left-values \
                                  simultaneously"
-                            )),
-                    )
-                    .into(),
-            ],
+                )),
+            )],
             help: Some("consider using a simple assignment (e.g., `=` instead of `+=`)"),
         },
         AnalysisErrorKind::InvalidLeftValue { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a left-value for assignment".into(),
             code: "G015".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression cannot be resolved to a valid left-value"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a valid left-value"),
+                ),
             ],
             help: Some("check whether the specified left-value is correct"),
         },
         AnalysisErrorKind::ImmutableLeftValue { symbol } => StructuredErrorInfo {
             title: "immutable left-value in assignment".into(),
             code: "G016".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(symbol.location().clone())
-                            .label(format!(
-                                "symbol `{}` is constant or unchangeable",
-                                symbol.content()
-                            )),
-                    )
-                    .into(),
-            ],
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(symbol.location().clone()).label(format!(
+                    "symbol `{}` is constant or unchangeable",
+                    symbol.content()
+                )),
+            )],
             help: Some("check whether the specified left-value should be marked as immutable"),
         },
         AnalysisErrorKind::InvalidSelectionBase { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a selection base".into(),
             code: "G017".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression cannot be resolved to a valid selection base"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a valid selection base"),
+                ),
             ],
             help: Some("check whether the specified selection base is a struct"),
         },
         AnalysisErrorKind::InvalidIndexingBase { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as an indexing base".into(),
             code: "G018".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression cannot be resolved to a valid indexing base"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a valid indexing base"),
+                ),
             ],
             help: Some("check whether the specified selection base is an array/slice"),
         },
         AnalysisErrorKind::InvalidSlicingBase { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a slicing base".into(),
             code: "G019".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression cannot be resolved to a valid slicing base"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a valid slicing base"),
+                ),
             ],
             help: Some("check whether the specified slicing base is a string/array/slice"),
         },
         AnalysisErrorKind::IllegalChannelExpression { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a channel in a send statement".into(),
             code: "G020".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression cannot be resolved to a channel"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a channel"),
+                ),
             ],
             help: Some("check whether the specified expression is a channel"),
         },
         AnalysisErrorKind::GoNotCall { location } => StructuredErrorInfo {
             title: "illegal `go` statement with a non-call expression".into(),
             code: "G021".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression cannot be resolved to a function call"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a function call"),
+                ),
             ],
             help: Some("check whether the specified expression is a function call"),
         },
         AnalysisErrorKind::IllegalSelectCase { location } => StructuredErrorInfo {
             title: "illegal case in `select` statement".into(),
             code: "G022".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this is neither a send or a receive statement"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this is neither a send or a receive statement"),
+                ),
             ],
             help: Some("cases in a `select` statement can only pertain to channel communications"),
         },
         AnalysisErrorKind::UnexpectedFallthrough { location } => StructuredErrorInfo {
             title: "unexpected fallthrough statement".into(),
             code: "G023".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("a fallthrough statement is illegal at this location"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("a fallthrough statement is illegal at this location"),
+                ),
             ],
             help: Some("ensure the statement is at the end of an expression switch clause"),
         },
         AnalysisErrorKind::DuplicateStructFieldName { duplicate } => StructuredErrorInfo {
             title: "duplicate field name in struct literal expression".into(),
             code: "G024".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(duplicate.location().clone())
-                            .label("another field with this name has already been specified"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(duplicate.location().clone())
+                        .label("another field with this name has already been specified"),
+                ),
             ],
             help: Some("ensure there are no duplicate entries in the struct literal"),
         },
         AnalysisErrorKind::UnexpectedVoidExpression { location } => StructuredErrorInfo {
             title: "invalid void expression when a single value was expected".into(),
             code: "G025".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression yields no value, but one value was expected"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression yields no value, but one value was expected"),
+                ),
             ],
             help: Some("ensure the expression's value-arity is compatible with where it is used"),
         },
         AnalysisErrorKind::UnexpectedMultiValueExpression { location } => StructuredErrorInfo {
             title: "invalid multi-value expression when a single value was expected".into(),
             code: "G026".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(AnnotationKind::Primary.span(location.clone()).label(
-                        "this expression yields multiple values, but only one value was expected",
-                    ))
-                    .into(),
-            ],
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(
+                    "this expression yields multiple values, but only one value was expected",
+                ),
+            )],
             help: Some("ensure the expression's value-arity is compatible with where it is used"),
         },
 
         AnalysisErrorKind::GotoNotSupported { location } => StructuredErrorInfo {
             title: "unsupported `goto` statement was ignored".into(),
             code: "U001".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this statement was not considered to affect control flow"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this statement was not considered to affect control flow"),
+                ),
             ],
             help: Some("this analyzer version does not support `goto` statements"),
         },
         AnalysisErrorKind::DeferNotDeferred { location } => StructuredErrorInfo {
             title: "unsupported `defer` statement was not deferred".into(),
             code: "U002".into(),
-            elements: vec![
-                builder
-                    .snippet()
-                    .annotation(
-                        AnnotationKind::Primary
-                            .span(location.clone())
-                            .label("this expression was considered to execute immediately"),
-                    )
-                    .into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression was considered to execute immediately"),
+                ),
             ],
             help: Some("this analyzer version does not support `defer` statements"),
         },
@@ -973,8 +920,8 @@ fn label_backtrace_to_snippets<'a>(
     backtrace: &'a LabelBacktrace<'a>,
     root_label: Option<String>,
     builder: &SnippetBuilder<'a>,
-) -> Vec<annotate_snippets::Element<'a>> {
-    let (base, label) = if let Some(label) = root_label {
+) -> Vec<StructuredSnippet<'a>> {
+    let (kind, label) = if let Some(label) = root_label {
         (AnnotationKind::Primary, label)
     } else {
         macro_rules! symbol {
@@ -1073,16 +1020,42 @@ fn label_backtrace_to_snippets<'a>(
         (AnnotationKind::Context, label)
     };
 
-    let mut elements = vec![
-        builder
-            .snippet_for(backtrace.location().file())
-            .annotation(base.span(backtrace.location().inner().clone()).label(label))
-            .into(),
-    ];
+    let mut snippets = vec![builder.snippet_for(backtrace.location().file()).annotate(
+        StructuredAnnotation::new(kind, backtrace.location().inner().clone()).label(label),
+    )];
 
     for child in backtrace.children() {
-        elements.extend(label_backtrace_to_snippets(child, None, builder));
+        snippets.extend(label_backtrace_to_snippets(child, None, builder));
     }
 
-    elements
+    snippets
+}
+
+// Given a vector of elements, if multiple snippets of the same file are
+// presented in a row, all annotations are merged into one single snippet
+fn collapse_snippets<'a>(snippets: Vec<StructuredSnippet<'a>>) -> Vec<StructuredSnippet<'a>> {
+    let mut new = Vec::with_capacity(snippets.len());
+
+    // we don't use `new.last_mut()` because `.extend` needs to take ownership
+    // rather than just a mutable reference (since `.annotate` needs `self`);
+    // instead, we use this `previous` variable and then commit it later
+    let mut previous: Option<StructuredSnippet<'a>> = None;
+
+    for snippet in snippets {
+        if let Some(prev) = previous.take() {
+            if snippet.path == prev.path {
+                previous = Some(prev.extend(snippet.annotations));
+            } else {
+                new.push(prev); // commit
+
+                previous = Some(snippet);
+            }
+        } else {
+            previous = Some(snippet);
+        }
+    }
+
+    new.extend(previous);
+
+    new
 }
