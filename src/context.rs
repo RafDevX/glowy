@@ -3,11 +3,11 @@ use std::{fmt, path::Path};
 use parser::Location;
 
 use crate::{
-    Pinned,
+    Pinned, SinkDescriptor,
     errors::{AnalysisError, AnalysisErrorKind},
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::{SymbolRef, SymbolTable},
-    values::ValueRef,
+    values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
 
 pub struct AnalysisContext<'a> {
@@ -91,6 +91,10 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn set_stage(&mut self, stage: AnalysisStage) {
         self.stage = stage;
+    }
+
+    pub fn current_file(&self) -> Option<&'a Path> {
+        self.current_file
     }
 
     pub fn set_current_file(&mut self, virtual_path: &'a Path) {
@@ -198,11 +202,22 @@ impl<'a> AnalysisContext<'a> {
         self.current_branch_scope_depth -= 1;
     }
 
+    pub fn defer_enforcement_check(&mut self, check: DeferredEnforcementCheck<'a>) {
+        let mut value = self.current_function().unwrap();
+        // ^ should be safe if this method is used correctly (only within a fn)
+
+        value.as_function_mut().unwrap().defer_check(check);
+    }
+
+    pub fn report_error_at(&mut self, file: &'a Path, kind: AnalysisErrorKind<'a>) {
+        if self.stage.admits_errors() {
+            self.errors.push(AnalysisError { file, kind });
+        }
+    }
+
     pub fn report_error(&mut self, kind: AnalysisErrorKind<'a>) {
         if let Some(file) = self.current_file {
-            if self.stage.admits_errors() {
-                self.errors.push(AnalysisError { file, kind });
-            }
+            self.report_error_at(file, kind);
         }
     }
 
@@ -302,4 +317,51 @@ pub enum DeferTarget<'a> {
     Function,
     InnermostLoop,
     LabeledLoop(&'a str),
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum DeferredEnforcementCheck<'a> {
+    Sink {
+        sink: SinkDescriptor<'a>,
+        found: LabelBacktrace<'a>,
+        file: &'a Path, // cannot use Pinned since lifetimes are important
+    },
+    Assertion {
+        expected: Label<'a>,
+        found: Option<LabelBacktrace<'a>>,
+        file: &'a Path, // cannot use Pinned since lifetimes are important
+        location: Location,
+    },
+}
+
+impl<'a> DeferredEnforcementCheck<'a> {
+    // might return None if a sink enforcement check no longer makes sense
+    // (`found` is now Bottom, so the check would always pass)
+    pub fn realize(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_index: Option<usize>, // None for receiver
+        concrete: Option<&LabelBacktrace<'a>>,
+    ) -> Option<Self> {
+        let realized = match self {
+            Self::Sink { sink, found, file } => Self::Sink {
+                sink: sink.clone(),
+                found: found.realize(from_func, from_index, concrete)?,
+                file,
+            },
+            Self::Assertion {
+                expected,
+                found,
+                file,
+                location,
+            } => Self::Assertion {
+                expected: expected.clone(),
+                found: found.realize(from_func, from_index, concrete),
+                file,
+                location: location.clone(),
+            },
+        };
+
+        Some(realized)
+    }
 }

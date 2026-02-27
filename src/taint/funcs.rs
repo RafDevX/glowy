@@ -434,13 +434,79 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         None
     };
 
+    handle_deferred_checks(ctx, &func, &ids, &node.args, &node.location);
+
+    let mut result = calculate_call_result(
+        ctx,
+        &func,
+        receiver.as_ref().map(Option::as_ref),
+        &ids,
+        outcome,
+        &node.args,
+        &node.location,
+    );
+
+    // need to nest the function's backtrace into the result because the
+    // function itself was accessed
+    if let Some(bt) = func.backtrace() {
+        for realized in &mut result {
+            *realized = realized.nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                ctx.pin(node.location.clone()),
+                [bt.clone()],
+            );
+        }
+    }
+
+    result
+
+    // TODO: test calling variadic fn, like `f(string, ...int)` with
+    // `f("hello", 1, 2, 3)`
+}
+
+fn handle_deferred_checks<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    ids: &[(Option<&Span<'a>>, bool)],
+    args: &[ExprNode<'a>],
+    location: &Location,
+) {
+    let mut deferred_checks = Vec::from(func.deferred_checks());
+    for (index, (id, variadic)) in ids.iter().copied().enumerate() {
+        let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
+
+        deferred_checks = deferred_checks
+            .iter()
+            .filter_map(|check| check.realize(func.r#ref(), Some(index), concrete.as_ref()))
+            .collect();
+    }
+    for check in deferred_checks {
+        let triggered = enforcement::try_trigger_deferred_check(ctx, &check);
+
+        if !triggered {
+            // propagate further
+            ctx.defer_enforcement_check(check);
+        }
+    }
+}
+
+fn calculate_call_result<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    receiver: Option<Option<&LabelBacktrace<'a>>>,
+    ids: &[(Option<&Span<'a>>, bool)],
+    outcome: &Vec<ValueRef<'a>>,
+    args: &[ExprNode<'a>],
+    location: &Location,
+) -> Vec<ValueRef<'a>> {
     let mut result = vec![];
 
     'components: for component in outcome {
         let mut realized = component.clone();
 
-        if let Some(receiver) = &receiver {
-            realized = realized.realize(func.r#ref(), None, receiver.as_ref());
+        if let Some(receiver) = receiver {
+            realized = realized.realize(func.r#ref(), None, receiver);
         }
 
         // vvv cannot actually do this because if/else would have diff types,
@@ -466,23 +532,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 continue 'components;
             }
 
-            let concrete = if variadic {
-                let children: Vec<_> = node.args[index..]
-                    .iter()
-                    .filter_map(|arg| exprs::get_expr_backtrace(ctx, arg))
-                    .collect();
-
-                LabelBacktrace::fold(
-                    &children,
-                    LabelBacktraceKind::FunctionVariadicAggregation,
-                    id.map(Span::content),
-                    ctx.pin(node.location.clone()),
-                )
-            } else {
-                let arg = node.args.get(index).expect("already checked arg count");
-
-                exprs::get_expr_backtrace(ctx, arg)
-            };
+            let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
 
             realized = realized.realize(func.r#ref(), Some(index), concrete.as_ref());
         }
@@ -490,21 +540,32 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         result.push(realized);
     }
 
-    // need to nest the function's backtrace into the result because the
-    // function itself was accessed
-    if let Some(bt) = func.backtrace() {
-        for realized in &mut result {
-            *realized = realized.nest_backtrace(
-                LabelBacktraceKind::Expression,
-                None,
-                ctx.pin(node.location.clone()),
-                [bt.clone()],
-            );
-        }
-    }
-
     result
+}
 
-    // TODO: test calling variadic fn, like `f(string, ...int)` with
-    // `f("hello", 1, 2, 3)`
+fn calculate_concrete_backtrace<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    index: usize,
+    id: Option<&Span<'a>>,
+    variadic: bool,
+    args: &[ExprNode<'a>],
+    location: &Location,
+) -> Option<LabelBacktrace<'a>> {
+    if variadic {
+        let children: Vec<_> = args[index..]
+            .iter()
+            .filter_map(|arg| exprs::get_expr_backtrace(ctx, arg))
+            .collect();
+
+        LabelBacktrace::fold(
+            &children,
+            LabelBacktraceKind::FunctionVariadicAggregation,
+            id.map(Span::content),
+            ctx.pin(location.clone()),
+        )
+    } else {
+        let arg = args.get(index).expect("already checked arg count");
+
+        exprs::get_expr_backtrace(ctx, arg)
+    }
 }

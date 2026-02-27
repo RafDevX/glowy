@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use parser::Location;
 
 use crate::{
-    context::AnalysisContext,
+    context::{AnalysisContext, DeferredEnforcementCheck},
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::SinkDescriptor,
@@ -22,6 +22,19 @@ pub fn trigger_sink<'a>(
     );
 
     let label = found.as_ref().map_or(&Label::Bottom, LabelBacktrace::label);
+
+    if label.has_any_synthetic() {
+        // we cannot evaluate this sink at this point in time, since the passed
+        // label depends on at least one synthetic tag which will only be
+        // resolved at call-time
+        ctx.defer_enforcement_check(DeferredEnforcementCheck::Sink {
+            sink: sink.into_owned(),
+            found: found.unwrap(), // safe, as label not Bottom (has synthetic)
+            file: ctx.current_file().unwrap(),
+        });
+
+        return;
+    }
 
     if *label <= sink.label {
         // all good! value's label is compatible with sink
@@ -49,6 +62,20 @@ pub fn trigger_assertion<'a>(
 
     let label = found.as_ref().map_or(&Label::Bottom, LabelBacktrace::label);
 
+    if label.has_any_synthetic() {
+        // we cannot evaluate this check at this point in time, since the passed
+        // label depends on at least one synthetic tag which will only be
+        // resolved at call-time
+        ctx.defer_enforcement_check(DeferredEnforcementCheck::Assertion {
+            expected: expected.into_owned(),
+            found,
+            file: ctx.current_file().unwrap(),
+            location,
+        });
+
+        return;
+    }
+
     if *label == *expected {
         // all good! value's label matches the assertion
         return;
@@ -59,4 +86,49 @@ pub fn trigger_assertion<'a>(
         found,
         location,
     });
+}
+
+// returns whether the check triggered or if it must be propagated further
+pub fn try_trigger_deferred_check<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    check: &DeferredEnforcementCheck<'a>,
+) -> bool {
+    let bt = match &check {
+        DeferredEnforcementCheck::Sink { found, .. } => Some(found),
+        DeferredEnforcementCheck::Assertion { found, .. } => found.as_ref(),
+    };
+    let label = bt.map_or(&Label::Bottom, LabelBacktrace::label);
+
+    if label.has_any_synthetic() {
+        return false;
+    }
+
+    match check {
+        DeferredEnforcementCheck::Sink { sink, .. } if *label <= sink.label => {} // all good
+        DeferredEnforcementCheck::Sink { sink, found, file } => {
+            ctx.report_error_at(
+                file,
+                AnalysisErrorKind::InsecureFlow {
+                    sink: sink.clone(),
+                    backtrace: found.clone(),
+                },
+            );
+        }
+        DeferredEnforcementCheck::Assertion { expected, .. } if *label == *expected => {} // all good
+        DeferredEnforcementCheck::Assertion {
+            expected,
+            found,
+            file,
+            location,
+        } => ctx.report_error_at(
+            file,
+            AnalysisErrorKind::FalseAssertion {
+                expected: expected.clone(),
+                found: found.clone(),
+                location: location.clone(),
+            },
+        ),
+    }
+
+    true
 }

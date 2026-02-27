@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::{
     Pinned,
+    context::DeferredEnforcementCheck,
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
 
@@ -955,6 +956,8 @@ pub struct FunctionValue<'a> {
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
+    // from sinks within the function, to which synthetic tags were passed
+    deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
 }
 
 impl<'a> FunctionValue<'a> {
@@ -968,6 +971,7 @@ impl<'a> FunctionValue<'a> {
             signature,
             outcome: None,
             backtrace,
+            deferred_checks: vec![],
         }
     }
 
@@ -1037,6 +1041,14 @@ impl<'a> FunctionValue<'a> {
     pub fn backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.backtrace.as_ref()
     }
+
+    pub fn deferred_checks(&self) -> &[DeferredEnforcementCheck<'a>] {
+        &self.deferred_checks
+    }
+
+    pub fn defer_check(&mut self, check: DeferredEnforcementCheck<'a>) {
+        self.deferred_checks.push(check);
+    }
 }
 
 impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
@@ -1076,11 +1088,18 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
 
         let backtrace = self.backtrace.realize(from_func, from_index, concrete);
 
+        let deferred_checks = self
+            .deferred_checks
+            .iter()
+            .filter_map(|check| check.realize(from_func, from_index, concrete))
+            .collect();
+
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
             outcome,
             backtrace,
+            deferred_checks,
         }
     }
 
@@ -1103,6 +1122,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             signature: self.signature.clone(),
             outcome: self.outcome.clone(),
             backtrace,
+            deferred_checks: self.deferred_checks.clone(),
         }
     }
 }

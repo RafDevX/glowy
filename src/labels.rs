@@ -290,6 +290,14 @@ impl<'a> Label<'a> {
         }
     }
 
+    pub(crate) fn has_any_synthetic(&self) -> bool {
+        let Self::Tags(tags) = self else {
+            return false;
+        };
+
+        tags.iter().any(|t| matches!(t, LabelTag::Synthetic { .. }))
+    }
+
     pub(crate) fn is_synthetic_func_param_decl(
         &self,
         param_func: &FunctionRef<'a>,
