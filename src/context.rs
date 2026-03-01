@@ -327,7 +327,7 @@ pub enum DeferredEnforcementCheck<'a> {
         file: &'a Path, // cannot use Pinned since lifetimes are important
     },
     Assertion {
-        expected: Label<'a>,
+        expected_sequence: Vec<Label<'a>>,
         found: Option<LabelBacktrace<'a>>,
         file: &'a Path, // cannot use Pinned since lifetimes are important
         location: Location,
@@ -350,12 +350,12 @@ impl<'a> DeferredEnforcementCheck<'a> {
                 file,
             },
             Self::Assertion {
-                expected,
+                expected_sequence,
                 found,
                 file,
                 location,
             } => Self::Assertion {
-                expected: expected.clone(),
+                expected_sequence: expected_sequence.clone(),
                 found: found.realize(from_func, from_index, concrete),
                 file,
                 location: location.clone(),

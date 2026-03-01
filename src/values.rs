@@ -958,6 +958,8 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
+    // how many times this function has been called
+    call_count: usize,
 }
 
 impl<'a> FunctionValue<'a> {
@@ -972,6 +974,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             deferred_checks: vec![],
+            call_count: 0,
         }
     }
 
@@ -1049,6 +1052,14 @@ impl<'a> FunctionValue<'a> {
     pub fn defer_check(&mut self, check: DeferredEnforcementCheck<'a>) {
         self.deferred_checks.push(check);
     }
+
+    pub fn call_count(&self) -> usize {
+        self.call_count
+    }
+
+    pub fn record_call(&mut self) {
+        self.call_count += 1;
+    }
 }
 
 impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
@@ -1100,6 +1111,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             deferred_checks,
+            call_count: 0,
         }
     }
 
@@ -1123,6 +1135,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             deferred_checks: self.deferred_checks.clone(),
+            call_count: 0,
         }
     }
 }

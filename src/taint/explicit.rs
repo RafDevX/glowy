@@ -152,11 +152,10 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     // that information here
                     let rhs_location = ctx.pin(location.clone());
                     let backtrace = rhs.backtrace_at_location(rhs_location);
-                    let label = Label::from_tags(&annotation.tags);
 
                     enforcement::trigger_assertion(
                         ctx,
-                        Cow::Owned(label),
+                        &Label::sequence_from_tags(&annotation.tags),
                         backtrace,
                         location.clone(),
                     );

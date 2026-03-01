@@ -49,7 +49,7 @@ pub fn trigger_sink<'a>(
 
 pub fn trigger_assertion<'a>(
     ctx: &mut AnalysisContext<'a>,
-    expected: Cow<Label<'a>>,
+    expected_sequence: &[Label<'a>],
     backtrace: Option<LabelBacktrace<'a>>,
     location: Location,
 ) {
@@ -67,7 +67,7 @@ pub fn trigger_assertion<'a>(
         // label depends on at least one synthetic tag which will only be
         // resolved at call-time
         ctx.defer_enforcement_check(DeferredEnforcementCheck::Assertion {
-            expected: expected.into_owned(),
+            expected_sequence: Vec::from(expected_sequence),
             found,
             file: ctx.current_file().unwrap(),
             location,
@@ -76,13 +76,15 @@ pub fn trigger_assertion<'a>(
         return;
     }
 
-    if *label == *expected {
+    let expected_label = expected_sequence.first().unwrap_or(&Label::Bottom);
+
+    if *label == *expected_label {
         // all good! value's label matches the assertion
         return;
     }
 
     ctx.report_error(AnalysisErrorKind::FalseAssertion {
-        expected: expected.into_owned(),
+        expected: expected_label.clone(),
         found,
         location,
     });
@@ -92,6 +94,7 @@ pub fn trigger_assertion<'a>(
 pub fn try_trigger_deferred_check<'a>(
     ctx: &mut AnalysisContext<'a>,
     check: &DeferredEnforcementCheck<'a>,
+    call_index: usize,
 ) -> bool {
     let bt = match &check {
         DeferredEnforcementCheck::Sink { found, .. } => Some(found),
@@ -114,20 +117,30 @@ pub fn try_trigger_deferred_check<'a>(
                 },
             );
         }
-        DeferredEnforcementCheck::Assertion { expected, .. } if *label == *expected => {} // all good
         DeferredEnforcementCheck::Assertion {
-            expected,
+            expected_sequence,
             found,
             file,
             location,
-        } => ctx.report_error_at(
-            file,
-            AnalysisErrorKind::FalseAssertion {
-                expected: expected.clone(),
-                found: found.clone(),
-                location: location.clone(),
-            },
-        ),
+        } => {
+            let expected = expected_sequence
+                .get(call_index)
+                .or_else(|| expected_sequence.last())
+                .unwrap_or(&Label::Bottom);
+
+            if *label == *expected {
+                // all good
+            } else {
+                ctx.report_error_at(
+                    file,
+                    AnalysisErrorKind::FalseAssertion {
+                        expected: expected.clone(),
+                        found: found.clone(),
+                        location: location.clone(),
+                    },
+                );
+            }
+        }
     }
 
     true

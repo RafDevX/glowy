@@ -177,6 +177,33 @@ impl<'a> Label<'a> {
         }
     }
 
+    /// Constructs an ordered sequence of [`Label`]s given a slice of strings.
+    ///
+    /// This returns a [`Vec`] where each label corresponds to a [`Label`]
+    /// obtained via [`Label::from_tags`] for each slice partition as separated
+    /// by the separator `->`. The resulting sequence represents a set of
+    /// [`Label`]s to be used independently at different points in time,
+    /// chronologically as specified by the sequence and according to context.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// assert_eq!(
+    ///     Label::sequence_from_tags(&["->", "dog", "cat", "->", "bird"])
+    ///         .iter()
+    ///         .map(ToString::to_string)
+    ///         .collect::<Vec<_>>(),
+    ///     vec!["{}", "{cat, dog}", "{bird}"]
+    /// )
+    /// ```
+    pub fn sequence_from_tags(tags: &[&'a str]) -> Vec<Self> {
+        tags.split(|tag| *tag == "->")
+            .map(Self::from_tags)
+            .collect()
+    }
+
     /// Constructs a new instance from a single [`LabelTag`].
     ///
     /// This is a convenience method particularly useful for dealing with a

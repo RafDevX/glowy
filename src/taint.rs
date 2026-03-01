@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use parser::{
     Location, Span,
     ast::{
@@ -196,13 +194,13 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                             return;
                         }
 
+                        let sequence = Label::sequence_from_tags(&annotation.tags);
                         let location = ctx.pin(location.clone());
-                        let label = Label::from_tags(&annotation.tags);
 
                         for value in values {
                             enforcement::trigger_assertion(
                                 ctx,
-                                Cow::Borrowed(&label),
+                                &sequence,
                                 value.backtrace_at_location(location.clone()),
                                 location.inner().clone(),
                             );

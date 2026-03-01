@@ -270,7 +270,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
-    let value = exprs::visit_single_expr(ctx, &node.func);
+    let mut value = exprs::visit_single_expr(ctx, &node.func);
 
     let Some(func) = value.as_function() else {
         ctx.report_error(AnalysisErrorKind::IllegalCallExpression {
@@ -348,14 +348,14 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 }
             }
             "assert" => {
-                let label = Label::from_tags(&annotation.tags);
+                let sequence = Label::sequence_from_tags(&annotation.tags);
 
                 for arg in &node.args {
                     let backtrace = exprs::get_expr_backtrace(ctx, arg);
 
                     enforcement::trigger_assertion(
                         ctx,
-                        Cow::Borrowed(&label),
+                        &sequence,
                         backtrace,
                         node.location.clone(),
                     );
@@ -459,6 +459,12 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
+    // re-borrow as mutable
+    drop(func);
+    if let Some(mut func) = value.as_function_mut() {
+        func.record_call();
+    }
+
     result
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
@@ -473,6 +479,7 @@ fn handle_deferred_checks<'a>(
     location: &Location,
 ) {
     let mut deferred_checks = Vec::from(func.deferred_checks());
+
     for (index, (id, variadic)) in ids.iter().copied().enumerate() {
         let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
 
@@ -481,8 +488,13 @@ fn handle_deferred_checks<'a>(
             .filter_map(|check| check.realize(func.r#ref(), Some(index), concrete.as_ref()))
             .collect();
     }
+
+    // we don't need to -1 because this value is before the call count has been
+    // incremented for the current call, so it already corresponds to a 0-index
+    let call_index = func.call_count();
+
     for check in deferred_checks {
-        let triggered = enforcement::try_trigger_deferred_check(ctx, &check);
+        let triggered = enforcement::try_trigger_deferred_check(ctx, &check, call_index);
 
         if !triggered {
             // propagate further
