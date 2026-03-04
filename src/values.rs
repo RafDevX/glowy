@@ -959,7 +959,11 @@ pub struct FunctionValue<'a> {
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
     // how many times this function has been called
-    call_count: usize,
+    // (must be a shared ref, rather than a raw usize, since otherwise mutation
+    // would not work as we'd only modify derived operand-name-access tainted
+    // values from `nest_backtrace`, not the original underlying values, and so
+    // this mutation would never be reflected in future function accesses)
+    call_count: Rc<RefCell<usize>>,
 }
 
 impl<'a> FunctionValue<'a> {
@@ -974,7 +978,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             deferred_checks: vec![],
-            call_count: 0,
+            call_count: Rc::new(RefCell::new(0)),
         }
     }
 
@@ -1054,11 +1058,11 @@ impl<'a> FunctionValue<'a> {
     }
 
     pub fn call_count(&self) -> usize {
-        self.call_count
+        *self.call_count.borrow()
     }
 
     pub fn record_call(&mut self) {
-        self.call_count += 1;
+        *self.call_count.borrow_mut() += 1;
     }
 }
 
@@ -1111,7 +1115,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             deferred_checks,
-            call_count: 0,
+            call_count: self.call_count.clone(), // preserve link to shared val
         }
     }
 
@@ -1135,7 +1139,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             deferred_checks: self.deferred_checks.clone(),
-            call_count: 0,
+            call_count: self.call_count.clone(), // preserve link to shared val
         }
     }
 }
