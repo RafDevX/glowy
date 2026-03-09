@@ -1,0 +1,47 @@
+name: Publish Docs
+
+on:
+    push:
+        branches:
+            - ${{ github.event.repository.default_branch }}
+
+concurrency:
+    group: publish-docs
+    cancel-in-progress: true
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build:
+        name: Build Docs
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+            - uses: actions/cache@v3
+              with:
+                  path: |
+                      ~/.cargo/bin/
+                      ~/.cargo/registry/index/
+                      ~/.cargo/registry/cache/
+                      ~/.cargo/git/db/
+                      target/
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            - name: Build Documentation
+              run: cargo doc --workspace --no-deps
+            - name: Upload Artifact
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: target/doc
+
+    deploy:
+        name: Deploy Docs
+        needs: build
+        runs-on: ubuntu-latest
+        environment:
+            name: Glowy Library Docs
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - name: Deploy to GitHub Pages
+              id: deployment
+              uses: actions/deploy-pages@v4
