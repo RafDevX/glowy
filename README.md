@@ -21,7 +21,7 @@ In order to analyze a Go source file using the Glowy binary, one need only:
 
 - Obtain the tool's source code from the present repository:
 
-  `$ git clone git@github.com:ist199211-ist199311/glowy`
+  `$ git clone git@github.com:RafDevX/glowy.git`
 
 - Compile Glowy:
 
