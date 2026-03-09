@@ -5,6 +5,11 @@ on:
         branches:
             - master
 
+permissions:
+    contents: read # would only be default if no permissions were specified
+    pages: write
+    id-token: write
+
 concurrency:
     group: publish-docs
     cancel-in-progress: true
