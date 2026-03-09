@@ -3,7 +3,7 @@ name: Publish Docs
 on:
     push:
         branches:
-            - ${{ github.event.repository.default_branch }}
+            - master
 
 concurrency:
     group: publish-docs
