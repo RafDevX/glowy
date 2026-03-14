@@ -438,7 +438,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
         } else {
             let rhs_backtrace = rhs.backtrace_at_location(ctx.pin(location.clone()));
 
-            borrowed.value().nest_backtrace(
+            borrowed.value().get().nest_backtrace(
                 backtrace_kind,
                 Some(self.content()), // symbol.declared_name()?
                 ctx.pin(location.clone()),

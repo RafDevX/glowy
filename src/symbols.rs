@@ -331,6 +331,29 @@ impl<'a> SymbolTable<'a> {
 
         false
     }
+
+    pub fn snapshot(&self) -> SymbolTableSnapshot<'a> {
+        let mut items = vec![];
+
+        // necessary because a HashMap has no defined order, which could lead to
+        // inconsistent theoretically-identical snapshots
+        let mut sorted: Vec<_> = self.package_scopes.iter().collect();
+        sorted.sort_unstable_by_key(|(k, _)| *k);
+
+        for (path, envelope) in sorted {
+            // we use an Rc instead of cloning String every time since there'll
+            // probably be many items with the exact same namespace, and &str
+            // would not compile (lifetimes, this is being returned to outside
+            // this function and would depend on &self.package_scopes)
+            let namespace = Rc::from(path.as_str());
+
+            if let Some(envelope) = envelope {
+                items.extend(envelope.scope.borrow().partial_snapshot(&namespace));
+            }
+        }
+
+        SymbolTableSnapshot(items)
+    }
 }
 
 impl Default for SymbolTable<'_> {
@@ -487,6 +510,42 @@ impl<'a> Scope<'a> {
     fn contains_local_symbol(&self, symbol: &SymbolRef<'a>) -> bool {
         self.symbols.values().any(|s| Rc::ptr_eq(s, symbol))
     }
+
+    fn partial_snapshot(&self, namespace: &Rc<str>) -> Vec<SymbolTableSnapshotItem<'a>> {
+        let mut items = vec![];
+
+        // necessary because a HashMap has no defined order, which could lead to
+        // inconsistent theoretically-identical snapshots
+        let mut sorted: Vec<_> = self.symbols.iter().collect();
+        sorted.sort_unstable_by_key(|(k, _)| *k);
+
+        for (name, symbol) in sorted {
+            let borrowed = symbol.borrow();
+
+            let item = SymbolTableSnapshotItem {
+                namespace: namespace.clone(),
+                path: Vec::new(),
+                name,
+                mutable: borrowed.mutable(),
+                value: borrowed.value().get(),
+            };
+
+            items.push(item);
+        }
+
+        for (i, child) in self.children.iter().enumerate() {
+            let borrowed = child.borrow();
+            let mut sub = borrowed.partial_snapshot(namespace);
+
+            for item in &mut sub {
+                item.path.push(i);
+            }
+
+            items.extend(sub);
+        }
+
+        items
+    }
 }
 
 impl fmt::Debug for Scope<'_> {
@@ -564,11 +623,43 @@ impl<'a> Symbol<'a> {
         self.mutable = false;
     }
 
-    pub fn value(&self) -> ValueRef<'a> {
-        self.value.clone()
+    /// This method's return value MAY NOT be used for internal mutability.
+    ///
+    /// Any mutations MUST be made indirectly by passing [`Symbol::set_value`] a
+    /// new [`ValueRef`] pointing to a DIFFERENT inner value, as otherwise this
+    /// will break snapshot logic assumptions.
+    pub fn value(&self) -> AssumedImmutable<ValueRef<'a>> {
+        AssumedImmutable(self.value.clone())
     }
 
     pub fn set_value(&mut self, value: ValueRef<'a>) {
         self.value = value;
     }
+}
+
+/// Annotation that an inner value MAY NOT be used for internal mutability.
+///
+/// This is a wrapper type with no behavior, used exclusively to clearly signal
+/// the semantic invariant that the contained data should not be directly
+/// mutated, as otherwise it would break a logical assumption.
+pub struct AssumedImmutable<T>(T);
+
+impl<T> AssumedImmutable<T> {
+    /// Accept the imposed conditions and access the inner value.
+    pub fn get(self) -> T {
+        self.0
+    }
+}
+
+/// Opaque type capturing relevant [`SymbolTable`] details at a point in time.
+#[derive(PartialEq, Eq, Debug)]
+pub struct SymbolTableSnapshot<'a>(Vec<SymbolTableSnapshotItem<'a>>);
+
+#[derive(PartialEq, Eq, Debug)]
+struct SymbolTableSnapshotItem<'a> {
+    namespace: Rc<str>,
+    path: Vec<usize>, // reversed for more efficient building
+    name: &'a str,
+    mutable: bool,
+    value: ValueRef<'a>,
 }

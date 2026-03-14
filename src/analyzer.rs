@@ -5,6 +5,8 @@ use std::{
     path,
 };
 
+use parser::ast::SourceFileNode;
+
 use crate::{
     FullPackagePath, SourceFile,
     context::{AnalysisContext, AnalysisStage},
@@ -324,16 +326,20 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::StabilizeLabels);
 
-        // TODO: while ...
+        let mut last_snapshot = None;
 
-        context.symtab_mut().clear_all_package_progress();
+        loop {
+            self.process_taint_analysis_iteration(&mut context, &parsed);
 
-        for (path, ast) in &parsed {
-            context.set_current_file(path);
+            let snapshot = context.symtab().snapshot();
 
-            let package_path = compute_package_path(&self.module_base, path);
+            if last_snapshot.is_some_and(|old| snapshot == old) {
+                // nothing relevant has changed since the last iteration, so we
+                // have reached label convergence and can thus stop the loop
+                break;
+            }
 
-            taint::visit_source_file(&mut context, ast, &package_path);
+            last_snapshot = Some(snapshot);
         }
 
         // Stage #3: EnforceSecurityPolicies
@@ -342,9 +348,27 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
-        // ----- TODO -----
+        self.process_taint_analysis_iteration(&mut context, &parsed);
+
+        // All done: return based on final context.
 
         Result::from(context)
+    }
+
+    fn process_taint_analysis_iteration<'a>(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        files: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
+    ) {
+        ctx.symtab_mut().clear_all_package_progress();
+
+        for (path, ast) in files {
+            ctx.set_current_file(path);
+
+            let package_path = compute_package_path(&self.module_base, path);
+
+            taint::visit_source_file(ctx, ast, &package_path);
+        }
     }
 }
 

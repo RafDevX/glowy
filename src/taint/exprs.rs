@@ -149,7 +149,7 @@ pub fn visit_operand_name<'a>(
 
     let borrowed = symbol.borrow();
 
-    borrowed.value().nest_backtrace(
+    borrowed.value().get().nest_backtrace(
         LabelBacktraceKind::Expression,
         Some(name.content()),
         ctx.pin(name.location()),
