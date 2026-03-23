@@ -12,6 +12,7 @@ use crate::{
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
     labels::Label,
+    snapshots::SnapshotAware,
     values::BacktraceContainer,
 };
 
@@ -45,6 +46,12 @@ impl<'a> SinkDescriptor<'a> {
             label,
             location,
         }
+    }
+}
+
+impl SnapshotAware for SinkDescriptor<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self == other
     }
 }
 

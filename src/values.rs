@@ -21,6 +21,7 @@ use crate::{
     Pinned,
     context::DeferredEnforcementCheck,
     labels::{LabelBacktrace, LabelBacktraceKind},
+    snapshots::SnapshotAware,
 };
 
 // wrapper struct (vs. type alias) allows impl'ing despite orphan rule
@@ -291,6 +292,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
     }
 }
 
+impl SnapshotAware for ValueRef<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.0.borrow().snapshot_aware_eq(&other.0.borrow())
+    }
+}
+
 impl<'a> BacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
     fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
         self.clone()
@@ -434,6 +441,39 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
     }
 }
 
+impl SnapshotAware for Value<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Simple(a), Self::Simple(b)) => a.snapshot_aware_eq(b),
+            (Self::Expandable(a), Self::Expandable(b)) => a.snapshot_aware_eq(b),
+            (Self::Mobius(a), Self::Mobius(b)) => a.snapshot_aware_eq(b),
+            (Self::PackageRef(a), Self::PackageRef(b)) => a.snapshot_aware_eq(b),
+            (Self::Array(a), Self::Array(b)) | (Self::Slice(a), Self::Slice(b)) => {
+                a.snapshot_aware_eq(b)
+            }
+            (Self::Map(a), Self::Map(b)) => a.snapshot_aware_eq(b),
+            (Self::Struct(a), Self::Struct(b)) => a.snapshot_aware_eq(b),
+            (Self::Function(a), Self::Function(b)) => a.snapshot_aware_eq(b),
+
+            // no wildcard _ so we rely on exhaustiveness for maintainability
+            // (compiler will error if a new variant is added and this method
+            // is not updated to reflect that)
+            (
+                Self::Simple(_)
+                | Self::Expandable(_)
+                | Self::Mobius(_)
+                | Self::PackageRef(_)
+                | Self::Array(_)
+                | Self::Slice(_)
+                | Self::Map(_)
+                | Self::Struct(_)
+                | Self::Function(_),
+                _,
+            ) => false,
+        }
+    }
+}
+
 trait Upgrade<'a> {
     // Coerce from a Value::Simple to Self, preserving inner backtrace
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self;
@@ -539,6 +579,13 @@ impl<'a> Upgrade<'a> for ExpandableValue<'a> {
     }
 }
 
+impl SnapshotAware for ExpandableValue<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.primary.snapshot_aware_eq(&other.primary)
+            && self.secondary.snapshot_aware_eq(&other.secondary)
+    }
+}
+
 // represents a value of unknown, adaptable cardinality -- similar to an
 // ExpandableValue, but more flexible, able to become any number of the same
 // inner value, in a sort of illusion like a Möbius strip.
@@ -601,6 +648,12 @@ impl<'a> Upgrade<'a> for MobiusValue<'a> {
     }
 }
 
+impl SnapshotAware for MobiusValue<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.0.snapshot_aware_eq(&other.0)
+    }
+}
+
 // represents a reference to another package by the name under which it was
 // imported to this file -- this replaces the need for qualified identifiers,
 // since `pkg.abc` becomes represented as a selection of "pseudo-field" `abc`
@@ -647,6 +700,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
         _extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         self.clone()
+    }
+}
+
+impl SnapshotAware for PackageRefValue<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
@@ -870,6 +929,20 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
 impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         Self::empty(backtrace)
+    }
+}
+
+// assumes K: !SnapshotAware (i.e., it's a primitive irrelevant to this logic)
+// (Rust negative trait bounds are unsupported, so we cannot enforce it)
+impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.r#dyn.snapshot_aware_eq(&other.r#dyn)
+            && self.default_value.snapshot_aware_eq(&other.default_value)
+            && self.r#const.len() == other.r#const.len()
+            && self
+                .r#const
+                .iter()
+                .all(|(k, v)| other.r#const.get(k).snapshot_aware_eq(&Some(v)))
     }
 }
 
@@ -1150,6 +1223,19 @@ impl<'a> Upgrade<'a> for FunctionValue<'a> {
     }
 }
 
+impl SnapshotAware for FunctionValue<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.r#ref.snapshot_aware_eq(&other.r#ref)
+            && self.signature == other.signature
+            && self.outcome.snapshot_aware_eq(&other.outcome)
+            && self.backtrace.snapshot_aware_eq(&other.backtrace)
+            && self
+                .deferred_checks
+                .snapshot_aware_eq(&other.deferred_checks)
+        // intentionally ignoring call count
+    }
+}
+
 /// Represents an unambiguous reference to a function declaration.
 ///
 /// Among other uses, this is necessary to guarantee uniqueness of a
@@ -1225,6 +1311,12 @@ impl Ord for FunctionRef<'_> {
 impl PartialOrd for FunctionRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl SnapshotAware for FunctionRef<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self == other
     }
 }
 

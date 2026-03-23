@@ -47,6 +47,7 @@ use parser::Span;
 
 use crate::{
     FullPackagePath, Pinned,
+    snapshots::{AssumedImmutable, SymbolTableSnapshot, SymbolTableSnapshotItem},
     values::{FunctionValue, Value, ValueRef},
 };
 
@@ -352,7 +353,7 @@ impl<'a> SymbolTable<'a> {
             }
         }
 
-        SymbolTableSnapshot(items)
+        SymbolTableSnapshot::from(items)
     }
 }
 
@@ -522,13 +523,12 @@ impl<'a> Scope<'a> {
         for (name, symbol) in sorted {
             let borrowed = symbol.borrow();
 
-            let item = SymbolTableSnapshotItem {
-                namespace: namespace.clone(),
-                path: Vec::new(),
+            let item = SymbolTableSnapshotItem::new(
+                namespace.clone(),
                 name,
-                mutable: borrowed.mutable(),
-                value: borrowed.value().get(),
-            };
+                borrowed.mutable(),
+                borrowed.value().get(),
+            );
 
             items.push(item);
         }
@@ -538,7 +538,7 @@ impl<'a> Scope<'a> {
             let mut sub = borrowed.partial_snapshot(namespace);
 
             for item in &mut sub {
-                item.path.push(i);
+                item.push_to_path(i);
             }
 
             items.extend(sub);
@@ -629,37 +629,10 @@ impl<'a> Symbol<'a> {
     /// new [`ValueRef`] pointing to a DIFFERENT inner value, as otherwise this
     /// will break snapshot logic assumptions.
     pub fn value(&self) -> AssumedImmutable<ValueRef<'a>> {
-        AssumedImmutable(self.value.clone())
+        AssumedImmutable::new(self.value.clone())
     }
 
     pub fn set_value(&mut self, value: ValueRef<'a>) {
         self.value = value;
     }
-}
-
-/// Annotation that an inner value MAY NOT be used for internal mutability.
-///
-/// This is a wrapper type with no behavior, used exclusively to clearly signal
-/// the semantic invariant that the contained data should not be directly
-/// mutated, as otherwise it would break a logical assumption.
-pub struct AssumedImmutable<T>(T);
-
-impl<T> AssumedImmutable<T> {
-    /// Accept the imposed conditions and access the inner value.
-    pub fn get(self) -> T {
-        self.0
-    }
-}
-
-/// Opaque type capturing relevant [`SymbolTable`] details at a point in time.
-#[derive(PartialEq, Eq, Debug)]
-pub struct SymbolTableSnapshot<'a>(Vec<SymbolTableSnapshotItem<'a>>);
-
-#[derive(PartialEq, Eq, Debug)]
-struct SymbolTableSnapshotItem<'a> {
-    namespace: Rc<str>,
-    path: Vec<usize>, // reversed for more efficient building
-    name: &'a str,
-    mutable: bool,
-    value: ValueRef<'a>,
 }

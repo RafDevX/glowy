@@ -45,6 +45,7 @@ mod decls;
 pub mod errors;
 mod files;
 pub mod labels;
+mod snapshots;
 mod symbols;
 mod taint;
 mod values;

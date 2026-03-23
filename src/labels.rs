@@ -665,6 +665,13 @@ impl<'a> LabelBacktrace<'a> {
     }
 }
 
+// allow consuming backtrace to convert it to its label without cloning
+impl<'a> From<LabelBacktrace<'a>> for Label<'a> {
+    fn from(backtrace: LabelBacktrace<'a>) -> Self {
+        backtrace.label
+    }
+}
+
 /// The concrete operation that resulted in a label assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelBacktraceKind {

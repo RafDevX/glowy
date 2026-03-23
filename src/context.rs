@@ -6,6 +6,7 @@ use crate::{
     Pinned, SinkDescriptor,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -363,5 +364,52 @@ impl<'a> DeferredEnforcementCheck<'a> {
         };
 
         Some(realized)
+    }
+}
+
+impl SnapshotAware for DeferredEnforcementCheck<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Sink {
+                    sink: sink_a,
+                    found: found_a,
+                    file: file_a,
+                },
+                Self::Sink {
+                    sink: sink_b,
+                    found: found_b,
+                    file: file_b,
+                },
+            ) => {
+                sink_a.snapshot_aware_eq(sink_b)
+                    && found_a.snapshot_aware_eq(found_b)
+                    && file_a == file_b
+            }
+            (
+                Self::Assertion {
+                    expected_sequence: expected_sequence_a,
+                    found: found_a,
+                    file: file_a,
+                    location: location_a,
+                },
+                Self::Assertion {
+                    expected_sequence: expected_sequence_b,
+                    found: found_b,
+                    file: file_b,
+                    location: location_b,
+                },
+            ) => {
+                expected_sequence_a == expected_sequence_b
+                    && found_a.snapshot_aware_eq(found_b)
+                    && file_a == file_b
+                    && location_a == location_b
+            }
+
+            // no wildcard _ so we rely on exhaustiveness for maintainability
+            // (compiler will error if a new variant is added and this method
+            // is not updated to reflect that)
+            (Self::Sink { .. } | Self::Assertion { .. }, _) => false,
+        }
     }
 }
