@@ -57,7 +57,7 @@ fn visit_function_def<'a>(
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
 
-        ctx.declare_new_symbol(symbol.clone());
+        ctx.declare_new_symbol(symbol);
     }
 
     ctx.symtab_mut().select_next_child_scope(); // push
