@@ -655,9 +655,24 @@ fn get_structured_error_info<'a>(
             ],
             help: Some("fix the surrounding syntax to encapsulate the return in a function"),
         },
+        AnalysisErrorKind::MismatchingReturnCardinality {
+            expected,
+            found,
+            location,
+        } => StructuredErrorInfo {
+            title: "returned values cardinality differs from previous return statement".into(),
+            code: "G008".into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label(format!("expected {expected} value(s), but found {found}")),
+                ),
+            ],
+            help: Some("ensure all of this function's return statements match the signature"),
+        },
         AnalysisErrorKind::Unreachable { location } => StructuredErrorInfo {
             title: "unreachable statement found after a block-terminating statement".into(),
-            code: "G008".into(),
+            code: "G009".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(
                     "this statement is unreachable since control flow is diverted before it",
@@ -667,7 +682,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::IllegalCallExpression { location } => StructuredErrorInfo {
             title: "illegal call expression".into(),
-            code: "G009".into(),
+            code: "G010".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -683,7 +698,7 @@ fn get_structured_error_info<'a>(
         } => StructuredErrorInfo {
             title: format!("expected {expected} arguments in function call, but found {found}")
                 .into(),
-            code: "G010".into(),
+            code: "G011".into(),
             snippets: vec![
                 builder
                     .snippet()
@@ -695,7 +710,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedBuiltInArgShape { location } => StructuredErrorInfo {
             title: "unexpected argument shape passed to built-in function".into(),
-            code: "G011".into(),
+            code: "G012".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -711,7 +726,7 @@ fn get_structured_error_info<'a>(
         } => StructuredErrorInfo {
             title: "mismatching number of identifiers and expressions in binding declaration spec"
                 .into(),
-            code: "G012".into(),
+            code: "G013".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(format!(
                     "cannot assign {right} value(s) to {left} identifier(s)"
@@ -726,7 +741,7 @@ fn get_structured_error_info<'a>(
         } => StructuredErrorInfo {
             title: "mismatching number of left-values and expressions in binding declaration spec"
                 .into(),
-            code: "G013".into(),
+            code: "G014".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(format!(
                     "cannot assign {right} right-value(s) to {left} left-value(s)"
@@ -736,7 +751,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::MultiComplexAssignment { location, num } => StructuredErrorInfo {
             title: "invalid complex assignment with more than one left-value".into(),
-            code: "G014".into(),
+            code: "G015".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(format!(
                     "cannot perform a complex assignment on {num} left-values \
@@ -747,7 +762,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::InvalidLeftValue { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a left-value for assignment".into(),
-            code: "G015".into(),
+            code: "G016".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -758,7 +773,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::ImmutableLeftValue { symbol } => StructuredErrorInfo {
             title: "immutable left-value in assignment".into(),
-            code: "G016".into(),
+            code: "G017".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(symbol.location().clone()).label(format!(
                     "symbol `{}` is constant or unchangeable",
@@ -769,7 +784,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::InvalidSelectionBase { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a selection base".into(),
-            code: "G017".into(),
+            code: "G018".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -780,7 +795,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::InvalidIndexingBase { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as an indexing base".into(),
-            code: "G018".into(),
+            code: "G019".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -791,7 +806,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::InvalidSlicingBase { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a slicing base".into(),
-            code: "G019".into(),
+            code: "G020".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -802,7 +817,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::IllegalChannelExpression { location } => StructuredErrorInfo {
             title: "illegal or unsupported expression used as a channel in a send statement".into(),
-            code: "G020".into(),
+            code: "G021".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -813,7 +828,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::GoNotCall { location } => StructuredErrorInfo {
             title: "illegal `go` statement with a non-call expression".into(),
-            code: "G021".into(),
+            code: "G022".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -824,7 +839,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::IllegalSelectCase { location } => StructuredErrorInfo {
             title: "illegal case in `select` statement".into(),
-            code: "G022".into(),
+            code: "G023".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -835,7 +850,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedFallthrough { location } => StructuredErrorInfo {
             title: "unexpected fallthrough statement".into(),
-            code: "G023".into(),
+            code: "G024".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -846,7 +861,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::DuplicateStructFieldName { duplicate } => StructuredErrorInfo {
             title: "duplicate field name in struct literal expression".into(),
-            code: "G024".into(),
+            code: "G025".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(duplicate.location().clone())
@@ -857,7 +872,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedVoidExpression { location } => StructuredErrorInfo {
             title: "invalid void expression when a single value was expected".into(),
-            code: "G025".into(),
+            code: "G026".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -868,7 +883,7 @@ fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedMultiValueExpression { location } => StructuredErrorInfo {
             title: "invalid multi-value expression when a single value was expected".into(),
-            code: "G026".into(),
+            code: "G027".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(
                     "this expression yields multiple values, but only one value was expected",

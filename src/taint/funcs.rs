@@ -16,8 +16,8 @@ use crate::{
     symbols::Symbol,
     taint::{SinkDescriptor, SinkKind, enforcement, exprs},
     values::{
-        BacktraceContainer, FunctionRef, FunctionValue, MobiusValue, SelfAwareBacktraceContainer,
-        Value, ValueRef,
+        BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
+        SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
 
@@ -180,6 +180,14 @@ pub fn visit_return<'a>(
 
     let outcome = calculate_outcome(ctx, func.signature(), exprs, location);
 
+    // merge with existing outcome, if any
+    // (this allows for multiple return statements within the same function)
+    let outcome = if let Some(existing) = func.outcome() {
+        merge_outcomes(ctx, existing, outcome, location)
+    } else {
+        outcome
+    };
+
     drop(func);
 
     let Some(mut func) = value.as_function_mut() else {
@@ -240,6 +248,30 @@ fn calculate_outcome<'a>(
     }
 
     outcome
+}
+
+fn merge_outcomes<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    existing: &[ValueRef<'a>],
+    new: Vec<ValueRef<'a>>,
+    location: &Location,
+) -> Vec<ValueRef<'a>> {
+    if new.len() != existing.len() {
+        ctx.report_error(AnalysisErrorKind::MismatchingReturnCardinality {
+            expected: existing.len(),
+            found: new.len(),
+            location: location.clone(),
+        });
+    }
+
+    let pinned = ctx.pin(location.clone());
+    let mut merged = Vec::with_capacity(new.len());
+
+    for (existing, new) in existing.iter().zip(new.into_iter()) {
+        merged.push(new.merge_with(existing, LabelBacktraceKind::Return, Cow::Borrowed(&pinned)));
+    }
+
+    merged
 }
 
 #[allow(clippy::too_many_lines)]

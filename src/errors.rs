@@ -167,6 +167,15 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the extraneous return statement was found.
         location: Location,
     },
+    /// Illegal number of return values differs from previous return statement.
+    MismatchingReturnCardinality {
+        /// The previously found number of returned values.
+        expected: usize,
+        /// The number of values described by this return statement.
+        found: usize,
+        /// Where the invalid return statement was found.
+        location: Location,
+    },
     /// Illegal statement present after a block-terminating statement.
     Unreachable {
         /// Where the offending statement was found.
@@ -323,6 +332,7 @@ impl AnalysisErrorKind<'_> {
             | Self::UnknownSymbol { .. }
             | Self::UnknownQualifier { .. }
             | Self::UnexpectedReturn { .. }
+            | Self::MismatchingReturnCardinality { .. }
             | Self::Unreachable { .. }
             | Self::IllegalCallExpression { .. }
             | Self::IncorrectCallCardinality { .. }

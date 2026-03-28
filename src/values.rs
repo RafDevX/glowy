@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cell::{Ref, RefCell, RefMut},
     cmp,
     collections::{HashMap, hash_map::Entry},
@@ -292,6 +293,32 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
     }
 }
 
+// can't be part of SelfAwareBacktraceContainer because some sub-containers
+// might not want to implement this, such as PackageRefValue (where this would
+// make absolutely no sense and even be semantically incorrect)
+pub trait Mergeable {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self;
+}
+
+impl Mergeable for ValueRef<'_> {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self {
+        let b1 = self.0.borrow();
+        let b2 = other.0.borrow();
+
+        ValueRef::from(b1.merge_with(&b2, with_kind, at_location))
+    }
+}
+
 impl SnapshotAware for ValueRef<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.0.borrow().snapshot_aware_eq(&other.0.borrow())
@@ -337,6 +364,26 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
             .collect();
 
         LabelBacktrace::fold(children.iter(), parent_kind, parent_symbol, parent_location)
+    }
+}
+
+impl Mergeable for Option<LabelBacktrace<'_>> {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self {
+        match (self, other) {
+            (None, None) => None,
+            (Some(only), None) | (None, Some(only)) => Some(only.clone()),
+            (Some(a), Some(b)) => Some(LabelBacktrace::union(
+                a,
+                b,
+                with_kind,
+                at_location.into_owned(),
+            )),
+        }
     }
 }
 
@@ -437,6 +484,63 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Struct(composite) => Self::Struct(recurs!(composite)),
             Self::Function(func) => Self::Function(recurs!(func)),
+        }
+    }
+}
+
+impl Mergeable for Value<'_> {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self {
+        macro_rules! recurs {
+            ($a:expr, $b:expr) => {
+                $a.merge_with($b, with_kind, at_location)
+            };
+        }
+
+        match (self, other) {
+            (Self::Simple(a), Self::Simple(b)) => Self::Simple(recurs!(a, b)),
+            (Self::Expandable(a), Self::Expandable(b)) => Self::Expandable(recurs!(a, b)),
+            (Self::Mobius(a), Self::Mobius(b)) => Self::Mobius(recurs!(a, b)),
+            (Self::PackageRef(_), Self::PackageRef(_)) => Self::Simple(None),
+            (Self::Array(a), Self::Array(b)) => Self::Array(recurs!(a, b)),
+            (Self::Slice(a), Self::Slice(b)) => Self::Slice(recurs!(a, b)),
+            (Self::Map(a), Self::Map(b)) => Self::Map(recurs!(a, b)),
+            (Self::Struct(a), Self::Struct(b)) => Self::Struct(recurs!(a, b)),
+            // intentionally not handling (Fn, Fn)
+            //
+            (Self::Simple(None), other) | (other, Self::Simple(None)) => other.clone(),
+            (Self::Simple(Some(bt)), other) | (other, Self::Simple(Some(bt))) => other
+                .nest_backtrace(
+                    with_kind,
+                    None,
+                    at_location.into_owned(),
+                    iter::once(bt.clone()),
+                ),
+
+            // no wildcard _ so we rely on exhaustiveness for maintainability
+            // (compiler will error if a new variant is added and this method
+            // is not updated to reflect that)
+            (
+                Self::Expandable(_)
+                | Self::Mobius(_)
+                | Self::PackageRef(_)
+                | Self::Array(_)
+                | Self::Slice(_)
+                | Self::Map(_)
+                | Self::Struct(_)
+                | Self::Function(_),
+                _,
+            ) => {
+                let location = at_location.clone().into_owned();
+                let a = self.backtrace_at_location(location.clone());
+                let b = other.backtrace_at_location(location);
+
+                Self::Simple(recurs!(a, &b))
+            }
         }
     }
 }
@@ -573,6 +677,35 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
     }
 }
 
+impl Mergeable for ExpandableValue<'_> {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self {
+        let primary = self
+            .primary
+            .merge_with(&other.primary, with_kind, at_location.clone());
+
+        let max_len = cmp::max(self.secondary.len(), other.secondary.len());
+        let mut secondary = Vec::with_capacity(max_len);
+
+        // cannot use zip since one of the vectors might be longer
+        for i in 0..max_len {
+            let merged = match (self.secondary.get(i), other.secondary.get(i)) {
+                (None, None) => unreachable!(),
+                (Some(single), None) | (None, Some(single)) => single.clone(),
+                (Some(a), Some(b)) => a.merge_with(b, with_kind, at_location.clone()),
+            };
+
+            secondary.push(merged);
+        }
+
+        Self::new(primary, secondary)
+    }
+}
+
 impl<'a> Upgrade<'a> for ExpandableValue<'a> {
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         Self::new(ValueRef::from(backtrace), Vec::new())
@@ -639,6 +772,17 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
             parent_location,
             extra_children,
         ))
+    }
+}
+
+impl Mergeable for MobiusValue<'_> {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self {
+        Self::new(self.0.merge_with(&other.0, with_kind, at_location))
     }
 }
 
@@ -922,6 +1066,45 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             r#const,
             r#dyn,
             default_value: self.default_value.clone(), // ref-clone is fine here
+        }
+    }
+}
+
+impl<K: Eq + Hash + Clone> Mergeable for CompositeValue<'_, K> {
+    fn merge_with(
+        &self,
+        other: &Self,
+        with_kind: LabelBacktraceKind,
+        at_location: Cow<Pinned<Location>>,
+    ) -> Self {
+        let mut r#const = self.r#const.clone();
+        for (k, v) in &other.r#const {
+            match r#const.entry(k.clone()) {
+                Entry::Occupied(mut occupied) => {
+                    let merged = occupied.get().merge_with(v, with_kind, at_location.clone());
+
+                    occupied.insert(merged);
+                }
+                Entry::Vacant(vacant) => {
+                    vacant.insert(v.clone());
+                }
+            }
+        }
+
+        let r#dyn = self
+            .r#dyn
+            .merge_with(&other.r#dyn, with_kind, at_location.clone());
+
+        let default_value = match (&self.default_value, &other.default_value) {
+            (None, None) => None,
+            (Some(single), None) | (None, Some(single)) => Some(single.clone()),
+            (Some(a), Some(b)) => Some(a.merge_with(b, with_kind, at_location)),
+        };
+
+        Self {
+            r#const,
+            r#dyn,
+            default_value,
         }
     }
 }
