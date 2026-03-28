@@ -1,10 +1,13 @@
 [package]
 name = "parser"
 description = "Simple parser for the Go language"
+readme = "../README.md"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
