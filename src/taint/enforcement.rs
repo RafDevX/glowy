@@ -91,6 +91,7 @@ pub fn trigger_assertion<'a>(
 }
 
 // returns whether the check triggered or if it must be propagated further
+#[must_use]
 pub fn try_trigger_deferred_check<'a>(
     ctx: &mut AnalysisContext<'a>,
     check: &DeferredEnforcementCheck<'a>,
