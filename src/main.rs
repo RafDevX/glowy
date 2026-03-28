@@ -13,9 +13,15 @@ use glowy::{
     labels::{LabelBacktrace, LabelBacktraceKind},
 };
 
-// FIXME: change to proper hosted version
-// (ideally, automatically updated with GitHub actions)
-const DOCS_ROOT_URL: &str = "file:///home/raf/Documents/KTH/TCYSM/thesis/glowy/target/doc/glowy";
+#[cfg(not(debug_assertions))] // release mode
+const DOCS_ROOT_URL: &str = "https://glowy.rso.pt/glowy";
+#[cfg(debug_assertions)] // debug mode
+const DOCS_ROOT_URL: &str = concat!(
+    "file://",
+    env!("CARGO_MANIFEST_DIR"),
+    "/target/doc/",
+    env!("CARGO_CRATE_NAME")
+);
 
 fn main() {
     let config = Config::parse();
