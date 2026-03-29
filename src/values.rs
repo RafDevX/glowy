@@ -89,45 +89,43 @@ impl<'a> ValueRef<'a> {
             *self.0.borrow_mut() = new;
         }
     }
+}
 
+macro_rules! extract_inner {
+    ($variant:path, $value:expr) => {
+        match $value {
+            $variant(inner) => Some(inner),
+            _ => None,
+        }
+    };
+    ($variant:path) => {
+        |value| extract_inner!($variant, value)
+    };
+}
+
+impl<'a> ValueRef<'a> {
     pub fn as_expandable(&self) -> Option<Ref<'_, ExpandableValue<'a>>> {
         self.try_upgrade_to(Value::Expandable);
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
-            Value::Expandable(exp) => Some(exp),
-            _ => None,
-        })
-        .ok()
+        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Expandable)).ok()
     }
 
     pub fn as_mobius(&self) -> Option<Ref<'_, MobiusValue<'a>>> {
         self.try_upgrade_to(Value::Mobius);
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
-            Value::Mobius(mobius) => Some(mobius),
-            _ => None,
-        })
-        .ok()
+        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Mobius)).ok()
     }
 
     pub fn as_package_ref(&self) -> Option<Ref<'_, PackageRefValue<'a>>> {
         // no coercion because there's no 'blank' package ref
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
-            Value::PackageRef(pkg) => Some(pkg),
-            _ => None,
-        })
-        .ok()
+        Ref::filter_map(self.0.borrow(), extract_inner!(Value::PackageRef)).ok()
     }
 
     pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 
-        RefMut::filter_map(self.0.borrow_mut(), |value| match value {
-            Value::Slice(composite) => Some(composite),
-            _ => None,
-        })
-        .ok()
+        RefMut::filter_map(self.0.borrow_mut(), extract_inner!(Value::Slice)).ok()
     }
 
     // (complex because Simple is technically also sliceable but not supported
@@ -171,41 +169,25 @@ impl<'a> ValueRef<'a> {
     pub fn as_struct(&self) -> Option<Ref<'_, CompositeValue<'a, String>>> {
         self.try_upgrade_to(Value::Struct);
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
-            Value::Struct(r#struct) => Some(r#struct),
-            _ => None,
-        })
-        .ok()
+        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Struct)).ok()
     }
 
     pub fn as_struct_mut(&self) -> Option<RefMut<'_, CompositeValue<'a, String>>> {
         self.try_upgrade_to(Value::Struct);
 
-        RefMut::filter_map(self.0.borrow_mut(), |value| match value {
-            Value::Struct(r#struct) => Some(r#struct),
-            _ => None,
-        })
-        .ok()
+        RefMut::filter_map(self.0.borrow_mut(), extract_inner!(Value::Struct)).ok()
     }
 
     pub fn as_function(&self) -> Option<Ref<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
-            Value::Function(func) => Some(func),
-            _ => None,
-        })
-        .ok()
+        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Function)).ok()
     }
 
     pub fn as_function_mut(&mut self) -> Option<RefMut<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
-        RefMut::filter_map(self.0.borrow_mut(), |value| match value {
-            Value::Function(func) => Some(func),
-            _ => None,
-        })
-        .ok()
+        RefMut::filter_map(self.0.borrow_mut(), extract_inner!(Value::Function)).ok()
     }
 }
 
