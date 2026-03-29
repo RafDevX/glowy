@@ -312,7 +312,7 @@ impl SnapshotAware for ValueRef<'_> {
 }
 
 impl<'a> BacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<Location>) -> Self {
         self.clone()
             .map(|bt| (bt.symbol(), bt)) // thanks borrow checker, very cool
             .map(|(sym, bt)| bt.into_single_child(LabelBacktraceKind::Expression, sym, location))

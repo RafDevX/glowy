@@ -123,7 +123,7 @@ impl<'a> AnalysisContext<'a> {
     pub fn branch_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.current_calculated_branch_backtrace
             .as_ref()
-            .or(self.branch_backtraces.last())
+            .or_else(|| self.branch_backtraces.last())
     }
 
     pub fn push_branch_backtrace(&mut self, backtrace: LabelBacktrace<'a>) {
@@ -313,7 +313,7 @@ struct DeferredBranchBacktrace<'a> {
     because: Pinned<Location>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeferTarget<'a> {
     Function,
     InnermostLoop,
@@ -370,6 +370,7 @@ impl<'a> DeferredEnforcementCheck<'a> {
 impl SnapshotAware for DeferredEnforcementCheck<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         match (self, other) {
+            #[expect(clippy::suspicious_operation_groupings, reason = "False positive")]
             (
                 Self::Sink {
                     sink: sink_a,

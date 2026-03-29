@@ -202,7 +202,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                         }
 
                         let sequence = Label::sequence_from_tags(&annotation.tags);
-                        let location = ctx.pin(location.clone());
+                        let location = ctx.pin(location);
 
                         for value in values {
                             enforcement::trigger_assertion(

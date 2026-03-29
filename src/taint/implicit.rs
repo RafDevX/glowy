@@ -276,7 +276,7 @@ fn get_for_range_values<'a>(
         // and the 1st value would coincide)
 
         // 1st value index, 2nd value code point
-        let bt = value.backtrace_at_location(location.clone());
+        let bt = value.backtrace_at_location(location);
 
         vec![ValueRef::from(bt.clone()), ValueRef::from(bt)]
     }
