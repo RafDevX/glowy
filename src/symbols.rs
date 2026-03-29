@@ -201,29 +201,28 @@ impl<'a> SymbolTable<'a> {
         self.universe_scope.get_local_symbol(name)
     }
 
-    /// Returns None if qualifier cannot be resolved, Some(None) if the
-    /// qualifier is recognized but no matching package has (yet?) been analyzed
-    /// so it is not known if the symbol exists, Some(Some(None)) if name is not
-    /// exported by the referenced package, or finally Some(Some(Some(symbol)))
-    /// otherwise (if the symbol exists).
     pub fn get_qualified_symbol(
         &self,
         qualifier: &str,
         name: &str,
-    ) -> Option<Option<Option<SymbolRef<'a>>>> {
+    ) -> QualifiedSymbolResolutionResult<'a> {
         if let Some(path) = self.current_file_named_imports.get(qualifier) {
             if let Some(Some(envelope)) = self.package_scopes.get(path) {
                 if name.chars().next().is_some_and(char::is_uppercase) {
-                    Some(Some(envelope.scope.borrow().get_local_symbol(name)))
+                    if let Some(symbol) = envelope.scope.borrow().get_local_symbol(name) {
+                        QualifiedSymbolResolutionResult::Success(symbol)
+                    } else {
+                        QualifiedSymbolResolutionResult::UnknownSymbol
+                    }
                 } else {
-                    Some(Some(None))
+                    QualifiedSymbolResolutionResult::UnknownSymbol
                 }
             } else {
                 // we haven't visited the package (yet?)
-                Some(None)
+                QualifiedSymbolResolutionResult::PendingAnalysis
             }
         } else {
-            None
+            QualifiedSymbolResolutionResult::UnknownQualifier
         }
     }
 
@@ -361,6 +360,25 @@ impl Default for SymbolTable<'_> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub enum QualifiedSymbolResolutionResult<'a> {
+    /// Qualifier is unknown and so could not be resolved to any other package.
+    UnknownQualifier,
+    /// Qualifier recognized but no matching package has (yet?) been analyzed.
+    ///
+    /// This means that it is not possible at this point in time to determine if
+    /// the symbol exists, since such determination will only be possible once
+    /// the target package has been analyzed (assuming its source code is
+    /// available and will eventually be queued).
+    PendingAnalysis,
+    /// Requested name is not exported by the referenced package.
+    ///
+    /// This might be because it is private, or simply because it does not exist
+    /// within the target package.
+    UnknownSymbol,
+    /// Specified symbol was successfully found in the referenced package.
+    Success(SymbolRef<'a>),
 }
 
 #[derive(Debug)]

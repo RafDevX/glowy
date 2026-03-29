@@ -535,6 +535,10 @@ fn handle_deferred_checks<'a>(
     }
 }
 
+#[allow(
+    clippy::option_option,
+    reason = "Conveniently represent a receiver's presence/absence"
+)]
 fn calculate_call_result<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,

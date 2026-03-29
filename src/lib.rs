@@ -24,7 +24,6 @@
 
 // Clippy lint configuration
 #![warn(clippy::all, clippy::pedantic, clippy::cargo)]
-#![allow(clippy::option_option)]
 // Documentation lint configuration
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]

@@ -104,6 +104,10 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         // matching here to essentially swap the Options
         #[inline]
         #[allow(clippy::items_after_statements)]
+        #[allow(
+            clippy::option_option,
+            reason = "Access to convenient methods in auxiliary computations"
+        )]
         fn transform(v: Option<&Option<SimpleConstValue>>) -> Option<Option<u64>> {
             match v {
                 Some(Some(SimpleConstValue::Integer(x))) => Some(Some(*x)),

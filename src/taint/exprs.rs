@@ -8,7 +8,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
-    symbols::SymbolRef,
+    symbols::{QualifiedSymbolResolutionResult, SymbolRef},
     values::{
         BacktraceContainer, ExpandableValue, PackageRefValue, SelfAwareBacktraceContainer, Value,
         ValueRef,
@@ -168,15 +168,16 @@ pub fn resolve_operand_name<'a>(
             .symtab()
             .get_qualified_symbol(qualifier.content(), name.content())
         {
-            Some(Some(symbol)) => symbol,
-            Some(None) => {
+            QualifiedSymbolResolutionResult::Success(symbol) => Some(symbol),
+            QualifiedSymbolResolutionResult::UnknownSymbol => None,
+            QualifiedSymbolResolutionResult::PendingAnalysis => {
                 // this is likely the accessing of blackbox package for which we
                 // do not actually have the source, so we just return None now
                 // without actually reporting any error
 
                 return None;
             }
-            None => {
+            QualifiedSymbolResolutionResult::UnknownQualifier => {
                 ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
 
                 return None;
