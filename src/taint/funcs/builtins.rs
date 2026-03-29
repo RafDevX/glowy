@@ -27,6 +27,10 @@ use crate::{
 };
 
 pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> ValueRef<'a> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "We explicitly only support these types (per Go spec)"
+    )]
     match &node.r#type {
         TypeNode::Slice { .. } => {
             let n = node
@@ -367,14 +371,14 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     let mut composite = value.as_composite_mut().unwrap(); // already checked
 
     if let Some(r#const) = SimpleConstValue::try_resolve_from_expr(key) {
-        composite.set_const(
+        composite.set_at_known_key(
             r#const,
             ValueRef::new_bottom(),
             true,
             ctx.pin(node.location.clone()),
         );
     } else {
-        composite.set_dyn(&ValueRef::new_bottom(), ctx.pin(node.location.clone()));
+        composite.set_at_unknown_key(&ValueRef::new_bottom(), ctx.pin(node.location.clone()));
     }
 
     drop(composite);

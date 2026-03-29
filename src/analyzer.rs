@@ -132,7 +132,7 @@ impl Analyzer {
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    #[allow(clippy::missing_panics_doc)] // unwrap is guaranteed safe here
+    #[expect(clippy::missing_panics_doc, reason = "Unwrap is guaranteed safe here")]
     pub fn from_go_mod<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let file = fs::File::open(path)?;
         let reader = io::BufReader::new(file);
@@ -163,21 +163,25 @@ impl Analyzer {
             let entry = entry?;
             let file_type = entry.file_type()?;
 
+            #[expect(
+                clippy::filetype_is_file,
+                reason = "Symlinks currently unsupported (could lead to cycles)"
+            )]
             if file_type.is_dir() {
                 self.add_directory_recurs(
                     virtual_path.as_ref().join(entry.file_name()),
                     entry.path(),
                 )?;
             } else if file_type.is_file() {
-                let real_path = entry.path();
+                let file_real_path = entry.path();
 
-                if real_path.extension().filter(|e| *e == "go").is_none() {
+                if file_real_path.extension().filter(|e| *e == "go").is_none() {
                     continue;
                 }
 
                 let file = SourceFile::read_from_disk(
                     virtual_path.as_ref().join(entry.file_name()),
-                    real_path,
+                    file_real_path,
                 )?;
 
                 self.add_file(file);

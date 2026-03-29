@@ -228,7 +228,10 @@ fn get_for_range_values<'a>(
 
         let index_bt = composite.backtrace_at_location(location.clone());
 
-        vec![ValueRef::from(index_bt), composite.get_dyn(location)]
+        vec![
+            ValueRef::from(index_bt),
+            composite.get_at_unknown_key(location),
+        ]
     } else if let Some(func) = value.as_function() {
         let yield_type = func
             .signature()
@@ -326,7 +329,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
     // the secret can be leaked.
     // Note that this is distinct from node.clauses.len()+1? because some might
     // have no backtraces (e.g., `case 3:`).
-    let mut n_pushes = 0;
+    let mut n_pushes = 0_usize;
 
     if let Some(expr) = &node.expr {
         if let Some(bt) = exprs::get_expr_backtrace(ctx, expr) {

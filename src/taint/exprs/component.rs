@@ -50,9 +50,9 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);
 
     let result = if let Some(index) = index {
-        composite.get_const(&index, ctx.pin(node.location.clone()))
+        composite.get_at_known_key(&index, ctx.pin(node.location.clone()))
     } else {
-        composite.get_dyn(ctx.pin(node.location.clone()))
+        composite.get_at_unknown_key(ctx.pin(node.location.clone()))
     };
 
     if base.is_map() {
@@ -103,8 +103,11 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         // be propagated. this means we need to do some rather unintuitive
         // matching here to essentially swap the Options
         #[inline]
-        #[allow(clippy::items_after_statements)]
-        #[allow(
+        #[expect(
+            clippy::items_after_statements,
+            reason = "Auxiliary function makes more sense defined/explained here"
+        )]
+        #[expect(
             clippy::option_option,
             reason = "Access to convenient methods in auxiliary computations"
         )]

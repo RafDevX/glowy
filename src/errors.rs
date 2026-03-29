@@ -34,6 +34,7 @@ use crate::{
 /// Error information is presented in a flexible manner so that the application
 /// can decide how to react and choose what details to display.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct AnalysisError<'a> {
     /// Go source file during the analysis of which the error was reported.
     ///

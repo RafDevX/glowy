@@ -113,7 +113,7 @@ impl<'a> SymbolTable<'a> {
         self.current_file_named_imports.clear();
         self.current_file_wildcard_imports.clear();
 
-        self.current_scope = envelope.scope.clone();
+        self.current_scope = Rc::clone(&envelope.scope);
         self.current_cursor = vec![envelope.next_child_index];
 
         &envelope.package_name
@@ -149,8 +149,8 @@ impl<'a> SymbolTable<'a> {
             if let Some(existing) = scope.children.get(index).cloned() {
                 existing
             } else {
-                let new_scope = Scope::new_ref(self.current_scope.clone());
-                scope.children.push(new_scope.clone());
+                let new_scope = Scope::new_ref(Rc::clone(&self.current_scope));
+                scope.children.push(Rc::clone(&new_scope));
 
                 new_scope
             }
@@ -173,9 +173,9 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
-        let mut checking = Some(self.current_scope.clone());
+        let mut checking = Some(Rc::clone(&self.current_scope));
 
-        while let Some(ref scope) = checking {
+        while let Some(scope) = &checking {
             let borrowed = scope.borrow();
 
             if let Some(symbol) = borrowed.get_local_symbol(name) {
@@ -542,7 +542,7 @@ impl<'a> Scope<'a> {
             let borrowed = symbol.borrow();
 
             let item = SymbolTableSnapshotItem::new(
-                namespace.clone(),
+                Rc::clone(namespace),
                 name,
                 borrowed.mutable(),
                 borrowed.value().get(),
@@ -569,14 +569,17 @@ impl<'a> Scope<'a> {
 impl fmt::Debug for Scope<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         #[derive(Debug)]
+        #[expect(dead_code, reason = "Fake struct not meant to be used")]
         struct Scope<'d, 'a> {
-            #[allow(dead_code)]
             symbols: &'d HashMap<&'a str, SymbolRef<'a>>,
             // no `parent` to avoid infinite loop
-            #[allow(dead_code)]
             children: &'d Vec<ScopeRef<'a>>,
         }
 
+        #[expect(
+            clippy::unneeded_field_pattern,
+            reason = "Force revisiting this implementation if a field is added"
+        )]
         let Self {
             symbols,
             children,

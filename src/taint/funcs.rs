@@ -190,7 +190,7 @@ pub fn visit_return<'a>(
 
     drop(func);
 
-    let Some(mut func) = value.as_function_mut() else {
+    let Some(mut func_mut) = value.as_function_mut() else {
         ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
             location: location.clone(),
         });
@@ -198,7 +198,7 @@ pub fn visit_return<'a>(
         return;
     };
 
-    func.set_outcome(outcome);
+    func_mut.set_outcome(outcome);
 
     ctx.defer_branch_backtrace(DeferTarget::Function, location.clone());
 }
@@ -267,6 +267,7 @@ fn merge_outcomes<'a>(
     let pinned = ctx.pin(location.clone());
     let mut merged = Vec::with_capacity(new.len());
 
+    #[expect(clippy::shadow_unrelated, reason = "False positive")]
     for (existing, new) in existing.iter().zip(new.into_iter()) {
         merged.push(new.merge_with(existing, LabelBacktraceKind::Return, Cow::Borrowed(&pinned)));
     }
@@ -274,7 +275,10 @@ fn merge_outcomes<'a>(
     merged
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Very tight coupling means it would become more confusing if split up"
+)]
 pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec<ValueRef<'a>> {
     // we treat some built-in functions specially, not as function calls but as
     // independent quasi-types of expressions. if they don't look like a real
@@ -453,14 +457,14 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // we cannot use exprs::get_expr_backtrace since we need to rule out the
         // case that the ""selection"" is actually just a qualified identifier
         // and so the ""receiver"" is really just a qualifier (package ref)
-        let value = exprs::visit_single_expr(ctx, &selection.base);
+        let base = exprs::visit_single_expr(ctx, &selection.base);
 
-        if value.as_package_ref().is_some() {
+        if base.as_package_ref().is_some() {
             None
         } else {
             let location = ctx.pin(exprs::get_expr_location(&selection.base));
 
-            Some(value.backtrace_at_location(location))
+            Some(base.backtrace_at_location(location))
         }
     } else {
         None
@@ -493,8 +497,8 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     // re-borrow as mutable
     drop(func);
-    if let Some(mut func) = value.as_function_mut() {
-        func.record_call();
+    if let Some(mut func_mut) = value.as_function_mut() {
+        func_mut.record_call();
     }
 
     result
@@ -535,7 +539,7 @@ fn handle_deferred_checks<'a>(
     }
 }
 
-#[allow(
+#[expect(
     clippy::option_option,
     reason = "Conveniently represent a receiver's presence/absence"
 )]

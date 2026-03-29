@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp};
+use std::{borrow::Cow, cmp, rc::Rc};
 
 use parser::{
     Annotation, Location, Span,
@@ -172,7 +172,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             true, // we initially always set the symbol as mutable
             ValueRef::new_bottom(),
         );
-        let symbol2 = symbol.clone(); // for later use if needed
+        let symbol2 = Rc::clone(&symbol); // for later use if needed
 
         if short {
             // declare manually to hold errors until we're sure
@@ -365,7 +365,18 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
             ExprNode::Name(name) => name,
             ExprNode::Indexing(indexing) => indexing,
             ExprNode::Selection(selection) => selection,
-            _ => {
+
+            // not using wildcard to force revisiting this implementation if a
+            // new kind of expression is ever added (need to decide whether to
+            // implement LeftValue for it or not)
+            ExprNode::Literal(_)
+            | ExprNode::Call(_)
+            | ExprNode::Make(_)
+            | ExprNode::Slicing(_)
+            | ExprNode::Conversion(_)
+            | ExprNode::TypeAssertion(_)
+            | ExprNode::UnaryOp { .. }
+            | ExprNode::BinaryOp { .. } => {
                 ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
                     location: exprs::get_expr_location(self),
                 });
@@ -491,9 +502,9 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         let overwrite = simple && root_indexing_in_current_scope(ctx, self);
 
         if let Some(index) = index {
-            composite.set_const(index, value, overwrite, ctx.pin(location.clone()));
+            composite.set_at_known_key(index, value, overwrite, ctx.pin(location.clone()));
         } else {
-            composite.set_dyn(&value, ctx.pin(location.clone()));
+            composite.set_at_unknown_key(&value, ctx.pin(location.clone()));
         }
     }
 }
@@ -502,6 +513,10 @@ fn root_indexing_in_current_scope<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &IndexingNode<'a>,
 ) -> bool {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "We explicitly want to be conservative for the unknown case"
+    )]
     match &*node.base {
         ExprNode::Name(operand) => {
             if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {

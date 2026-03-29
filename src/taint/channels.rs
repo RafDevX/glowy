@@ -145,6 +145,10 @@ pub fn visit_select<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectNode<'a>) {
 }
 
 fn extract_select_case_channel<'a, 'b>(node: &'b StatementNode<'a>) -> Option<&'b ExprNode<'a>> {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "We explicitly want to detect only these variants (per Go spec)"
+    )]
     match node {
         StatementNode::Send(send) => Some(&send.channel),
         StatementNode::Expr {

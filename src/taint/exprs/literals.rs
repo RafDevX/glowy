@@ -171,8 +171,11 @@ fn visit_struct_composite_literal<'a>(
             // only pass the field information as "others" (which will become
             // the basis for the dyn backtrace of the composite value)
 
-            let names = if let TypeNode::Struct { fields } = r#type {
-                let candidate: Vec<_> = fields
+            let names = if let TypeNode::Struct {
+                fields: type_fields,
+            } = r#type
+            {
+                let candidate: Vec<_> = type_fields
                     .iter()
                     .flat_map(|f| f.ids.iter())
                     .map(Option::as_ref)

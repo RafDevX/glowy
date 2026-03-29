@@ -258,18 +258,17 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                 location: location.clone(),
             });
         }
-        StatementNode::Go { expr, location } => match expr {
-            ExprNode::Call(call) => {
+        StatementNode::Go { expr, location } => {
+            if let ExprNode::Call(call) = expr {
                 // for our purposes, a `go` statement is functionally equivalent
                 // to a function call
                 funcs::visit_call(ctx, call);
-            }
-            _ => {
+            } else {
                 ctx.report_error(AnalysisErrorKind::GoNotCall {
                     location: location.clone(),
                 });
             }
-        },
+        }
         StatementNode::Defer { expr, location } => {
             // FIXME: defer statements are currently not supported (the
             // expression is just visited normally instead of later), since
@@ -351,6 +350,25 @@ fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
         StatementNode::Block(statements) => statements
             .last()
             .is_some_and(disallows_subsequent_statements),
-        _ => false,
+
+        // not using wildcard to force reconsidering this implementation if
+        // new statements are added (need to decide what this fn should return)
+        StatementNode::Empty { .. }
+        | StatementNode::Expr { .. }
+        | StatementNode::Send(_)
+        | StatementNode::Inc { .. }
+        | StatementNode::Dec { .. }
+        | StatementNode::Assignment(_)
+        | StatementNode::ShortVarDecl(_)
+        | StatementNode::Labeled { .. }
+        | StatementNode::Decl { .. }
+        | StatementNode::If(_)
+        | StatementNode::For(_)
+        | StatementNode::Switch(_)
+        | StatementNode::Select(_)
+        | StatementNode::Fallthrough { .. }
+        | StatementNode::Goto { .. }
+        | StatementNode::Go { .. }
+        | StatementNode::Defer { .. } => false,
     }
 }

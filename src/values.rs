@@ -103,6 +103,10 @@ macro_rules! extract_inner {
     };
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "We explicitly want to match only one variant and ignore all others"
+)]
 impl<'a> ValueRef<'a> {
     pub fn as_expandable(&self) -> Option<Ref<'_, ExpandableValue<'a>>> {
         self.try_upgrade_to(Value::Expandable);
@@ -1060,6 +1064,11 @@ impl<K: Eq + Hash + Clone> Mergeable for CompositeValue<'_, K> {
         at_location: Cow<Pinned<Location>>,
     ) -> Self {
         let mut r#const = self.r#const.clone();
+
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "Order is irrelevant; result is still deterministic"
+        )]
         for (k, v) in &other.r#const {
             match r#const.entry(k.clone()) {
                 Entry::Occupied(mut occupied) => {
@@ -1115,30 +1124,41 @@ impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
 // CompositeValue<'a, ?> in function return values and etc., but we want to
 // re-use code for similar logic whenever possible while maintaining typing
 // guarantees for integer-keyed composite values
+// Method names are different than CompositeValue's for clarity and prevent
+// confusion on whether a call refers to the struct's own method or this trait.
+// See clippy::same_name_method
 pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
-    fn get_const(&self, key: &SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a>;
-    fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a>;
-    fn set_const(
+    fn get_at_known_key(
+        &self,
+        key: &SimpleConstValue,
+        at_location: Pinned<Location>,
+    ) -> ValueRef<'a>;
+    fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a>;
+    fn set_at_known_key(
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
         overwrite: bool,
         at_location: Pinned<Location>,
     );
-    fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>);
+    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>);
 }
 
 // trivial implementation
 impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
-    fn get_const(&self, key: &SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_at_known_key(
+        &self,
+        key: &SimpleConstValue,
+        at_location: Pinned<Location>,
+    ) -> ValueRef<'a> {
         self.get_const(key, at_location)
     }
 
-    fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
         self.get_dyn(at_location)
     }
 
-    fn set_const(
+    fn set_at_known_key(
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
@@ -1148,14 +1168,18 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
         self.set_const(key, value, overwrite, at_location);
     }
 
-    fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
+    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
         self.set_dyn(value, at_location);
     }
 }
 
 // integer key adapter
 impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
-    fn get_const(&self, key: &SimpleConstValue, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_at_known_key(
+        &self,
+        key: &SimpleConstValue,
+        at_location: Pinned<Location>,
+    ) -> ValueRef<'a> {
         if let SimpleConstValue::Integer(key) = key {
             self.get_const(key, at_location)
         } else {
@@ -1163,11 +1187,11 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         }
     }
 
-    fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
         self.get_dyn(at_location)
     }
 
-    fn set_const(
+    fn set_at_known_key(
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
@@ -1181,7 +1205,7 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         }
     }
 
-    fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
+    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
         self.set_dyn(value, at_location);
     }
 }
@@ -1353,7 +1377,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             deferred_checks,
-            call_count: self.call_count.clone(), // preserve link to shared val
+            call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
 
@@ -1377,7 +1401,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             deferred_checks: self.deferred_checks.clone(),
-            call_count: self.call_count.clone(), // preserve link to shared val
+            call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
 }
@@ -1494,6 +1518,10 @@ pub enum SimpleConstValue {
 // basic support for literal-only composition, e.g. `2 + 3` is recognized as 5
 impl SimpleConstValue {
     pub fn try_resolve_from_expr(expr: &ExprNode<'_>) -> Option<Self> {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "We explicitly only want a very restricted set of expressions"
+        )]
         let result = match expr {
             ExprNode::Literal(LiteralNode::String { value, .. }) => Self::String(value.clone()),
             ExprNode::Literal(LiteralNode::Int { value, .. }) => Self::Integer(*value),
@@ -1505,39 +1533,53 @@ impl SimpleConstValue {
             ExprNode::BinaryOp {
                 kind, left, right, ..
             } => {
-                let l = Self::try_resolve_from_expr(left)?;
-                let r = Self::try_resolve_from_expr(right)?;
+                let left = Self::try_resolve_from_expr(left)?;
+                let right = Self::try_resolve_from_expr(right)?;
 
                 if *kind == BinaryOpKind::Sum {
-                    if let Self::String(l) = l {
-                        if let Self::String(r) = r {
+                    // check right before left to avoid having to clone either
+                    // (since we never need ownership of right)
+                    if let Self::String(right) = &right {
+                        if let Self::String(left) = left {
                             // string concatenation
-                            return Some(Self::String(l + &r));
+                            return Some(Self::String(left + right));
                         }
                     }
                 }
 
                 // otherwise, must be integer operation
 
-                let Self::Integer(l) = Self::try_resolve_from_expr(left)? else {
+                let Self::Integer(left) = left else {
                     return None;
                 };
-                let Self::Integer(r) = Self::try_resolve_from_expr(right)? else {
+                let Self::Integer(right) = right else {
                     return None;
                 };
 
                 let combined = match kind {
-                    BinaryOpKind::Sum => l.saturating_add(r),
-                    BinaryOpKind::Diff => l.saturating_sub(r),
-                    BinaryOpKind::Product => l.saturating_mul(r),
-                    BinaryOpKind::Quotient if r != 0 => l.saturating_div(r),
-                    BinaryOpKind::Remainder => l % r,
-                    BinaryOpKind::ShiftLeft => l << r,
-                    BinaryOpKind::ShiftRight => l >> r,
-                    BinaryOpKind::BitwiseOr => l | r,
-                    BinaryOpKind::BitwiseAnd => l & r,
-                    BinaryOpKind::BitwiseXor => l ^ r,
-                    _ => return None,
+                    BinaryOpKind::Sum => left.saturating_add(right),
+                    BinaryOpKind::Diff => left.saturating_sub(right),
+                    BinaryOpKind::Product => left.saturating_mul(right),
+                    BinaryOpKind::Quotient if right != 0 => left.saturating_div(right),
+                    BinaryOpKind::Remainder => left % right,
+                    BinaryOpKind::ShiftLeft => left << right,
+                    BinaryOpKind::ShiftRight => left >> right,
+                    BinaryOpKind::BitwiseOr => left | right,
+                    BinaryOpKind::BitwiseAnd => left & right,
+                    BinaryOpKind::BitwiseXor => left ^ right,
+
+                    // not using wildcard to force revisiting this
+                    // implementation if a new op kind is added
+                    BinaryOpKind::Eq
+                    | BinaryOpKind::NotEq
+                    | BinaryOpKind::Less
+                    | BinaryOpKind::LessEq
+                    | BinaryOpKind::Greater
+                    | BinaryOpKind::GreaterEq
+                    | BinaryOpKind::Quotient
+                    | BinaryOpKind::BitClear
+                    | BinaryOpKind::LogicalAnd
+                    | BinaryOpKind::LogicalOr => return None,
                 };
 
                 Self::Integer(combined)
