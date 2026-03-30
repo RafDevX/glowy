@@ -564,7 +564,7 @@ fn get_structured_error_info<'a>(
             },
             help: Some(
                 "error reported because the expression label differed from the declared \
-                     expectation",
+                 expectation",
             ),
         },
 
@@ -579,8 +579,7 @@ fn get_structured_error_info<'a>(
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(found.location().clone()).label(
-                        "this package name does not match other files in the same \
-                                 directory",
+                        "this package name does not match other files in the same directory",
                     ),
                 ),
                 builder.snippet_for(previous.file()).annotate(
@@ -644,8 +643,7 @@ fn get_structured_error_info<'a>(
             code: "G006".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(found.location().clone()).label(
-                    "this qualifier does not match any import declaration within the \
-                                 current file",
+                    "this qualifier does not match any import declaration within the current file",
                 ),
             )],
             help: Some("check the file's import declarations"),
@@ -760,8 +758,7 @@ fn get_structured_error_info<'a>(
             code: "G015".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(format!(
-                    "cannot perform a complex assignment on {num} left-values \
-                                 simultaneously"
+                    "cannot perform a complex assignment on {num} left-values simultaneously"
                 )),
             )],
             help: Some("consider using a simple assignment (e.g., `=` instead of `+=`)"),

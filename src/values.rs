@@ -497,7 +497,7 @@ impl Mergeable for Value<'_> {
             (Self::Map(a), Self::Map(b)) => Self::Map(recurs!(a, b)),
             (Self::Struct(a), Self::Struct(b)) => Self::Struct(recurs!(a, b)),
             // intentionally not handling (Fn, Fn)
-            //
+            // ---
             (Self::Simple(None), other) | (other, Self::Simple(None)) => other.clone(),
             (Self::Simple(Some(bt)), other) | (other, Self::Simple(Some(bt))) => other
                 .nest_backtrace(
