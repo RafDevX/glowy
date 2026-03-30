@@ -59,7 +59,7 @@ impl<'a> Iterator for TokenStream<'a> {
             None => self.lexer.next(),
         };
 
-        if let Some(Ok(ref token)) = item {
+        if let Some(Ok(token)) = &item {
             self.last_location = Some(token.span.location());
         }
 

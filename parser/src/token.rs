@@ -97,20 +97,20 @@ impl TokenKind {
     pub(crate) fn allows_implicit_semicolon(&self) -> bool {
         matches!(
             self,
-            TokenKind::Ident
-                | TokenKind::Int(_)
-                | TokenKind::Float(_)
-                | TokenKind::Rune(_)
-                | TokenKind::String(_)
-                | TokenKind::Break
-                | TokenKind::Continue
-                | TokenKind::Fallthrough
-                | TokenKind::Return
-                | TokenKind::PlusPlus
-                | TokenKind::MinusMinus
-                | TokenKind::ParenR
-                | TokenKind::SquareR
-                | TokenKind::CurlyR
+            Self::Ident
+                | Self::Int(_)
+                | Self::Float(_)
+                | Self::Rune(_)
+                | Self::String(_)
+                | Self::Break
+                | Self::Continue
+                | Self::Fallthrough
+                | Self::Return
+                | Self::PlusPlus
+                | Self::MinusMinus
+                | Self::ParenR
+                | Self::SquareR
+                | Self::CurlyR
         )
     }
 }

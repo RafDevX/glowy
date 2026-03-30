@@ -61,8 +61,7 @@ impl<'a> Diagnostics<'a> for ParsingError<'a> {
                     expected,
                     found
                         .as_ref()
-                        .map(|t| format!("{:?}", t.kind))
-                        .unwrap_or(s!("end-of-file"))
+                        .map_or_else(|| s!("end-of-file"), |t| format!("{:?}", t.kind))
                 ),
                 context: found.clone().map(|t| t.span),
             },
@@ -72,10 +71,10 @@ impl<'a> Diagnostics<'a> for ParsingError<'a> {
                 details: format!(
                     "expected {}, but found {}",
                     expected,
-                    found
-                        .as_ref()
-                        .map(|t| format!("a token of kind {:?}", t.kind))
-                        .unwrap_or(s!("end-of-file"))
+                    found.as_ref().map_or_else(
+                        || s!("end-of-file"),
+                        |t| format!("a token of kind {:?}", t.kind)
+                    )
                 ),
                 context: found.clone().map(|t| t.span),
             },

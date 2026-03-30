@@ -15,7 +15,7 @@ use crate::{
 
 const ANNOTATION_REGEX: &str = r"glowy::(?P<directive>\w+)::\{(?P<tags>[^}]*)\}";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LexingError<'a> {
     UnknownChar(Span<'a>),
     InvalidNumberLiteralChar(Span<'a>),
@@ -234,7 +234,7 @@ impl<'a> Lexer<'a> {
         // cloned so we can peek freely
         let mut it = self.src.clone();
 
-        if let Some('/') = it.next() {
+        if it.next() == Some('/') {
             match it.next() {
                 Some('/') => {
                     // line comment
@@ -274,7 +274,7 @@ impl<'a> Lexer<'a> {
                     loop {
                         self.read_while(|ch| ch != '*');
                         self.read_char(); // step over *
-                        if let Some('/') = self.read_char() {
+                        if self.read_char() == Some('/') {
                             break;
                         }
                     }
@@ -643,9 +643,7 @@ impl<'a> Lexer<'a> {
                     } => {
                         if let Some((new_value, c)) = ch
                             .to_digit(*radix)
-                            .and_then(|digit| {
-                                value.checked_mul(*radix).and_then(|v| v.checked_add(digit))
-                            })
+                            .and_then(|digit| value.checked_mul(*radix)?.checked_add(digit))
                             .filter(|v| v <= max_value)
                             .and_then(|v| char::from_u32(v).map(|c| (v, c)))
                         {
@@ -946,7 +944,7 @@ fn parse_hexadecimal_float(s: &str) -> f64 {
         None => (mantissa_str, ""),
     };
 
-    let mut mantissa = 0.0;
+    let mut mantissa = 0.0_f64;
 
     #[allow(clippy::cast_precision_loss)]
     if !int_part.is_empty() {
@@ -958,11 +956,11 @@ fn parse_hexadecimal_float(s: &str) -> f64 {
             let digit = ch.to_digit(16).unwrap();
 
             // `i` will never be huge (max = # of digits), so unwrap is safe
-            mantissa += f64::from(digit) / 16f64.powi(i32::try_from(i + 1).unwrap());
+            mantissa += f64::from(digit) / 16_f64.powi(i32::try_from(i + 1).unwrap());
         }
     }
 
-    mantissa * exp.map_or(1.0, |e| 2f64.powi(e))
+    mantissa * exp.map_or(1.0, |e| 2_f64.powi(e))
 }
 
 #[cfg(test)]
