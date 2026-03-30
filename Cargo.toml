@@ -16,7 +16,7 @@ rust-version.workspace = true
 members = [".", "parser"]
 
 [workspace.dependencies]
-codespan-reporting = "0.11.1"
+codespan-reporting = "0.13.1"
 
 [workspace.package]
 version = "0.1.0"
@@ -31,11 +31,11 @@ categories = [
     "parser-implementations",
 ]
 license = "MIT"
-rust-version = "1.86"
+rust-version = "1.87"
 
 [dependencies]
 annotate-snippets = "0.12.10"
-anstream = "0.6.21"
+anstream = "1.0.0"
 clap = { version = "4.5.51", features = ["derive"] }
 colored = "3.1.1"
 parser = { path = "parser" }

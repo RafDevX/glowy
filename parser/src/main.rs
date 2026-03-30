@@ -53,5 +53,6 @@ fn show_error(path: &Option<String>, input: &str, info: ErrorDiagnosticInfo) {
     let writer = StandardStream::stderr(ColorChoice::Auto);
     let config = term::Config::default();
 
-    term::emit(&mut writer.lock(), &config, &file, &diagnostic).expect("Failed to show error");
+    term::emit_to_write_style(&mut writer.lock(), &config, &file, &diagnostic)
+        .expect("Failed to show error");
 }
