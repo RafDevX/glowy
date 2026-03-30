@@ -22,7 +22,30 @@ pkgs.mkShellNoCC {
     {
       "rust-analyzer.cargo.sysrootSrc": "$RUST_SRC_PATH",
       "rust-analyzer.check.command": "clippy",
-      "cSpell.words": ["predeclared"]
+      "cSpell.words": [
+        "anstream",
+        "codespan",
+        "clippy",
+        "deque",
+        "direnv",
+        "finl",
+        "funcs",
+        "glowy",
+        "hexdigit",
+        "imag",
+        "impls",
+        "nixpkgs",
+        "pathbuf",
+        "peekable",
+        "pkgs",
+        "predeclared",
+        "println",
+        "rsplit",
+        "rustc",
+        "scrutinee",
+        "symtab",
+        "unseparated"
+      ]
     }
     EOF
   '';
