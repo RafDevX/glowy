@@ -1511,6 +1511,7 @@ impl SnapshotAware for FunctionRef<'_> {
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum SimpleConstValue {
+    Boolean(bool),
     Integer(u64),
     String(String),
 }
@@ -1536,15 +1537,35 @@ impl SimpleConstValue {
                 let left = Self::try_resolve_from_expr(left)?;
                 let right = Self::try_resolve_from_expr(right)?;
 
-                if *kind == BinaryOpKind::Sum {
-                    // check right before left to avoid having to clone either
-                    // (since we never need ownership of right)
-                    if let Self::String(right) = &right {
-                        if let Self::String(left) = left {
-                            // string concatenation
-                            return Some(Self::String(left + right));
+                // some operations are treated specially
+                #[expect(
+                    clippy::wildcard_enum_match_arm,
+                    reason = "Only interested in some kinds here; rest is handled below"
+                )]
+                match kind {
+                    BinaryOpKind::Sum => {
+                        // check right before left to avoid having to clone either
+                        // (since we never need ownership of right)
+                        if let Self::String(right) = &right {
+                            if let Self::String(left) = left {
+                                // string concatenation
+                                return Some(Self::String(left + right));
+                            }
                         }
                     }
+                    BinaryOpKind::Eq => return Some(Self::Boolean(left == right)),
+                    BinaryOpKind::NotEq => return Some(Self::Boolean(left != right)),
+                    BinaryOpKind::LogicalAnd => {
+                        if let (Self::Boolean(left), Self::Boolean(right)) = (&left, &right) {
+                            return Some(Self::Boolean(*left && *right));
+                        }
+                    }
+                    BinaryOpKind::LogicalOr => {
+                        if let (Self::Boolean(left), Self::Boolean(right)) = (&left, &right) {
+                            return Some(Self::Boolean(*left || *right));
+                        }
+                    }
+                    _ => {}
                 }
 
                 // otherwise, must be integer operation
@@ -1556,33 +1577,35 @@ impl SimpleConstValue {
                     return None;
                 };
 
-                let combined = match kind {
-                    BinaryOpKind::Sum => left.saturating_add(right),
-                    BinaryOpKind::Diff => left.saturating_sub(right),
-                    BinaryOpKind::Product => left.saturating_mul(right),
-                    BinaryOpKind::Quotient if right != 0 => left.saturating_div(right),
-                    BinaryOpKind::Remainder => left % right,
-                    BinaryOpKind::ShiftLeft => left << right,
-                    BinaryOpKind::ShiftRight => left >> right,
-                    BinaryOpKind::BitwiseOr => left | right,
-                    BinaryOpKind::BitwiseAnd => left & right,
-                    BinaryOpKind::BitwiseXor => left ^ right,
-                    BinaryOpKind::BitClear => left & !right,
+                match kind {
+                    BinaryOpKind::Sum => Self::Integer(left.saturating_add(right)),
+                    BinaryOpKind::Diff => Self::Integer(left.saturating_sub(right)),
+                    BinaryOpKind::Product => Self::Integer(left.saturating_mul(right)),
+                    BinaryOpKind::Quotient if right != 0 => {
+                        Self::Integer(left.saturating_div(right))
+                    }
+                    BinaryOpKind::Remainder => Self::Integer(left % right),
+                    BinaryOpKind::ShiftLeft => Self::Integer(left << right),
+                    BinaryOpKind::ShiftRight => Self::Integer(left >> right),
+                    BinaryOpKind::BitwiseOr => Self::Integer(left | right),
+                    BinaryOpKind::BitwiseAnd => Self::Integer(left & right),
+                    BinaryOpKind::BitwiseXor => Self::Integer(left ^ right),
+                    BinaryOpKind::BitClear => Self::Integer(left & !right),
+
+                    BinaryOpKind::Less => Self::Boolean(left < right),
+                    BinaryOpKind::LessEq => Self::Boolean(left <= right),
+                    BinaryOpKind::Greater => Self::Boolean(left > right),
+                    BinaryOpKind::GreaterEq => Self::Boolean(left >= right),
+
+                    // already handled above
+                    BinaryOpKind::Eq | BinaryOpKind::NotEq => unreachable!(),
 
                     // not using wildcard to force revisiting this
                     // implementation if a new op kind is added
-                    BinaryOpKind::Eq
-                    | BinaryOpKind::NotEq
-                    | BinaryOpKind::Less
-                    | BinaryOpKind::LessEq
-                    | BinaryOpKind::Greater
-                    | BinaryOpKind::GreaterEq
-                    | BinaryOpKind::Quotient
-                    | BinaryOpKind::LogicalAnd
-                    | BinaryOpKind::LogicalOr => return None,
-                };
-
-                Self::Integer(combined)
+                    BinaryOpKind::LogicalAnd | BinaryOpKind::LogicalOr | BinaryOpKind::Quotient => {
+                        return None;
+                    }
+                }
             }
             _ => return None,
         };
