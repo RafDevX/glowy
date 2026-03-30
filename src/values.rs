@@ -1567,6 +1567,7 @@ impl SimpleConstValue {
                     BinaryOpKind::BitwiseOr => left | right,
                     BinaryOpKind::BitwiseAnd => left & right,
                     BinaryOpKind::BitwiseXor => left ^ right,
+                    BinaryOpKind::BitClear => left & !right,
 
                     // not using wildcard to force revisiting this
                     // implementation if a new op kind is added
@@ -1577,7 +1578,6 @@ impl SimpleConstValue {
                     | BinaryOpKind::Greater
                     | BinaryOpKind::GreaterEq
                     | BinaryOpKind::Quotient
-                    | BinaryOpKind::BitClear
                     | BinaryOpKind::LogicalAnd
                     | BinaryOpKind::LogicalOr => return None,
                 };
