@@ -1,20 +1,24 @@
 {
   pkgs ? (import <nixpkgs> { }),
+  unstable ? (import <unstable> { }),
 }:
 pkgs.mkShellNoCC {
-  buildInputs = with pkgs; [
-    rustc
-    cargo
-    rustfmt
-    gcc # need cc linker
+  buildInputs =
+    (with pkgs; [
+      gcc # need cc linker
+    ])
+    ++ (with unstable; [
+      rustc
+      cargo
+      rustfmt
 
-    rust-analyzer
-    clippy
-    cargo-make
-  ];
+      rust-analyzer
+      clippy
+      cargo-make
+    ]);
 
   shellHook = ''
-    export RUST_SRC_PATH="${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}"
+    export RUST_SRC_PATH="${unstable.rust.packages.stable.rustPlatform.rustLibSrc}"
 
     mkdir -p .vscode
     cat > .vscode/settings.json <<EOF
