@@ -5,8 +5,6 @@ use std::{
     path,
 };
 
-use parser::ast::SourceFileNode;
-
 use crate::{
     FullPackagePath, SourceFile,
     context::{AnalysisContext, AnalysisStage},
@@ -319,6 +317,25 @@ impl Analyzer {
             return Err(parse_errors);
         }
 
+        let mut context = AnalysisContext::new();
+
+        macro_rules! process_taint_analysis_iteration {
+            ($visitor:path, false) => {
+                for (path, ast) in &parsed {
+                    context.set_current_file(path);
+
+                    let package_path = compute_package_path(&self.module_base, path);
+
+                    $visitor(&mut context, ast, package_path);
+                }
+            };
+            ($visitor:path, true) => {
+                context.symtab_mut().clear_all_package_progress();
+
+                process_taint_analysis_iteration!($visitor, false);
+            };
+        }
+
         // Stage #1: RecordDeclarations (default for AnalysisContext)
         //     An initial pass through all files to find top-level declarations
         //     and record what symbols exist, since they can be referenced from
@@ -326,15 +343,7 @@ impl Analyzer {
         //     This is also used to scaffold sub-module hierarchies and package
         //     scopes.
 
-        let mut context = AnalysisContext::new();
-
-        for (path, ast) in &parsed {
-            context.set_current_file(path);
-
-            let package_path = compute_package_path(&self.module_base, path);
-
-            decls::visit_source_file(&mut context, ast, package_path);
-        }
+        process_taint_analysis_iteration!(decls::visit_source_file, false);
 
         // Stage #2: StabilizeLabels
         //     Repeatedly visit symbols and assign them labels (per taint
@@ -346,7 +355,7 @@ impl Analyzer {
         let mut last_snapshot = None;
 
         loop {
-            self.process_taint_analysis_iteration(&mut context, &parsed);
+            process_taint_analysis_iteration!(taint::visit_source_file, true);
 
             let snapshot = context.symtab().snapshot();
 
@@ -365,27 +374,11 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
-        self.process_taint_analysis_iteration(&mut context, &parsed);
+        process_taint_analysis_iteration!(taint::visit_source_file, true);
 
         // All done: return based on final context.
 
         Result::from(context)
-    }
-
-    fn process_taint_analysis_iteration<'a>(
-        &self,
-        ctx: &mut AnalysisContext<'a>,
-        files: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
-    ) {
-        ctx.symtab_mut().clear_all_package_progress();
-
-        for (path, ast) in files {
-            ctx.set_current_file(path);
-
-            let package_path = compute_package_path(&self.module_base, path);
-
-            taint::visit_source_file(ctx, ast, &package_path);
-        }
     }
 }
 

@@ -69,10 +69,14 @@ pub enum SinkKind {
     Send,
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Signature consistency between top-level visitors"
+)]
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SourceFileNode<'a>,
-    package_path: &FullPackagePath,
+    package_path: FullPackagePath,
 ) {
     let package_name = ctx.pin(node.package_clause.id);
 
@@ -109,7 +113,7 @@ pub fn visit_source_file<'a>(
         visit_decl(ctx, decl);
     }
 
-    ctx.symtab_mut().save_package_progress(package_path);
+    ctx.symtab_mut().save_package_progress(&package_path);
 }
 
 fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a>) {
