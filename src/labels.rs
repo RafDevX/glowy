@@ -427,7 +427,7 @@ pub struct LabelBacktrace<'a> {
     /// Where this operation took place.
     location: Pinned<Location>,
     /// Other backtraces through which this label is derived via propagation.
-    children: Vec<LabelBacktrace<'a>>,
+    children: Vec<Self>,
 }
 
 impl<'a> LabelBacktrace<'a> {

@@ -285,10 +285,6 @@ impl Analyzer {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[expect(
-        clippy::allow_attributes,
-        reason = "`expect` malfunctions for this lint"
-    )]
-    #[allow(
         clippy::missing_inline_in_public_items,
         reason = "Main entrypoint method"
     )]

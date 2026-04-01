@@ -103,6 +103,10 @@ macro_rules! extract_inner {
 }
 
 #[expect(
+    clippy::multiple_inherent_impl,
+    reason = "Scope the below `expect` to only the relevant methods"
+)]
+#[expect(
     clippy::wildcard_enum_match_arm,
     reason = "We explicitly want to match only one variant and ignore all others"
 )]
