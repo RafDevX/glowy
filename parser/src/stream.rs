@@ -52,7 +52,6 @@ impl<'a> TokenStream<'a> {
 impl<'a> Iterator for TokenStream<'a> {
     type Item = LItem<'a>;
 
-    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let item = match self.peeked.take() {
             Some(v) => v,

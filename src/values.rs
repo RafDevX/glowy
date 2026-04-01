@@ -30,7 +30,6 @@ use crate::{
 pub struct ValueRef<'a>(Rc<RefCell<Value<'a>>>);
 
 impl<'a> ValueRef<'a> {
-    #[inline]
     pub fn new_bottom() -> Self {
         Self::from(None)
     }

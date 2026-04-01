@@ -1,5 +1,5 @@
 // Clippy lint configuration
-#![warn(clippy::all, clippy::pedantic)]
+#![warn(clippy::all, clippy::pedantic, clippy::missing_inline_in_public_items)]
 #![allow(clippy::option_option, clippy::missing_errors_doc)]
 
 use std::ops::Range;
@@ -33,6 +33,7 @@ pub struct Span<'a> {
 
 impl<'a> Span<'a> {
     #[must_use]
+    #[inline]
     pub fn new(content: &'a str, offset: usize, line: usize) -> Self {
         Self {
             content,
@@ -42,16 +43,19 @@ impl<'a> Span<'a> {
     }
 
     #[must_use]
+    #[inline]
     pub fn content(&self) -> &'a str {
         self.content
     }
 
     #[must_use]
+    #[inline]
     pub fn location(&self) -> Range<usize> {
         self.offset..(self.offset + self.content.len())
     }
 }
 
+#[allow(clippy::missing_inline_in_public_items)]
 pub fn parse(input: &str) -> Result<SourceFileNode<'_>, ParsingError<'_>> {
     let mut stream = TokenStream::new(Lexer::new(input));
 

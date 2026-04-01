@@ -323,6 +323,7 @@ pub enum AnalysisErrorKind<'a> {
 impl AnalysisErrorKind<'_> {
     /// Returns a general category to which the error kind belongs.
     #[must_use]
+    #[inline]
     pub fn category(&self) -> AnalysisErrorCategory {
         match self {
             Self::Parsing(..)
@@ -366,6 +367,7 @@ impl AnalysisErrorKind<'_> {
 }
 
 impl<'a> From<ParsingError<'a>> for AnalysisErrorKind<'a> {
+    #[inline]
     fn from(err: ParsingError<'a>) -> Self {
         Self::Parsing(err)
     }

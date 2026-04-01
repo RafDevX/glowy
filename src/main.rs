@@ -920,7 +920,6 @@ fn get_structured_error_info<'a>(
     }
 }
 
-#[inline]
 fn error_category_to_level(category: AnalysisErrorCategory) -> annotate_snippets::Level<'static> {
     // TODO: pedantic flag
 

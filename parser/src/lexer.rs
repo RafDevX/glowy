@@ -30,6 +30,7 @@ pub enum LexingError<'a> {
 }
 
 impl<'a> Diagnostics<'a> for LexingError<'a> {
+    #[inline]
     fn diagnostics(&self) -> ErrorDiagnosticInfo<'a> {
         macro_rules! s {
             ($lit:expr) => {

@@ -46,6 +46,7 @@ impl SourceFile {
     /// In many cases, the file content is read dynamically from disk at
     /// runtime. In such cases, the [`SourceFile::read_from_disk`] utility will
     /// likely prove more useful than using this method directly.
+    #[inline]
     pub fn new<P: Into<PathBuf>, C: Into<String>>(virtual_path: P, contents: C) -> Self {
         let virtual_path = virtual_path.into();
 
@@ -89,6 +90,7 @@ impl SourceFile {
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
+    #[inline]
     pub fn read_from_disk<V: Into<PathBuf>, R: AsRef<Path>>(
         virtual_path: V,
         real_path: R,
@@ -105,6 +107,7 @@ impl SourceFile {
     /// files within the module hierarchy, but do not (necessarily) match the
     /// files' real paths on disk.
     #[must_use]
+    #[inline]
     pub fn virtual_path(&self) -> &Path {
         &self.virtual_path
     }
@@ -115,6 +118,7 @@ impl SourceFile {
     /// (if ever), so any changes to some underlying real file on disk will not
     /// be reflected here.
     #[must_use]
+    #[inline]
     pub fn contents(&self) -> &str {
         &self.contents
     }

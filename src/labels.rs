@@ -51,6 +51,7 @@ pub enum LabelTag<'a> {
 }
 
 impl fmt::Display for LabelTag<'_> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Concrete(tag) => write!(f, "{tag}"),
@@ -81,6 +82,7 @@ impl fmt::Display for LabelTag<'_> {
 }
 
 impl Ord for LabelTag<'_> {
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self, other) {
             (Self::Concrete(_), Self::Synthetic { .. }) => cmp::Ordering::Less,
@@ -103,12 +105,14 @@ impl Ord for LabelTag<'_> {
 }
 
 impl PartialOrd for LabelTag<'_> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl PartialEq for LabelTag<'_> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Concrete(left), Self::Concrete(right)) => left == right,
@@ -167,6 +171,7 @@ impl<'a> Label<'a> {
     ///
     /// assert_eq!(Label::from_tags(&[]), Label::Bottom);
     /// ```
+    #[inline]
     pub fn from_tags(tags: &[&'a str]) -> Self {
         if tags.is_empty() {
             Self::Bottom
@@ -198,6 +203,7 @@ impl<'a> Label<'a> {
     ///     vec!["{}", "{cat, dog}", "{bird}"]
     /// )
     /// ```
+    #[inline]
     pub fn sequence_from_tags(tags: &[&'a str]) -> Vec<Self> {
         tags.split(|tag| *tag == "->")
             .map(Self::from_tags)
@@ -218,6 +224,7 @@ impl<'a> Label<'a> {
     /// assert_eq!(Label::from_single(tag).to_string(), "{secret}");
     /// ```
     #[must_use]
+    #[inline]
     pub fn from_single(tag: LabelTag<'a>) -> Self {
         let mut set = BTreeSet::new();
         set.insert(tag);
@@ -241,6 +248,7 @@ impl<'a> Label<'a> {
     /// assert_eq!(x.union(&y).to_string(), "{alice, bob, charlie, david, eve}");
     /// ```
     #[must_use]
+    #[inline]
     pub fn union(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, l) | (l, Self::Bottom) => l.clone(),
@@ -267,6 +275,7 @@ impl<'a> Label<'a> {
     /// assert_eq!(y.intersect(&z).to_string(), "{}");
     /// ```
     #[must_use]
+    #[inline]
     pub fn intersect(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, _) | (_, Self::Bottom) => Self::Bottom,
@@ -301,6 +310,7 @@ impl<'a> Label<'a> {
     /// assert_eq!(Label::Bottom.difference(&x), Label::Bottom);
     /// ```
     #[must_use]
+    #[inline]
     pub fn difference(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, _) => Self::Bottom,
@@ -347,6 +357,7 @@ impl<'a> Label<'a> {
 }
 
 impl PartialOrd for Label<'_> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         if self == other {
             return Some(cmp::Ordering::Equal);
@@ -371,6 +382,7 @@ impl PartialOrd for Label<'_> {
 }
 
 impl fmt::Display for Label<'_> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Label::Tags(tags) => {
@@ -636,30 +648,35 @@ impl<'a> LabelBacktrace<'a> {
 
     /// Returns the kind of operation that caused the label assignment.
     #[must_use]
+    #[inline]
     pub fn kind(&self) -> &LabelBacktraceKind {
         &self.kind
     }
 
     /// Returns the label in question described by this backtrace.
     #[must_use]
+    #[inline]
     pub fn label(&self) -> &Label<'a> {
         &self.label
     }
 
     /// Returns the name of the symbol with this label, if any/applicable.
     #[must_use]
+    #[inline]
     pub fn symbol(&self) -> Option<&'a str> {
         self.symbol
     }
 
     /// Returns the location where the operation took place.
     #[must_use]
+    #[inline]
     pub fn location(&self) -> &Pinned<Location> {
         &self.location
     }
 
     /// Returns the backtraces that compound to yield and justify this one.
     #[must_use]
+    #[inline]
     pub fn children(&self) -> &[Self] {
         &self.children
     }
@@ -667,6 +684,7 @@ impl<'a> LabelBacktrace<'a> {
 
 // allow consuming backtrace to convert it to its label without cloning
 impl<'a> From<LabelBacktrace<'a>> for Label<'a> {
+    #[inline]
     fn from(backtrace: LabelBacktrace<'a>) -> Self {
         backtrace.label
     }

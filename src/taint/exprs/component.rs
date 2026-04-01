@@ -102,7 +102,6 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         // low/high value was explicitly provided or just omitted) should just
         // be propagated. this means we need to do some rather unintuitive
         // matching here to essentially swap the Options
-        #[inline]
         #[expect(
             clippy::items_after_statements,
             reason = "Auxiliary function makes more sense defined/explained here"

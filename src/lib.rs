@@ -56,6 +56,7 @@
     clippy::map_err_ignore,
     clippy::map_with_unused_argument_over_ranges,
     clippy::missing_assert_message,
+    clippy::missing_inline_in_public_items,
     clippy::mixed_read_write_in_expression,
     clippy::mod_module_files,
     clippy::module_name_repetitions,
@@ -197,6 +198,7 @@ impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
     /// Returns the file where the content was found.
     ///
     /// The returned [`Path`] is always rooted and bound to the Go module base.
+    #[inline]
     pub fn file(&self) -> &Path {
         &self.virtual_file_path
     }
@@ -207,6 +209,7 @@ impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
     /// the specific file, and in the case of [`Span`] additionally includes the
     /// snippet itself, accessible via [`Span::content`] (see also the
     /// short-hand [`Pinned::content`]).
+    #[inline]
     pub fn inner(&self) -> &T {
         &self.inner
     }
@@ -219,6 +222,7 @@ impl<'a> Pinned<Span<'a>> {
     /// [`Span::content`] on the result of [`Pinned::inner`] when the inner type
     /// is [`Span`].
     #[must_use]
+    #[inline]
     pub fn content(&self) -> &'a str {
         self.inner().content()
     }
@@ -228,6 +232,7 @@ impl<'a> Pinned<Span<'a>> {
     /// This method uses [`Span::location`] to construct a new [`Pinned`] with
     /// inner type [`Location`]. The same virtual file path is used (cloned).
     #[must_use]
+    #[inline]
     pub fn pinned_location(&self) -> Pinned<Location> {
         Pinned {
             virtual_file_path: self.virtual_file_path.clone(),
@@ -237,6 +242,7 @@ impl<'a> Pinned<Span<'a>> {
 }
 
 impl Ord for Pinned<Span<'_>> {
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.virtual_file_path
             .cmp(&other.virtual_file_path)
@@ -246,12 +252,14 @@ impl Ord for Pinned<Span<'_>> {
 }
 
 impl PartialOrd for Pinned<Span<'_>> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl PartialOrd for Pinned<Location> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         if self.virtual_file_path != other.virtual_file_path {
             // not comparable on different files

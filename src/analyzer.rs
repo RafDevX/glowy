@@ -61,6 +61,7 @@ impl Analyzer {
     /// [`Analyzer::from_directory`] utility or [`Analyzer::from_go_mod`], which
     /// are helpful wrappers around this method.
     #[must_use]
+    #[inline]
     pub fn new(module_base: &str) -> Self {
         Self {
             module_base: module_base.to_owned(),
@@ -97,6 +98,7 @@ impl Analyzer {
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
+    #[inline]
     pub fn from_directory<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let Some(mut analyzer) = Self::from_go_mod(path.as_ref().join("go.mod"))? else {
             return Ok(None);
@@ -133,6 +135,7 @@ impl Analyzer {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[expect(clippy::missing_panics_doc, reason = "Unwrap is guaranteed safe here")]
+    #[inline]
     pub fn from_go_mod<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let file = fs::File::open(path)?;
         let reader = io::BufReader::new(file);
@@ -212,6 +215,7 @@ impl Analyzer {
     /// When applicable, prefer using [`Analyzer::from_directory`] rather than
     /// manually re-implementing its logic with direct invocations of this
     /// method.
+    #[inline]
     pub fn add_file(&mut self, file: SourceFile) {
         // find the right spot for the file to not break sorting order
         let index = self
@@ -243,6 +247,7 @@ impl Analyzer {
     ///     .file_contents("/main.go")
     ///     .expect("Not yet registered");
     /// ```
+    #[inline]
     pub fn file_contents<P: AsRef<path::Path>>(&self, virtual_path: P) -> Option<&str> {
         self.files
             .binary_search_by_key(&virtual_path.as_ref(), SourceFile::virtual_path)
@@ -281,6 +286,14 @@ impl Analyzer {
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
+    #[expect(
+        clippy::allow_attributes,
+        reason = "`expect` malfunctions for this lint"
+    )]
+    #[allow(
+        clippy::missing_inline_in_public_items,
+        reason = "Main entrypoint method"
+    )]
     pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
         let mut parsed = BTreeMap::new();
         let mut parse_errors = vec![];

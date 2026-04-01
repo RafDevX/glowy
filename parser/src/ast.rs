@@ -46,6 +46,7 @@ pub enum DeclNode<'a> {
 }
 
 impl<'a> From<FunctionDeclNode<'a>> for DeclNode<'a> {
+    #[inline]
     fn from(node: FunctionDeclNode<'a>) -> Self {
         Self::Function(Box::new(node))
     }
@@ -147,6 +148,7 @@ pub enum FunctionResultNode<'a> {
 
 impl FunctionResultNode<'_> {
     #[must_use]
+    #[inline]
     pub fn len(&self) -> usize {
         match self {
             Self::None => 0,
@@ -157,6 +159,7 @@ impl FunctionResultNode<'_> {
 
     // make clippy happy (clippy::len_without_is_empty)
     #[must_use]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::None)
     }
@@ -249,48 +252,56 @@ pub enum BinaryOpKind {
 }
 
 impl<'a> From<LiteralNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: LiteralNode<'a>) -> Self {
         Self::Literal(node)
     }
 }
 
 impl<'a> From<CallNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: CallNode<'a>) -> Self {
         Self::Call(node)
     }
 }
 
 impl<'a> From<MakeNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: MakeNode<'a>) -> Self {
         Self::Make(node)
     }
 }
 
 impl<'a> From<SelectionNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: SelectionNode<'a>) -> Self {
         Self::Selection(node)
     }
 }
 
 impl<'a> From<IndexingNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: IndexingNode<'a>) -> Self {
         Self::Indexing(node)
     }
 }
 
 impl<'a> From<SlicingNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: SlicingNode<'a>) -> Self {
         Self::Slicing(node)
     }
 }
 
 impl<'a> From<ConversionNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: ConversionNode<'a>) -> Self {
         Self::Conversion(node)
     }
 }
 
 impl<'a> From<TypeAssertionNode<'a>> for ExprNode<'a> {
+    #[inline]
     fn from(node: TypeAssertionNode<'a>) -> Self {
         Self::TypeAssertion(node)
     }
@@ -353,12 +364,14 @@ pub struct OrderedF64(pub f64);
 impl Eq for OrderedF64 {}
 
 impl Ord for OrderedF64 {
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.0.total_cmp(&other.0)
     }
 }
 
 impl PartialOrd for OrderedF64 {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -502,54 +515,63 @@ pub enum StatementNode<'a> {
 }
 
 impl<'a> From<SendNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: SendNode<'a>) -> Self {
         Self::Send(node)
     }
 }
 
 impl<'a> From<AssignmentNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: AssignmentNode<'a>) -> Self {
         Self::Assignment(node)
     }
 }
 
 impl<'a> From<ShortVarDeclNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: ShortVarDeclNode<'a>) -> Self {
         Self::ShortVarDecl(node)
     }
 }
 
 impl<'a> From<DeclNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: DeclNode<'a>) -> Self {
         Self::Decl(node)
     }
 }
 
 impl<'a> From<IfNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: IfNode<'a>) -> Self {
         Self::If(node)
     }
 }
 
 impl<'a> From<ForNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: ForNode<'a>) -> Self {
         Self::For(node)
     }
 }
 
 impl<'a> From<SelectNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: SelectNode<'a>) -> Self {
         Self::Select(node)
     }
 }
 
 impl<'a> From<SwitchNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: SwitchNode<'a>) -> Self {
         Self::Switch(node)
     }
 }
 
 impl<'a> From<BlockNode<'a>> for StatementNode<'a> {
+    #[inline]
     fn from(node: BlockNode<'a>) -> Self {
         Self::Block(node)
     }
@@ -665,12 +687,14 @@ pub enum SwitchNode<'a> {
 }
 
 impl<'a> From<ExprSwitchNode<'a>> for SwitchNode<'a> {
+    #[inline]
     fn from(node: ExprSwitchNode<'a>) -> Self {
         Self::Expr(node)
     }
 }
 
 impl<'a> From<TypeSwitchNode<'a>> for SwitchNode<'a> {
+    #[inline]
     fn from(node: TypeSwitchNode<'a>) -> Self {
         Self::Type(node)
     }

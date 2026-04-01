@@ -19,6 +19,7 @@ pub enum ParsingError<'a> {
 }
 
 impl<'a> From<LexingError<'a>> for ParsingError<'a> {
+    #[inline]
     fn from(err: LexingError<'a>) -> Self {
         Self::Lexing(err)
     }
@@ -36,6 +37,7 @@ pub trait Diagnostics<'a> {
 }
 
 impl<'a> Diagnostics<'a> for ParsingError<'a> {
+    #[inline]
     fn diagnostics(&self) -> ErrorDiagnosticInfo<'a> {
         macro_rules! s {
             ($lit:expr) => {

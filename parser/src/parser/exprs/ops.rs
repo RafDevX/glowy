@@ -83,6 +83,7 @@ pub struct UnknownOpKind;
 impl TryFrom<TokenKind> for UnaryOpKind {
     type Error = UnknownOpKind;
 
+    #[inline]
     fn try_from(kind: TokenKind) -> Result<Self, Self::Error> {
         let op = match kind {
             TokenKind::Plus => Self::Identity,
@@ -102,6 +103,7 @@ impl TryFrom<TokenKind> for UnaryOpKind {
 impl TryFrom<TokenKind> for BinaryOpKind {
     type Error = UnknownOpKind;
 
+    #[inline]
     fn try_from(kind: TokenKind) -> Result<Self, Self::Error> {
         let op = match kind {
             TokenKind::DoubleEq => Self::Eq,

@@ -269,6 +269,7 @@ impl Default for AnalysisContext<'_> {
 }
 
 impl<'a> From<AnalysisContext<'a>> for Result<(), Vec<AnalysisError<'a>>> {
+    #[inline]
     fn from(ctx: AnalysisContext<'a>) -> Self {
         if ctx.errors.is_empty() {
             Ok(())
@@ -288,7 +289,6 @@ pub enum AnalysisStage {
 }
 
 impl AnalysisStage {
-    #[inline]
     fn admits_errors(&self) -> bool {
         matches!(
             self,

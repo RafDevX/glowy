@@ -291,6 +291,7 @@ pub struct UnknownAssignmentKind;
 impl TryFrom<TokenKind> for AssignmentKind {
     type Error = UnknownAssignmentKind;
 
+    #[inline]
     fn try_from(kind: TokenKind) -> Result<Self, Self::Error> {
         let res = match kind {
             TokenKind::Assign => Self::Simple,
