@@ -15,7 +15,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::{SinkDescriptor, SinkKind, enforcement},
-    values::{BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
+    values::{SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
 pub fn visit_binding_decl<'a>(
@@ -139,27 +139,13 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         location.clone(), // spec, not annotation
                     );
 
-                    // FIXME: this location is probably wrong for what we want
-                    // to report; i.e. we want to highlight a specific expr
-                    // rather than an entire declaration, but we just don't have
-                    // that information here
-                    let rhs_location = ctx.pin(location.clone());
-                    let backtrace = rhs.backtrace_at_location(rhs_location);
-
-                    enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
+                    enforcement::trigger_sink(ctx, Cow::Owned(sink), rhs.backtrace());
                 }
                 "assert" => {
-                    // FIXME: this location is probably wrong for what we want
-                    // to report; i.e. we want to highlight a specific expr
-                    // rather than an entire declaration, but we just don't have
-                    // that information here
-                    let rhs_location = ctx.pin(location.clone());
-                    let backtrace = rhs.backtrace_at_location(rhs_location);
-
                     enforcement::trigger_assertion(
                         ctx,
                         &Label::sequence_from_tags(&annotation.tags),
-                        backtrace,
+                        rhs.backtrace(),
                         location.clone(),
                     );
                 }
@@ -450,8 +436,6 @@ impl<'a> LeftValue<'a> for Span<'a> {
                     .cloned(),
             )
         } else {
-            let rhs_backtrace = rhs.backtrace_at_location(ctx.pin(location.clone()));
-
             borrowed.value().get().nest_backtrace(
                 backtrace_kind,
                 Some(self.content()), // symbol.declared_name()?
@@ -459,7 +443,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
                 explicit_backtrace
                     .into_iter()
                     .cloned()
-                    .chain(rhs_backtrace)
+                    .chain(rhs.backtrace())
                     .chain(ctx.branch_backtrace().cloned()),
             )
         };

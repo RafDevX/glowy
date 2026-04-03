@@ -282,10 +282,7 @@ fn visit_array_literal_element<'a>(
             } else if values.len() == 1 {
                 values.pop().unwrap()
             } else {
-                let backtraces: Vec<_> = values
-                    .iter()
-                    .filter_map(|v| v.backtrace_at_location(location.clone()))
-                    .collect();
+                let backtraces: Vec<_> = values.iter().filter_map(ValueRef::backtrace).collect();
 
                 let folded = LabelBacktrace::fold(
                     &backtraces,
