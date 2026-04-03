@@ -900,8 +900,6 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
     r#const: HashMap<K, ValueRef<'a>>,
     // overall backtrace affecting the entire structure, from dynamic sets, etc.
     r#dyn: Option<LabelBacktrace<'a>>,
-    // default value returned by get if the key is not found on access
-    default_value: Option<ValueRef<'a>>,
 }
 
 impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
@@ -909,7 +907,6 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         Self {
             r#const: HashMap::new(),
             r#dyn,
-            default_value: None,
         }
     }
 
@@ -930,30 +927,18 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             location,
         );
 
-        Self {
-            r#const,
-            r#dyn,
-            default_value: None,
-        }
-    }
-
-    pub fn set_default_value(&mut self, default_value: ValueRef<'a>) {
-        self.default_value = Some(default_value);
+        Self { r#const, r#dyn }
     }
 
     pub fn clear(&mut self) {
         self.r#const = HashMap::new();
         self.r#dyn = None;
-        self.default_value = None;
     }
 
     pub fn get_const(&self, key: &K, at_location: Pinned<Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(key).cloned() {
             Some(value) => value,
-            None => self.default_value.as_ref().map_or_else(
-                || ValueRef::new_bottom(at_location.clone()),
-                ValueRef::clone_inner,
-            ),
+            None => ValueRef::new_bottom(at_location.clone()),
         };
 
         value
@@ -966,6 +951,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             .with_location(at_location)
     }
 
+    #[rustfmt::skip]
     pub fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
         // since we don't know the concrete key, we must take the union of all
         // possibilities, i.e., all entries of const
@@ -974,17 +960,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         // implemented elsewhere
 
         self.backtrace_at_location(at_location.clone()).map_or_else(
-            || {
-                // necessary since 2 closures need to move the location, since
-                // the borrow checker doesn't know only one of the closures will
-                // actually run (so they could share one copy, but oh well)
-                let location_clone = at_location.clone();
-
-                self.default_value.as_ref().map_or_else(
-                    || ValueRef::new_bottom(at_location),
-                    |default| default.clone_inner().with_location(location_clone),
-                )
-            },
+            || ValueRef::new_bottom(at_location),
             ValueRef::from,
         )
     }
@@ -1091,11 +1067,7 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
 
         let r#dyn = self.r#dyn.realize(from_func, from_index, concrete);
 
-        Self {
-            r#const,
-            r#dyn,
-            default_value: self.default_value.clone(), // ref-clone is fine here
-        }
+        Self { r#const, r#dyn }
     }
 
     fn nest_backtrace(
@@ -1111,11 +1083,7 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             self.r#dyn
                 .nest_backtrace(parent_kind, parent_symbol, parent_location, extra_children);
 
-        Self {
-            r#const,
-            r#dyn,
-            default_value: self.default_value.clone(), // ref-clone is fine here
-        }
+        Self { r#const, r#dyn }
     }
 }
 
@@ -1149,17 +1117,7 @@ impl<K: Eq + Hash + Clone> Mergeable for CompositeValue<'_, K> {
             .r#dyn
             .merge_with(&other.r#dyn, with_kind, at_location.clone());
 
-        let default_value = match (&self.default_value, &other.default_value) {
-            (None, None) => None,
-            (Some(single), None) | (None, Some(single)) => Some(single.clone()),
-            (Some(a), Some(b)) => Some(a.merge_with(b, with_kind, at_location)),
-        };
-
-        Self {
-            r#const,
-            r#dyn,
-            default_value,
-        }
+        Self { r#const, r#dyn }
     }
 }
 
@@ -1174,7 +1132,6 @@ impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
 impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.r#dyn.snapshot_aware_eq(&other.r#dyn)
-            && self.default_value.snapshot_aware_eq(&other.default_value)
             && self.r#const.len() == other.r#const.len()
             && self
                 .r#const

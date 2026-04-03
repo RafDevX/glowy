@@ -45,16 +45,11 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
             let location = ctx.pin(node.location.clone());
 
             #[rustfmt::skip]
-            let mut composite = CompositeValue::new(
+            let composite = CompositeValue::new(
                 HashMap::new(),
                 n.into_iter().chain(m),
                 location.clone(),
             );
-
-            let default = ValueRef::new_bottom(location.clone());
-            if !default.is_simple() {
-                composite.set_default_value(default);
-            }
 
             ValueRef::new(Value::Slice(composite), location)
         }
