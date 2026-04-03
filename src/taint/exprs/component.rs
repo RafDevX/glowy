@@ -58,11 +58,9 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
         // indexing a map returns a second value corresponding to whether the
         // key was or not present in the map. here, we assume that this presence
         // value has the same label as the actual returned value
-        let presence = result.backtrace();
+        let presence = result.downgrade(|| location.clone());
 
-        let secondary = ValueRef::from_backtrace_or_bottom_at(presence, || location.clone());
-
-        let expandable = ExpandableValue::new(result, vec![secondary]);
+        let expandable = ExpandableValue::new(result, vec![presence]);
 
         ValueRef::new(Value::Expandable(expandable), location)
     } else {

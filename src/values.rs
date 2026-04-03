@@ -107,7 +107,15 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Map(_))
     }
 
-    // coerce a Value::Simple to take a complex shape when used
+    /// Downgrade a complex shape into a [`Value::Simple`] of same backtrace
+    pub fn downgrade<F>(&self, location_if_bottom: F) -> Self
+    where
+        F: FnOnce() -> Pinned<Location>,
+    {
+        Self::from_backtrace_or_bottom_at(self.backtrace(), location_if_bottom)
+    }
+
+    /// Coerce a [`Value::Simple`] to take a complex shape when it is first used
     fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
         let borrow = self.value.borrow();
 

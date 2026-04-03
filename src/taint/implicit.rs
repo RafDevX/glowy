@@ -252,10 +252,7 @@ fn get_for_range_values<'a>(
                         // being set, which is worse -- branch must depend on
                         // the label of `value`, since a function might have
                         // side effects
-                        return vec![ValueRef::from_backtrace_or_bottom_at(
-                            value.backtrace(),
-                            || location.clone(),
-                        )];
+                        return vec![value.downgrade(|| location.clone())];
                     } else if n_values == 1 || n_values == 2 {
                         // FIXME: don't know how to propagate this as a sink
                     }
@@ -275,14 +272,10 @@ fn get_for_range_values<'a>(
         // so we assume it's a string (2 values vs 1 offers more flexibility,
         // and the 1st value would coincide)
 
-        // 1st value index, 2nd value code point
-        #[rustfmt::skip]
-        let flattened = ValueRef::from_backtrace_or_bottom_at(
-            value.backtrace(),
-            || location.clone(),
-        );
+        let downgraded = value.downgrade(|| location.clone());
 
-        vec![flattened.clone_inner(), flattened]
+        // 1st value index, 2nd value code point
+        vec![downgraded.clone_inner(), downgraded]
     }
 }
 

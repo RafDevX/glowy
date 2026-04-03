@@ -204,9 +204,7 @@ fn visit_type_assertion<'a>(
     // itself (assuming the assertion is true), and the second is a boolean
     // indicating whether the assertion succeeded (essentially the same value
     // but downgraded to simplest shape to remove any complexity)
-    let backtrace = value.backtrace();
-
-    let secondary = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.clone());
+    let secondary = value.downgrade(|| location.clone());
 
     let expandable = ExpandableValue::new(value, vec![secondary]);
 
