@@ -377,6 +377,12 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
+    let arg_backtraces: Vec<_> = node
+        .args
+        .iter()
+        .map(|arg| exprs::get_expr_backtrace(ctx, arg))
+        .collect();
+
     if let Some(annotation) = &node.annotation {
         match annotation.directive {
             "sink" => {
@@ -386,22 +392,18 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                     node.location.clone(), // call, not annotation
                 );
 
-                for arg in &node.args {
-                    let backtrace = exprs::get_expr_backtrace(ctx, arg);
-
-                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), backtrace);
+                for arg in &arg_backtraces {
+                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg.clone());
                 }
             }
             "assert" => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
 
-                for arg in &node.args {
-                    let backtrace = exprs::get_expr_backtrace(ctx, arg);
-
+                for arg in &arg_backtraces {
                     enforcement::trigger_assertion(
                         ctx,
                         &sequence,
-                        backtrace,
+                        arg.clone(),
                         node.location.clone(),
                     );
                 }
@@ -422,10 +424,8 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
         let mut children = vec![];
 
-        for arg in &node.args {
-            if let Some(child) = exprs::get_expr_backtrace(ctx, arg) {
-                children.push(child);
-            }
+        for child in arg_backtraces.iter().flatten() {
+            children.push(child.clone());
         }
 
         let bt = LabelBacktrace::fold(
@@ -495,7 +495,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         None
     };
 
-    handle_deferred_checks(ctx, &func, &ids, &node.args, &node.location);
+    handle_deferred_checks(ctx, &func, &ids, &arg_backtraces, &node.location);
 
     let mut result = calculate_call_result(
         ctx,
@@ -503,7 +503,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         receiver.as_ref().map(Option::as_ref),
         &ids,
         outcome,
-        &node.args,
+        &arg_backtraces,
         &node.location,
     );
 
@@ -540,7 +540,7 @@ fn handle_deferred_checks<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     ids: &[(Option<&Span<'a>>, bool)],
-    args: &[ExprNode<'a>],
+    args: &[Option<LabelBacktrace<'a>>],
     location: &Location,
 ) {
     let mut deferred_checks = Vec::from(func.deferred_checks());
@@ -578,7 +578,7 @@ fn calculate_call_result<'a>(
     receiver: Option<Option<&LabelBacktrace<'a>>>,
     ids: &[(Option<&Span<'a>>, bool)],
     outcome: &Vec<ValueRef<'a>>,
-    args: &[ExprNode<'a>],
+    args: &[Option<LabelBacktrace<'a>>],
     location: &Location,
 ) -> Vec<ValueRef<'a>> {
     let mut result = vec![];
@@ -629,14 +629,11 @@ fn calculate_concrete_backtrace<'a>(
     index: usize,
     id: Option<&Span<'a>>,
     variadic: bool,
-    args: &[ExprNode<'a>],
+    args: &[Option<LabelBacktrace<'a>>],
     location: &Location,
 ) -> Option<LabelBacktrace<'a>> {
     if variadic {
-        let children: Vec<_> = args[index..]
-            .iter()
-            .filter_map(|arg| exprs::get_expr_backtrace(ctx, arg))
-            .collect();
+        let children: Vec<_> = args[index..].iter().flatten().cloned().collect();
 
         LabelBacktrace::fold(
             &children,
@@ -645,8 +642,6 @@ fn calculate_concrete_backtrace<'a>(
             ctx.pin(location.clone()),
         )
     } else {
-        let arg = args.get(index).expect("already checked arg count");
-
-        exprs::get_expr_backtrace(ctx, arg)
+        args.get(index).and_then(Option::clone)
     }
 }

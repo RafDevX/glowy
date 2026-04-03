@@ -35,6 +35,8 @@ pub fn visit_receive<'a>(
 }
 
 pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
+    let base = exprs::visit_single_expr(ctx, &node.expr);
+
     let mut explicit_backtrace = None;
 
     if let Some(annotation) = &node.annotation {
@@ -54,13 +56,13 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                     node.location.clone(), // statement, not annotation
                 );
 
-                let backtrace = exprs::get_expr_backtrace(ctx, &node.expr);
+                let backtrace = base.backtrace();
 
                 enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
             }
             "assert" => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
-                let backtrace = exprs::get_expr_backtrace(ctx, &node.expr);
+                let backtrace = base.backtrace();
 
                 enforcement::trigger_assertion(ctx, &sequence, backtrace, node.location.clone());
             }
@@ -70,8 +72,6 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
             }),
         }
     }
-
-    let base = exprs::visit_single_expr(ctx, &node.expr);
 
     // we take send as syntactic sugar for a complex assignment
     node.channel.assign(
