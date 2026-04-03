@@ -291,7 +291,7 @@ fn visit_array_literal_element<'a>(
                     location.clone(),
                 );
 
-                folded.map_or_else(|| ValueRef::new_bottom(location.clone()), ValueRef::from)
+                ValueRef::from_backtrace_or_bottom_at(folded, || location.clone())
             }
         }
     }

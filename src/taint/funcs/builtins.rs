@@ -123,7 +123,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 location.clone(),
             );
 
-            backtrace.map_or_else(|| ValueRef::new_bottom(location), ValueRef::from)
+            ValueRef::from_backtrace_or_bottom_at(backtrace, || location)
         }
     }
 }
@@ -254,7 +254,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     );
 
     // return concerns the number of elements copied, which is tainted
-    combined.map_or_else(|| ValueRef::new_bottom(location), ValueRef::from)
+    ValueRef::from_backtrace_or_bottom_at(combined, || location)
 }
 
 pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
@@ -304,11 +304,7 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
         slice.clear();
 
-        #[rustfmt::skip]
-        let backtrace_value = backtrace.map_or_else(
-            || ValueRef::new_bottom(location.clone()),
-            ValueRef::from,
-        );
+        let backtrace_value = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.clone());
 
         slice.set_dyn(&backtrace_value, location);
 

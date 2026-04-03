@@ -44,6 +44,20 @@ impl<'a> ValueRef<'a> {
         Self::new(Value::Simple(None), location)
     }
 
+    pub fn from_backtrace_or_bottom_at<F>(
+        backtrace: Option<LabelBacktrace<'a>>,
+        bottom_at: F,
+    ) -> Self
+    where
+        F: FnOnce() -> Pinned<Location>,
+    {
+        if let Some(backtrace) = backtrace {
+            Self::from(backtrace)
+        } else {
+            Self::new_bottom(bottom_at())
+        }
+    }
+
     /// Copy by value or by reference according to Go aliasing rules
     pub fn copy(&self) -> Self {
         let borrowed = self.value.borrow();
@@ -739,10 +753,7 @@ impl Mergeable for ExpandableValue<'_> {
 
 impl<'a> Upgrade<'a> for ExpandableValue<'a> {
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
-        let primary = backtrace.map_or_else(
-            || ValueRef::new_bottom(location.into_owned()),
-            ValueRef::from,
-        );
+        let primary = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.into_owned());
 
         Self::new(primary, Vec::new())
     }
@@ -824,10 +835,7 @@ impl Mergeable for MobiusValue<'_> {
 
 impl<'a> Upgrade<'a> for MobiusValue<'a> {
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
-        let inner = backtrace.map_or_else(
-            || ValueRef::new_bottom(location.into_owned()),
-            ValueRef::from,
-        );
+        let inner = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.into_owned());
 
         Self::new(inner)
     }
@@ -951,7 +959,6 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             .with_location(at_location)
     }
 
-    #[rustfmt::skip]
     pub fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
         // since we don't know the concrete key, we must take the union of all
         // possibilities, i.e., all entries of const
@@ -959,9 +966,9 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         // for simplicity, we re-use the backtrace_at_location logic already
         // implemented elsewhere
 
-        self.backtrace_at_location(at_location.clone()).map_or_else(
-            || ValueRef::new_bottom(at_location),
-            ValueRef::from,
+        ValueRef::from_backtrace_or_bottom_at(
+            self.backtrace_at_location(at_location.clone()),
+            || at_location,
         )
     }
 

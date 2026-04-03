@@ -60,11 +60,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
         // value has the same label as the actual returned value
         let presence = result.backtrace();
 
-        #[rustfmt::skip]
-        let secondary = presence.map_or_else(
-            || ValueRef::new_bottom(location.clone()),
-            ValueRef::from,
-        );
+        let secondary = ValueRef::from_backtrace_or_bottom_at(presence, || location.clone());
 
         let expandable = ExpandableValue::new(result, vec![secondary]);
 
@@ -158,5 +154,5 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         .flatten(),
     );
 
-    result.map_or_else(|| ValueRef::new_bottom(location), ValueRef::from)
+    ValueRef::from_backtrace_or_bottom_at(result, || location)
 }

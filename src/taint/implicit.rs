@@ -226,7 +226,7 @@ fn get_for_range_values<'a>(
         let index_bt = composite.backtrace_at_location(location.clone());
 
         vec![
-            index_bt.map_or_else(|| ValueRef::new_bottom(location.clone()), ValueRef::from),
+            ValueRef::from_backtrace_or_bottom_at(index_bt, || location.clone()),
             composite.get_at_unknown_key(location),
         ]
     } else if let Some(func) = value.as_function() {
@@ -252,9 +252,9 @@ fn get_for_range_values<'a>(
                         // being set, which is worse -- branch must depend on
                         // the label of `value`, since a function might have
                         // side effects
-                        return vec![value.backtrace().map_or_else(
-                            || ValueRef::new_bottom(location.clone()),
-                            ValueRef::from,
+                        return vec![ValueRef::from_backtrace_or_bottom_at(
+                            value.backtrace(),
+                            || location.clone(),
                         )];
                     } else if n_values == 1 || n_values == 2 {
                         // FIXME: don't know how to propagate this as a sink
@@ -276,9 +276,11 @@ fn get_for_range_values<'a>(
         // and the 1st value would coincide)
 
         // 1st value index, 2nd value code point
-        let flattened = value
-            .backtrace()
-            .map_or_else(|| ValueRef::new_bottom(location.clone()), ValueRef::from);
+        #[rustfmt::skip]
+        let flattened = ValueRef::from_backtrace_or_bottom_at(
+            value.backtrace(),
+            || location.clone(),
+        );
 
         vec![flattened.clone_inner(), flattened]
     }

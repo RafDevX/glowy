@@ -439,32 +439,21 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             // we have a signature, so we know exactly how many values it
             // returns and so can use that information
 
-            // cannot extract `.take(...).collect()` because closures would
-            // return different types, making the compiler angry without a lot
-            // of borrow checker hacks and Box<dyn Iterator>; this is simpler
-            return bt.map_or_else(
-                || {
-                    iter::repeat_with(|| ValueRef::new_bottom(call_location.clone()))
-                        .take(signature.result.len())
-                        .collect()
-                },
-                |backtrace| {
-                    iter::repeat_with(|| ValueRef::from(backtrace.clone()))
-                        .take(signature.result.len())
-                        .collect()
-                },
-            );
+            return iter::repeat_with(|| {
+                ValueRef::from_backtrace_or_bottom_at(
+                    bt.clone(), // clone makes borrow checker happy
+                    || call_location.clone(),
+                )
+            })
+            .take(signature.result.len())
+            .collect();
         }
 
         // we have no way of knowing how many values this function returns, so
         // the best we can do is return a Möbius value that can be expanded to
         // however many values the invoker expects
 
-        #[rustfmt::skip]
-        let inner = bt.map_or_else(
-            || ValueRef::new_bottom(call_location.clone()),
-            ValueRef::from,
-        );
+        let inner = ValueRef::from_backtrace_or_bottom_at(bt, || call_location.clone());
 
         return vec![ValueRef::new(
             Value::Mobius(MobiusValue::new(inner)),

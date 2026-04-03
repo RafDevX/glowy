@@ -48,10 +48,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
                 ctx.pin(location.clone()),
             );
 
-            backtrace.map_or_else(
-                || ValueRef::new_bottom(ctx.pin(location.clone())),
-                ValueRef::from,
-            )
+            ValueRef::from_backtrace_or_bottom_at(backtrace, || ctx.pin(location.clone()))
         }
     };
 
@@ -209,11 +206,7 @@ fn visit_type_assertion<'a>(
     // but downgraded to simplest shape to remove any complexity)
     let backtrace = value.backtrace();
 
-    #[rustfmt::skip]
-    let secondary = backtrace.map_or_else(
-        || ValueRef::new_bottom(location.clone()),
-        ValueRef::from,
-    );
+    let secondary = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.clone());
 
     let expandable = ExpandableValue::new(value, vec![secondary]);
 
