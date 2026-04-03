@@ -4,10 +4,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::LabelBacktraceKind,
-    values::{
-        BacktraceContainer, ExpandableValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
-        ValueRef,
-    },
+    values::{ExpandableValue, SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef},
 };
 
 pub fn visit_selection<'a>(
@@ -22,49 +19,56 @@ pub fn visit_selection<'a>(
         return super::visit_operand_name(ctx, node.selector, Some(pkg.qualifier()));
     }
 
+    let location = ctx.pin(node.location.clone());
+
     let Some(r#struct) = base.as_struct() else {
         ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     };
 
-    r#struct.get_const(
-        &node.selector.content().to_owned(),
-        ctx.pin(node.location.clone()),
-    )
+    r#struct.get_const(&node.selector.content().to_owned(), location)
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
     let base = super::visit_single_expr(ctx, &node.base);
+
+    let location = ctx.pin(node.location.clone());
 
     let Some(composite) = base.as_composite() else {
         ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     };
 
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);
 
     let result = if let Some(index) = index {
-        composite.get_at_known_key(&index, ctx.pin(node.location.clone()))
+        composite.get_at_known_key(&index, location.clone())
     } else {
-        composite.get_at_unknown_key(ctx.pin(node.location.clone()))
+        composite.get_at_unknown_key(location.clone())
     };
+
 
     if base.is_map() {
         // indexing a map returns a second value corresponding to whether the
         // key was or not present in the map. here, we assume that this presence
         // value has the same label as the actual returned value
-        let presence = result.backtrace_at_location(ctx.pin(node.location.clone()));
+        let presence = result.backtrace();
 
-        ValueRef::from(Value::Expandable(ExpandableValue::new(
-            result,
-            vec![ValueRef::from(presence)],
-        )))
+        #[rustfmt::skip]
+        let secondary = presence.map_or_else(
+            || ValueRef::new_bottom(location.clone()),
+            ValueRef::from,
+        );
+
+        let expandable = ExpandableValue::new(result, vec![secondary]);
+
+        ValueRef::new(Value::Expandable(expandable), location)
     } else {
         result
     }
@@ -84,7 +88,7 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         // the current simple value) -- in both cases, the result of accessing
         // it is always just the backtrace itself (+ low/high/max)
 
-        base.backtrace_at_location(ctx.pin(super::get_expr_location(&node.base)))
+        base.backtrace()
     } else if let Some(sliceable) = base.as_complex_sliceable() {
         let low = node
             .low
@@ -135,24 +139,24 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         None
     };
 
-    ValueRef::from(
-        result.nest_backtrace(
-            LabelBacktraceKind::Expression,
-            None,
-            location,
-            [
-                node.low
-                    .as_ref()
-                    .and_then(|l| super::get_expr_backtrace(ctx, l)),
-                node.high
-                    .as_ref()
-                    .and_then(|h| super::get_expr_backtrace(ctx, h)),
-                node.max
-                    .as_ref()
-                    .and_then(|m| super::get_expr_backtrace(ctx, m)),
-            ]
-            .into_iter()
-            .flatten(),
-        ),
-    )
+    let result = result.nest_backtrace(
+        LabelBacktraceKind::Expression,
+        None,
+        location.clone(),
+        [
+            node.low
+                .as_ref()
+                .and_then(|l| super::get_expr_backtrace(ctx, l)),
+            node.high
+                .as_ref()
+                .and_then(|h| super::get_expr_backtrace(ctx, h)),
+            node.max
+                .as_ref()
+                .and_then(|m| super::get_expr_backtrace(ctx, m)),
+        ]
+        .into_iter()
+        .flatten(),
+    );
+
+    result.map_or_else(|| ValueRef::new_bottom(location), ValueRef::from)
 }

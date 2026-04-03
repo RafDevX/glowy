@@ -9,6 +9,7 @@ use parser::{
 };
 
 use crate::{
+    Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
@@ -18,10 +19,10 @@ use crate::{
 
 pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> ValueRef<'a> {
     match node {
-        LiteralNode::Int { .. }
-        | LiteralNode::Float { .. }
-        | LiteralNode::Rune { .. }
-        | LiteralNode::String { .. } => ValueRef::new_bottom(),
+        LiteralNode::Int { location, .. }
+        | LiteralNode::Float { location, .. }
+        | LiteralNode::Rune { location, .. }
+        | LiteralNode::String { location, .. } => ValueRef::new_bottom(ctx.pin(location.clone())),
         LiteralNode::Function {
             signature,
             body,
@@ -29,45 +30,73 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
         } => funcs::visit_function_literal(ctx, signature, body, location),
         LiteralNode::Array {
             values, location, ..
-        } => ValueRef::from(Value::Array(visit_integer_keyed_composite_literal(
-            ctx, values, location,
-        ))),
+        } => {
+            let location = ctx.pin(location.clone());
+
+            let value = Value::Array(visit_integer_keyed_composite_literal(
+                ctx,
+                values,
+                location.clone(),
+            ));
+
+            ValueRef::new(value, location)
+        }
         LiteralNode::Slice {
             values, location, ..
         } => {
             // Array length must be a constant so we don't need to visit it to
             // trigger side-effects (there aren't any); we can focus on values
-            ValueRef::from(Value::Slice(visit_integer_keyed_composite_literal(
-                ctx, values, location,
-            )))
+
+            let location = ctx.pin(location.clone());
+
+            let value = Value::Slice(visit_integer_keyed_composite_literal(
+                ctx,
+                values,
+                location.clone(),
+            ));
+
+            ValueRef::new(value, location)
         }
         LiteralNode::Map {
             values, location, ..
-        } => ValueRef::from(Value::Map(visit_map_composite_literal(
-            ctx, values, location,
-        ))),
+        } => {
+            let location = ctx.pin(location.clone());
+
+            let value = Value::Map(visit_map_composite_literal(ctx, values, location.clone()));
+
+            ValueRef::new(value, location)
+        }
         LiteralNode::Struct {
             r#type,
             fields,
             location,
             ..
-        } => ValueRef::from(Value::Struct(visit_struct_composite_literal(
-            ctx, fields, r#type, location,
-        ))),
+        } => {
+            let location = ctx.pin(location.clone());
+
+            let value = Value::Struct(visit_struct_composite_literal(
+                ctx,
+                fields,
+                r#type,
+                location.clone(),
+            ));
+
+            ValueRef::new(value, location)
+        }
     }
 }
 
 fn visit_integer_keyed_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     values: &CompositeLiteralElementListNode<'a>,
-    location: &Location,
+    location: Pinned<Location>,
 ) -> CompositeValue<'a, u64> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
 
     let mut next_default_key = 0;
     for (opt_key, el) in values {
-        let value = visit_array_literal_element(ctx, el, location);
+        let value = visit_array_literal_element(ctx, el, &location);
 
         if value.is_bottom() {
             // we don't need to bloat the HashMap with None backtraces
@@ -101,19 +130,19 @@ fn visit_integer_keyed_composite_literal<'a>(
         }
     }
 
-    CompositeValue::new(map, others, ctx.pin(location.clone()))
+    CompositeValue::new(map, others, location)
 }
 
 fn visit_map_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     values: &CompositeLiteralElementListNode<'a>,
-    location: &Location,
+    location: Pinned<Location>,
 ) -> CompositeValue<'a, SimpleConstValue> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
 
     for (opt_key, el) in values {
-        let value = visit_array_literal_element(ctx, el, location);
+        let value = visit_array_literal_element(ctx, el, &location);
 
         if value.is_bottom() {
             // we don't need to bloat the HashMap with None backtraces
@@ -135,14 +164,14 @@ fn visit_map_composite_literal<'a>(
         }
     }
 
-    CompositeValue::new(map, others, ctx.pin(location.clone()))
+    CompositeValue::new(map, others, location)
 }
 
 fn visit_struct_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     fields: &StructLiteralFieldsNode<'a>,
     r#type: &TypeNode<'a>,
-    location: &Location,
+    location: Pinned<Location>,
 ) -> CompositeValue<'a, String> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
@@ -150,7 +179,7 @@ fn visit_struct_composite_literal<'a>(
     match fields {
         StructLiteralFieldsNode::Keyed(entries) => {
             for (field_name, element) in entries {
-                let value = visit_array_literal_element(ctx, element, location);
+                let value = visit_array_literal_element(ctx, element, &location);
 
                 if value.is_bottom() {
                     // we don't need to bloat the HashMap with None backtraces
@@ -193,7 +222,7 @@ fn visit_struct_composite_literal<'a>(
 
             if let Some(names) = names {
                 for (name, element) in names.iter().copied().zip(entries) {
-                    let value = visit_array_literal_element(ctx, element, location);
+                    let value = visit_array_literal_element(ctx, element, &location);
 
                     if let Some(&name) = name {
                         // happy path: we know the field name!
@@ -221,7 +250,7 @@ fn visit_struct_composite_literal<'a>(
                 // nothing to do, we cannot know field names, so we just
                 // approximate by merging all the provided values together
                 for element in entries {
-                    let value = visit_array_literal_element(ctx, element, location);
+                    let value = visit_array_literal_element(ctx, element, &location);
 
                     others.push(value);
                 }
@@ -229,13 +258,13 @@ fn visit_struct_composite_literal<'a>(
         }
     }
 
-    CompositeValue::new(map, others, ctx.pin(location.clone()))
+    CompositeValue::new(map, others, location)
 }
 
 fn visit_array_literal_element<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &CompositeLiteralElementNode<'a>,
-    location: &Location,
+    location: &Pinned<Location>,
 ) -> ValueRef<'a> {
     match &node {
         CompositeLiteralElementNode::Expr(expr) => super::visit_single_expr(ctx, expr),
@@ -249,21 +278,23 @@ fn visit_array_literal_element<'a>(
 
             if values.is_empty() {
                 // quicker escape to avoid clones et al. if they're unnecessary
-                ValueRef::new_bottom()
+                ValueRef::new_bottom(location.clone())
             } else if values.len() == 1 {
                 values.pop().unwrap()
             } else {
                 let backtraces: Vec<_> = values
                     .iter()
-                    .filter_map(|v| v.backtrace_at_location(ctx.pin(location.clone())))
+                    .filter_map(|v| v.backtrace_at_location(location.clone()))
                     .collect();
 
-                ValueRef::from(LabelBacktrace::fold(
+                let folded = LabelBacktrace::fold(
                     &backtraces,
                     LabelBacktraceKind::Expression,
                     None,
-                    ctx.pin(location.clone()),
-                ))
+                    location.clone(),
+                );
+
+                folded.map_or_else(|| ValueRef::new_bottom(location.clone()), ValueRef::from)
             }
         }
     }

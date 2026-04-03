@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter};
+use std::{borrow::Cow, iter, path::PathBuf};
 
 use parser::{
     Location, Span,
@@ -37,14 +37,23 @@ fn visit_function_def<'a>(
         None, // TODO: support annotations
     );
 
+    let value_location = match r#ref {
+        FunctionRef::Named(name) => name.pinned_location(),
+        FunctionRef::Anonymous(location) => location.clone(),
+        FunctionRef::BuiltIn(_) | FunctionRef::BlackboxInference(_) => {
+            decl_symbol.as_ref().map_or_else(
+                // FIXME: fake location
+                || Pinned::new(PathBuf::new(), 0..1),
+                Pinned::pinned_location,
+            )
+        }
+    };
+
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
     // the vec! macro would clone the ValueRef (and so they'd all point to the
     // same value, which is not what we want; they should be independent)
-    let bottom_outcome = iter::once(Value::Simple(None))
-        .cycle()
+    let bottom_outcome = iter::repeat_with(|| ValueRef::new_bottom(value_location.clone()))
         .take(signature.result.len())
-        // map only after cycle, otherwise Clone would just make many references
-        .map(ValueRef::from)
         .collect();
 
     // since we know that this function has an implementation, we set a bottom
@@ -52,7 +61,7 @@ fn visit_function_def<'a>(
     // blackbox function without implementation (which would have unset outcome)
     func_val.set_outcome(bottom_outcome);
 
-    let value = ValueRef::from(Value::Function(func_val));
+    let value = ValueRef::new(Value::Function(func_val), value_location);
 
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
@@ -80,7 +89,7 @@ fn visit_function_def<'a>(
             ctx.declare_new_symbol(Symbol::new_ref(
                 ctx.pin($id),
                 true,
-                ValueRef::from(Some(param_backtrace)),
+                ValueRef::from(param_backtrace),
             ));
         };
     }
@@ -404,6 +413,8 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
+    let call_location = ctx.pin(node.location.clone());
+
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must
         // treat it as a blackbox and assume the label of all its outputs is the
@@ -421,28 +432,44 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             children.iter().chain(func.backtrace()),
             LabelBacktraceKind::BlackboxCall,
             None,
-            ctx.pin(node.location.clone()),
+            call_location.clone(),
         );
 
         if let Some(signature) = func.signature() {
             // we have a signature, so we know exactly how many values it
             // returns and so can use that information
 
-            return iter::once(Value::Simple(bt))
-                .cycle()
-                .take(signature.result.len())
-                // only after cycle otherwise Clone would just make many refs
-                .map(ValueRef::from)
-                .collect();
+            // cannot extract `.take(...).collect()` because closures would
+            // return different types, making the compiler angry without a lot
+            // of borrow checker hacks and Box<dyn Iterator>; this is simpler
+            return bt.map_or_else(
+                || {
+                    iter::repeat_with(|| ValueRef::new_bottom(call_location.clone()))
+                        .take(signature.result.len())
+                        .collect()
+                },
+                |backtrace| {
+                    iter::repeat_with(|| ValueRef::from(backtrace.clone()))
+                        .take(signature.result.len())
+                        .collect()
+                },
+            );
         }
 
         // we have no way of knowing how many values this function returns, so
         // the best we can do is return a Möbius value that can be expanded to
         // however many values the invoker expects
 
-        let mobius = MobiusValue::new(ValueRef::from(bt));
+        #[rustfmt::skip]
+        let inner = bt.map_or_else(
+            || ValueRef::new_bottom(call_location.clone()),
+            ValueRef::from,
+        );
 
-        return vec![ValueRef::from(Value::Mobius(mobius))];
+        return vec![ValueRef::new(
+            Value::Mobius(MobiusValue::new(inner)),
+            call_location,
+        )];
     };
 
     // by this point, we know `func.outcome()` is `Some`, which means we have
@@ -462,9 +489,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         if base.as_package_ref().is_some() {
             None
         } else {
-            let location = ctx.pin(exprs::get_expr_location(&selection.base));
-
-            Some(base.backtrace_at_location(location))
+            Some(base.backtrace())
         }
     } else {
         None
@@ -489,10 +514,14 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             *realized = realized.nest_backtrace(
                 LabelBacktraceKind::Expression,
                 None,
-                ctx.pin(node.location.clone()),
+                call_location.clone(),
                 [bt.clone()],
             );
         }
+    }
+
+    for realized in &mut result {
+        *realized = realized.with_location(call_location.clone());
     }
 
     // re-borrow as mutable

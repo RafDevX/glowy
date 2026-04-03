@@ -15,7 +15,7 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::{explicit, exprs},
-    values::{BacktraceContainer, ValueRef},
+    values::ValueRef,
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -145,10 +145,7 @@ fn visit_for_range<'a>(
     let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
     rhs_values.truncate(lhs_len);
 
-    let children: Vec<_> = rhs_values
-        .iter()
-        .filter_map(|v| v.backtrace_at_location(rhs_location.clone()))
-        .collect();
+    let children: Vec<_> = rhs_values.iter().filter_map(ValueRef::backtrace).collect();
 
     let rhs_backtrace = LabelBacktrace::fold(
         children.iter(),
@@ -229,7 +226,7 @@ fn get_for_range_values<'a>(
         let index_bt = composite.backtrace_at_location(location.clone());
 
         vec![
-            ValueRef::from(index_bt),
+            index_bt.map_or_else(|| ValueRef::new_bottom(location.clone()), ValueRef::from),
             composite.get_at_unknown_key(location),
         ]
     } else if let Some(func) = value.as_function() {
@@ -255,7 +252,10 @@ fn get_for_range_values<'a>(
                         // being set, which is worse -- branch must depend on
                         // the label of `value`, since a function might have
                         // side effects
-                        return vec![ValueRef::from(value.backtrace_at_location(location))];
+                        return vec![value.backtrace().map_or_else(
+                            || ValueRef::new_bottom(location.clone()),
+                            ValueRef::from,
+                        )];
                     } else if n_values == 1 || n_values == 2 {
                         // FIXME: don't know how to propagate this as a sink
                     }
@@ -268,7 +268,7 @@ fn get_for_range_values<'a>(
         // this does not catch all the ints (see below), but it does catch some
         // of them (directly passed integer literals)
 
-        vec![ValueRef::new_bottom()] // (literals necessarily have no label)
+        vec![ValueRef::new_bottom(location)] // (literals necessarily have no label)
     } else {
         // the only options remaining (if this is a valid Go program) is either
         // a string or a (non-literal) integer, but we can't know which this is,
@@ -276,9 +276,11 @@ fn get_for_range_values<'a>(
         // and the 1st value would coincide)
 
         // 1st value index, 2nd value code point
-        let bt = value.backtrace_at_location(location);
+        let flattened = value
+            .backtrace()
+            .map_or_else(|| ValueRef::new_bottom(location.clone()), ValueRef::from);
 
-        vec![ValueRef::from(bt.clone()), ValueRef::from(bt)]
+        vec![flattened.clone_inner(), flattened]
     }
 }
 
@@ -405,7 +407,7 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
     }
 
     let expr_location = ctx.pin(exprs::get_expr_location(&node.expr));
-    let pushed = if let Some(bt) = value.backtrace_at_location(expr_location.clone()) {
+    let pushed = if let Some(bt) = value.backtrace() {
         ctx.push_branch_backtrace(bt.into_single_child(
             LabelBacktraceKind::Branch,
             None,

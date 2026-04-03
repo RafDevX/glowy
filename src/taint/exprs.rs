@@ -9,10 +9,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::{QualifiedSymbolResolutionResult, SymbolRef},
-    values::{
-        BacktraceContainer, ExpandableValue, PackageRefValue, SelfAwareBacktraceContainer, Value,
-        ValueRef,
-    },
+    values::{ExpandableValue, PackageRefValue, SelfAwareBacktraceContainer, Value, ValueRef},
 };
 
 mod component;
@@ -41,11 +38,8 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
             location,
             ..
         } => {
-            let left_location = ctx.pin(get_expr_location(left));
-            let right_location = ctx.pin(get_expr_location(right));
-
-            let left = visit_single_expr(ctx, left).backtrace_at_location(left_location);
-            let right = visit_single_expr(ctx, right).backtrace_at_location(right_location);
+            let left = get_expr_backtrace(ctx, left);
+            let right = get_expr_backtrace(ctx, right);
 
             let backtrace = LabelBacktrace::combine_options(
                 left,
@@ -54,7 +48,10 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
                 ctx.pin(location.clone()),
             );
 
-            ValueRef::from(backtrace)
+            backtrace.map_or_else(
+                || ValueRef::new_bottom(ctx.pin(location.clone())),
+                ValueRef::from,
+            )
         }
     };
 
@@ -85,7 +82,7 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
         };
     }
 
-    ValueRef::new_bottom()
+    ValueRef::new_bottom(ctx.pin(get_expr_location(node)))
 }
 
 pub fn visit_multi_exprs<'a>(
@@ -114,9 +111,7 @@ pub fn get_expr_backtrace<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &ExprNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    let location = ctx.pin(get_expr_location(node));
-
-    visit_single_expr(ctx, node).backtrace_at_location(location)
+    visit_single_expr(ctx, node).backtrace()
 }
 
 pub fn visit_operand_name<'a>(
@@ -124,6 +119,8 @@ pub fn visit_operand_name<'a>(
     name: Span<'a>,
     qualifier: Option<Span<'a>>,
 ) -> ValueRef<'a> {
+    let location = ctx.pin(name.location());
+
     if qualifier.is_none() && ctx.symtab().qualifier_exists(name.content()) {
         // FIXME: this is wrong because it means an existing qualifier will
         // always have precedence over a declared symbol with the same name,
@@ -132,29 +129,33 @@ pub fn visit_operand_name<'a>(
         // not prevent an unknown symbol error from being reported even when
         // a qualifier is valid
 
-        return ValueRef::from(Value::PackageRef(PackageRefValue::new(name)));
+        return ValueRef::new(Value::PackageRef(PackageRefValue::new(name)), location);
     } else if let Some(qual) = qualifier {
         if ctx.symtab().is_package_blackbox(qual.content()) {
             // we don't know any details about this package, so we just assume
             // that the requested member (`name`) exists within it
 
-            return ValueRef::new_bottom();
+            return ValueRef::new_bottom(location);
         }
     }
 
     let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
         // error already reported
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     };
 
     let borrowed = symbol.borrow();
 
-    borrowed.value().get().nest_backtrace(
-        LabelBacktraceKind::Expression,
-        Some(name.content()),
-        ctx.pin(name.location()),
-        [],
-    )
+    borrowed
+        .value()
+        .get()
+        .nest_backtrace(
+            LabelBacktraceKind::Expression,
+            Some(name.content()),
+            location.clone(),
+            [],
+        )
+        .with_location(location)
 }
 
 /// Reports error for unknown symbol or unknown qualifier, if applicable
@@ -200,16 +201,23 @@ fn visit_type_assertion<'a>(
 ) -> ValueRef<'a> {
     let value = visit_single_expr(ctx, &node.expr);
 
+    let location = ctx.pin(node.location.clone());
+
     // a type assertion is expandable into 2 values: the first is just the value
     // itself (assuming the assertion is true), and the second is a boolean
     // indicating whether the assertion succeeded (essentially the same value
     // but downgraded to simplest shape to remove any complexity)
-    let backtrace = value.backtrace_at_location(ctx.pin(node.location.clone()));
+    let backtrace = value.backtrace();
 
-    ValueRef::from(Value::Expandable(ExpandableValue::new(
-        value,
-        vec![ValueRef::from(backtrace)],
-    )))
+    #[rustfmt::skip]
+    let secondary = backtrace.map_or_else(
+        || ValueRef::new_bottom(location.clone()),
+        ValueRef::from,
+    );
+
+    let expandable = ExpandableValue::new(value, vec![secondary]);
+
+    ValueRef::new(Value::Expandable(expandable), location)
 }
 
 pub fn get_expr_location(node: &ExprNode<'_>) -> Location {

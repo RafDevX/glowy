@@ -27,55 +27,88 @@ use crate::{
 
 // wrapper struct (vs. type alias) allows impl'ing despite orphan rule
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct ValueRef<'a>(Rc<RefCell<Value<'a>>>);
+pub struct ValueRef<'a> {
+    value: Rc<RefCell<Value<'a>>>,
+    location: Pinned<Location>,
+}
 
 impl<'a> ValueRef<'a> {
-    pub fn new_bottom() -> Self {
-        Self::from(None)
+    pub fn new(value: Value<'a>, location: Pinned<Location>) -> Self {
+        Self {
+            value: Rc::new(RefCell::new(value)),
+            location,
+        }
+    }
+
+    pub fn new_bottom(location: Pinned<Location>) -> Self {
+        Self::new(Value::Simple(None), location)
     }
 
     /// Copy by value or by reference according to Go aliasing rules
     pub fn copy(&self) -> Self {
-        let borrowed = self.0.borrow();
+        let borrowed = self.value.borrow();
 
         if borrowed.is_copy_by_reference() {
             self.clone()
         } else {
-            Self::from(borrowed.clone())
+            Self {
+                value: Rc::new(RefCell::new(borrowed.clone())),
+                location: self.location.clone(),
+            }
         }
     }
 
     /// Force cloning inner value (copy by value)
     pub fn clone_inner(&self) -> Self {
-        let borrowed = self.0.borrow();
+        let borrowed = self.value.borrow();
 
-        Self::from(borrowed.clone())
+        Self {
+            value: Rc::new(RefCell::new(borrowed.clone())),
+            location: self.location.clone(),
+        }
+    }
+
+    pub fn with_location(&self, location: Pinned<Location>) -> Self {
+        Self {
+            value: Rc::clone(&self.value),
+            location,
+        }
+    }
+
+    pub fn location(&self) -> &Pinned<Location> {
+        &self.location
+    }
+
+    pub fn backtrace(&self) -> Option<LabelBacktrace<'a>> {
+        self.value
+            .borrow()
+            .backtrace_at_location(self.location.clone())
     }
 
     pub fn is_simple(&self) -> bool {
-        matches!(*self.0.borrow(), Value::Simple(_))
+        matches!(*self.value.borrow(), Value::Simple(_))
     }
 
     pub fn is_map(&self) -> bool {
-        matches!(*self.0.borrow(), Value::Map(_))
+        matches!(*self.value.borrow(), Value::Map(_))
     }
 
     // coerce a Value::Simple to take a complex shape when used
     fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
-        let borrow = self.0.borrow();
+        let borrow = self.value.borrow();
 
         if let Value::Simple(backtrace) = &*borrow {
-            let inner = C::upgrade(backtrace.clone());
+            let inner = C::upgrade(backtrace.clone(), Cow::Borrowed(&self.location));
 
             drop(borrow); // release the immutable borrow
 
-            *self.0.borrow_mut() = f(inner);
+            *self.value.borrow_mut() = f(inner);
         }
     }
 
     pub fn try_singularize_simple_mobius(&mut self) {
-        let new = if let Value::Mobius(MobiusValue(inner)) = &*self.0.borrow() {
-            if let value @ Value::Simple(_) = &*inner.0.borrow() {
+        let new = if let Value::Mobius(MobiusValue(inner)) = &*self.value.borrow() {
+            if let value @ Value::Simple(_) = &*inner.value.borrow() {
                 Some(value.clone())
             } else {
                 None
@@ -85,7 +118,7 @@ impl<'a> ValueRef<'a> {
         };
 
         if let Some(new) = new {
-            *self.0.borrow_mut() = new;
+            *self.value.borrow_mut() = new;
         }
     }
 }
@@ -114,25 +147,25 @@ impl<'a> ValueRef<'a> {
     pub fn as_expandable(&self) -> Option<Ref<'_, ExpandableValue<'a>>> {
         self.try_upgrade_to(Value::Expandable);
 
-        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Expandable)).ok()
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Expandable)).ok()
     }
 
     pub fn as_mobius(&self) -> Option<Ref<'_, MobiusValue<'a>>> {
         self.try_upgrade_to(Value::Mobius);
 
-        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Mobius)).ok()
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Mobius)).ok()
     }
 
     pub fn as_package_ref(&self) -> Option<Ref<'_, PackageRefValue<'a>>> {
         // no coercion because there's no 'blank' package ref
 
-        Ref::filter_map(self.0.borrow(), extract_inner!(Value::PackageRef)).ok()
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::PackageRef)).ok()
     }
 
     pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 
-        RefMut::filter_map(self.0.borrow_mut(), extract_inner!(Value::Slice)).ok()
+        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Slice)).ok()
     }
 
     // (complex because Simple is technically also sliceable but not supported
@@ -140,7 +173,7 @@ impl<'a> ValueRef<'a> {
     pub fn as_complex_sliceable(&self) -> Option<Ref<'_, CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
+        Ref::filter_map(self.value.borrow(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => Some(composite),
             _ => None,
         })
@@ -150,7 +183,7 @@ impl<'a> ValueRef<'a> {
     pub fn as_composite(&self) -> Option<Ref<'_, dyn CompositeValueAdapter<'a>>> {
         self.try_upgrade_to(Value::Array);
 
-        Ref::filter_map(self.0.borrow(), |value| match value {
+        Ref::filter_map(self.value.borrow(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {
                 Some(composite as &dyn CompositeValueAdapter<'a>)
             }
@@ -163,7 +196,7 @@ impl<'a> ValueRef<'a> {
     pub fn as_composite_mut(&mut self) -> Option<RefMut<'_, dyn CompositeValueAdapter<'a>>> {
         self.try_upgrade_to(Value::Array);
 
-        RefMut::filter_map(self.0.borrow_mut(), |value| match value {
+        RefMut::filter_map(self.value.borrow_mut(), |value| match value {
             Value::Array(composite) | Value::Slice(composite) => {
                 Some(composite as &mut dyn CompositeValueAdapter<'a>)
             }
@@ -176,37 +209,34 @@ impl<'a> ValueRef<'a> {
     pub fn as_struct(&self) -> Option<Ref<'_, CompositeValue<'a, String>>> {
         self.try_upgrade_to(Value::Struct);
 
-        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Struct)).ok()
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Struct)).ok()
     }
 
     pub fn as_struct_mut(&self) -> Option<RefMut<'_, CompositeValue<'a, String>>> {
         self.try_upgrade_to(Value::Struct);
 
-        RefMut::filter_map(self.0.borrow_mut(), extract_inner!(Value::Struct)).ok()
+        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Struct)).ok()
     }
 
     pub fn as_function(&self) -> Option<Ref<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
-        Ref::filter_map(self.0.borrow(), extract_inner!(Value::Function)).ok()
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Function)).ok()
     }
 
     pub fn as_function_mut(&mut self) -> Option<RefMut<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
-        RefMut::filter_map(self.0.borrow_mut(), extract_inner!(Value::Function)).ok()
+        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Function)).ok()
     }
 }
 
-impl<'a> From<Value<'a>> for ValueRef<'a> {
-    fn from(value: Value<'a>) -> Self {
-        Self(Rc::new(RefCell::new(value)))
-    }
-}
-
-impl<'a> From<Option<LabelBacktrace<'a>>> for ValueRef<'a> {
-    fn from(bt: Option<LabelBacktrace<'a>>) -> Self {
-        Value::Simple(bt).into()
+impl<'a> From<LabelBacktrace<'a>> for ValueRef<'a> {
+    fn from(backtrace: LabelBacktrace<'a>) -> Self {
+        Self::new(
+            Value::Simple(Some(backtrace.clone())),
+            backtrace.location().clone(),
+        )
     }
 }
 
@@ -219,15 +249,11 @@ pub trait BacktraceContainer<'a> {
 
 impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
     fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
-        let borrowed = self.0.borrow();
-
-        borrowed.backtrace_at_location(location)
+        self.with_location(location).backtrace()
     }
 
     fn is_bottom(&self) -> bool {
-        let borrowed = self.0.borrow();
-
-        borrowed.is_bottom()
+        self.value.borrow().is_bottom()
     }
 }
 
@@ -259,9 +285,14 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         from_index: Option<usize>,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
-        let borrowed = self.0.borrow();
+        let borrowed = self.value.borrow();
 
-        ValueRef::from(borrowed.realize(from_func, from_index, concrete))
+        let realized = borrowed.realize(from_func, from_index, concrete);
+
+        Self {
+            value: Rc::new(RefCell::new(realized)),
+            location: self.location.clone(),
+        }
     }
 
     fn nest_backtrace(
@@ -271,14 +302,20 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         parent_location: Pinned<Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
-        let borrowed = self.0.borrow();
+        let borrowed = self.value.borrow();
 
-        ValueRef::from(borrowed.nest_backtrace(
+        #[rustfmt::skip]
+        let nested = borrowed.nest_backtrace(
             parent_kind,
             parent_symbol,
             parent_location,
             extra_children,
-        ))
+        );
+
+        Self {
+            value: Rc::new(RefCell::new(nested)),
+            location: self.location.clone(),
+        }
     }
 }
 
@@ -301,16 +338,21 @@ impl Mergeable for ValueRef<'_> {
         with_kind: LabelBacktraceKind,
         at_location: Cow<Pinned<Location>>,
     ) -> Self {
-        let b1 = self.0.borrow();
-        let b2 = other.0.borrow();
+        let b1 = self.value.borrow();
+        let b2 = other.value.borrow();
 
-        ValueRef::from(b1.merge_with(&b2, with_kind, at_location))
+        let merged = b1.merge_with(&b2, with_kind, at_location);
+
+        Self {
+            value: Rc::new(RefCell::new(merged)),
+            location: self.location.clone(),
+        }
     }
 }
 
 impl SnapshotAware for ValueRef<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        self.0.borrow().snapshot_aware_eq(&other.0.borrow())
+        self.value.borrow().snapshot_aware_eq(&other.value.borrow())
     }
 }
 
@@ -569,7 +611,7 @@ impl SnapshotAware for Value<'_> {
 
 trait Upgrade<'a> {
     // Coerce from a Value::Simple to Self, preserving inner backtrace
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self;
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self;
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -599,7 +641,7 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
     fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
         let backtraces: Vec<LabelBacktrace<'a>> = iter::once(&self.primary)
             .chain(self.secondary.iter())
-            .filter_map(|v| v.backtrace_at_location(location.clone()))
+            .filter_map(ValueRef::backtrace)
             .collect();
 
         LabelBacktrace::fold(
@@ -696,8 +738,13 @@ impl Mergeable for ExpandableValue<'_> {
 }
 
 impl<'a> Upgrade<'a> for ExpandableValue<'a> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
-        Self::new(ValueRef::from(backtrace), Vec::new())
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
+        let primary = backtrace.map_or_else(
+            || ValueRef::new_bottom(location.into_owned()),
+            ValueRef::from,
+        );
+
+        Self::new(primary, Vec::new())
     }
 }
 
@@ -776,8 +823,13 @@ impl Mergeable for MobiusValue<'_> {
 }
 
 impl<'a> Upgrade<'a> for MobiusValue<'a> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
-        Self::new(ValueRef::from(backtrace))
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
+        let inner = backtrace.map_or_else(
+            || ValueRef::new_bottom(location.into_owned()),
+            ValueRef::from,
+        );
+
+        Self::new(inner)
     }
 }
 
@@ -868,7 +920,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     ) -> Self {
         let children: Vec<_> = others
             .into_iter()
-            .filter_map(|v| v.backtrace_at_location(location.clone()))
+            .filter_map(|value| value.backtrace())
             .collect();
 
         let r#dyn = LabelBacktrace::fold(
@@ -898,18 +950,20 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn get_const(&self, key: &K, at_location: Pinned<Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(key).cloned() {
             Some(value) => value,
-            None => self
-                .default_value
-                .as_ref()
-                .map_or_else(ValueRef::new_bottom, ValueRef::clone_inner),
+            None => self.default_value.as_ref().map_or_else(
+                || ValueRef::new_bottom(at_location.clone()),
+                ValueRef::clone_inner,
+            ),
         };
 
-        value.nest_backtrace(
-            LabelBacktraceKind::Expression,
-            None,
-            at_location,
-            self.r#dyn.clone(),
-        )
+        value
+            .nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                at_location.clone(),
+                self.r#dyn.clone(),
+            )
+            .with_location(at_location)
     }
 
     pub fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
@@ -919,15 +973,20 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         // for simplicity, we re-use the backtrace_at_location logic already
         // implemented elsewhere
 
-        let backtrace = self.backtrace_at_location(at_location);
+        self.backtrace_at_location(at_location.clone()).map_or_else(
+            || {
+                // necessary since 2 closures need to move the location, since
+                // the borrow checker doesn't know only one of the closures will
+                // actually run (so they could share one copy, but oh well)
+                let location_clone = at_location.clone();
 
-        if backtrace.is_none() {
-            if let Some(default) = &self.default_value {
-                return default.clone_inner();
-            }
-        }
-
-        ValueRef::from(backtrace)
+                self.default_value.as_ref().map_or_else(
+                    || ValueRef::new_bottom(at_location),
+                    |default| default.clone_inner().with_location(location_clone),
+                )
+            },
+            ValueRef::from,
+        )
     }
 
     pub fn set_const(
@@ -942,8 +1001,8 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
                 existing.insert(value.nest_backtrace(
                     LabelBacktraceKind::Assignment,
                     None,
-                    at_location.clone(),
-                    existing.get().backtrace_at_location(at_location),
+                    at_location,
+                    existing.get().backtrace(),
                 ));
             }
             Entry::Occupied(mut existing) => {
@@ -959,7 +1018,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
         self.r#dyn = LabelBacktrace::combine_options(
             self.r#dyn.clone(),
-            value.backtrace_at_location(at_location.clone()),
+            value.backtrace(),
             LabelBacktraceKind::Assignment,
             at_location,
         );
@@ -978,7 +1037,8 @@ impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
             .iter()
             .filter(|(k, _)| low.as_ref().is_none_or(|l| *k >= l))
             .filter(|(k, _)| high.as_ref().is_none_or(|h| *k < h))
-            .filter_map(|(_, v)| v.backtrace_at_location(at_location.clone()))
+            .map(|(_, v)| v)
+            .filter_map(ValueRef::backtrace)
             .chain(self.r#dyn.clone())
             .collect();
 
@@ -995,7 +1055,7 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
         let children: Vec<_> = self
             .r#const
             .values()
-            .filter_map(|v| v.backtrace_at_location(location.clone()))
+            .filter_map(ValueRef::backtrace)
             .chain(self.r#dyn.clone())
             .collect();
 
@@ -1104,7 +1164,7 @@ impl<K: Eq + Hash + Clone> Mergeable for CompositeValue<'_, K> {
 }
 
 impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, _location: Cow<Pinned<Location>>) -> Self {
         Self::empty(backtrace)
     }
 }
@@ -1410,7 +1470,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
 }
 
 impl<'a> Upgrade<'a> for FunctionValue<'a> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, _location: Cow<Pinned<Location>>) -> Self {
         Self::new_unknown(backtrace)
     }
 }

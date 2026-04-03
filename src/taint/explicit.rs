@@ -44,7 +44,10 @@ fn visit_binding_decl_spec<'a>(
         // (branch label is irrelevant in this case)
 
         for name in &node.ids {
-            let symbol = Symbol::new_ref(ctx.pin(*name), mutable, ValueRef::new_bottom());
+            let pinned = ctx.pin(*name);
+            let value = ValueRef::new_bottom(pinned.pinned_location());
+
+            let symbol = Symbol::new_ref(pinned, mutable, value);
 
             ctx.declare_new_symbol(symbol);
         }
@@ -170,7 +173,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
         let symbol = Symbol::new_ref(
             ctx.pin(name),
             true, // we initially always set the symbol as mutable
-            ValueRef::new_bottom(),
+            ValueRef::new_bottom(ctx.pin(location.clone())),
         );
         let symbol2 = Rc::clone(&symbol); // for later use if needed
 

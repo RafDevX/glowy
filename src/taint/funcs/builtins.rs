@@ -42,18 +42,21 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 .as_ref()
                 .map(|expr| exprs::visit_single_expr(ctx, expr));
 
+            let location = ctx.pin(node.location.clone());
+
+            #[rustfmt::skip]
             let mut composite = CompositeValue::new(
                 HashMap::new(),
                 n.into_iter().chain(m),
-                ctx.pin(node.location.clone()),
+                location.clone(),
             );
 
-            let default = ValueRef::new_bottom();
+            let default = ValueRef::new_bottom(location.clone());
             if !default.is_simple() {
                 composite.set_default_value(default);
             }
 
-            ValueRef::from(Value::Slice(composite))
+            ValueRef::new(Value::Slice(composite), location)
         }
         TypeNode::Map { .. } => {
             if let Some(m) = &node.m {
@@ -74,7 +77,10 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 .as_ref()
                 .map(|expr| exprs::visit_single_expr(ctx, expr));
 
-            ValueRef::from(Value::Map(CompositeValue::empty(None)))
+            ValueRef::new(
+                Value::Map(CompositeValue::empty(None)),
+                ctx.pin(node.location.clone()),
+            )
         }
         TypeNode::Channel { .. } => {
             if let Some(m) = &node.m {
@@ -90,10 +96,12 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
 
             // TODO: maybe add Value::Channel?
 
+            let location = ctx.pin(node.location.clone());
+
             if let Some(n) = &node.n {
-                exprs::visit_single_expr(ctx, n)
+                exprs::visit_single_expr(ctx, n).with_location(location)
             } else {
-                ValueRef::new_bottom()
+                ValueRef::new_bottom(location)
             }
         }
         _ => {
@@ -111,14 +119,16 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 .as_ref()
                 .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
 
+            let location = ctx.pin(node.location.clone());
+
             let backtrace = LabelBacktrace::combine_options(
                 n,
                 m,
                 LabelBacktraceKind::Expression,
-                ctx.pin(node.location.clone()),
+                location.clone(),
             );
 
-            ValueRef::from(backtrace)
+            backtrace.map_or_else(|| ValueRef::new_bottom(location), ValueRef::from)
         }
     }
 }
@@ -130,6 +140,8 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
     // TODO: is it possible to infer what is the current slice length, at least
     // in some cases, so we can use const instead of dyn?
 
+    let location = ctx.pin(node.location.clone());
+
     if node.args.len() < 2 {
         ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
             expected: 2,
@@ -137,7 +149,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     }
 
     let original = node.args.first().unwrap(); // already checked length
@@ -149,7 +161,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     };
 
     if node.variadic {
@@ -162,18 +174,18 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
                 location: node.location.clone(),
             });
 
-            return ValueRef::new_bottom();
+            return ValueRef::new_bottom(location);
         };
 
         let value = exprs::visit_single_expr(ctx, other);
 
-        slice.set_dyn(&value, ctx.pin(node.location.clone()));
+        slice.set_dyn(&value, location);
     } else {
         // multiple arguments corresponding to individual elements
         for el in node.args.iter().skip(1) {
             let value = exprs::visit_single_expr(ctx, el);
 
-            slice.set_dyn(&value, ctx.pin(node.location.clone()));
+            slice.set_dyn(&value, location.clone());
         }
     }
 
@@ -190,6 +202,8 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     // Also: some parts of the destination slice might not be overwritten, so we
     // need to remember its backtrace too.
 
+    let location = ctx.pin(node.location.clone());
+
     let [dst_expr, src_expr] = node.args.as_slice() else {
         ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
             expected: 2,
@@ -197,20 +211,17 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     };
-
-    let dst_location = ctx.pin(exprs::get_expr_location(dst_expr));
-    let src_location = ctx.pin(exprs::get_expr_location(src_expr));
 
     let mut dst = exprs::visit_single_expr(ctx, dst_expr);
     let src = exprs::visit_single_expr(ctx, src_expr);
 
     let combined = LabelBacktrace::combine_options(
-        dst.backtrace_at_location(dst_location),
-        src.backtrace_at_location(src_location),
+        dst.backtrace(),
+        src.backtrace(),
         LabelBacktraceKind::Expression,
-        ctx.pin(node.location.clone()),
+        location.clone(),
     );
 
     let Some(mut slice) = dst.as_slice_mut() else {
@@ -218,18 +229,18 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom();
+        return ValueRef::new_bottom(location);
     };
 
     slice.clear(); // we don't want const info anymore
-    slice.set_dyn(&src, ctx.pin(node.location.clone()));
+    slice.set_dyn(&src, location.clone());
 
     drop(slice);
 
     let value = dst.nest_backtrace(
         LabelBacktraceKind::SliceCopy,
         None,
-        ctx.pin(node.location.clone()),
+        location.clone(),
         combined.clone(),
     );
 
@@ -248,7 +259,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     );
 
     // return concerns the number of elements copied, which is tainted
-    ValueRef::from(combined)
+    combined.map_or_else(|| ValueRef::new_bottom(location), ValueRef::from)
 }
 
 pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
@@ -272,9 +283,11 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     let mut current = exprs::visit_single_expr(ctx, arg);
 
+    let location = ctx.pin(node.location.clone());
+
     let new = if current.is_map() {
         // overwrite to bottom
-        ValueRef::new_bottom()
+        ValueRef::new_bottom(location)
     } else {
         // ideally we'd do `} else if let Some(mut slice) = ... {` with then
         // another `} else { ctx.report_error(...); return; };` so it would be
@@ -284,6 +297,8 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         // Option<(slice)> from the if-let could be destructured, so we do this
         // (sillier) version as a workaround
 
+        let backtrace = current.backtrace_at_location(location.clone());
+
         let Some(mut slice) = current.as_slice_mut() else {
             ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
                 location: node.location.clone(),
@@ -292,9 +307,15 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
             return;
         };
 
-        let backtrace = slice.backtrace_at_location(ctx.pin(node.location.clone()));
         slice.clear();
-        slice.set_dyn(&ValueRef::from(backtrace), ctx.pin(node.location.clone()));
+
+        #[rustfmt::skip]
+        let backtrace_value = backtrace.map_or_else(
+            || ValueRef::new_bottom(location.clone()),
+            ValueRef::from,
+        );
+
+        slice.set_dyn(&backtrace_value, location);
 
         drop(slice);
 
@@ -333,10 +354,12 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         return;
     };
 
+    let location = ctx.pin(node.location.clone());
+
     arg.assign(
         ctx,
         LabelBacktraceKind::ChannelClose,
-        ValueRef::new_bottom(),
+        ValueRef::new_bottom(location),
         false, // don't want to overwrite
         None,
         &node.location,
@@ -370,15 +393,17 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     let mut composite = value.as_composite_mut().unwrap(); // already checked
 
+    let location = ctx.pin(node.location.clone());
+
     if let Some(r#const) = SimpleConstValue::try_resolve_from_expr(key) {
         composite.set_at_known_key(
             r#const,
-            ValueRef::new_bottom(),
+            ValueRef::new_bottom(location.clone()),
             true,
-            ctx.pin(node.location.clone()),
+            location,
         );
     } else {
-        composite.set_at_unknown_key(&ValueRef::new_bottom(), ctx.pin(node.location.clone()));
+        composite.set_at_unknown_key(&ValueRef::new_bottom(location.clone()), location);
     }
 
     drop(composite);

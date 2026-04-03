@@ -443,12 +443,19 @@ impl<'a> Scope<'a> {
     fn new_universe() -> Self {
         let mut scope = Self::new(None);
 
+        // FIXME: handle this better, or at least check if pinned.file() is
+        // empty everywhere this location could be reached and treat it as a
+        // special case (should only happen for predeclared)
+        // [note: cannot be `const` because MSRV would need to be raised to 1.91
+        // just to support this -- not worth it]
+        let predeclared_location = Pinned::new(PathBuf::new(), 0..1);
+
         macro_rules! predeclared_constant {
             ($id:expr, $value:expr) => {
                 scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
             };
             ($id:expr) => {
-                predeclared_constant!($id, ValueRef::new_bottom())
+                predeclared_constant!($id, ValueRef::new_bottom(predeclared_location.clone()))
             };
         }
 
@@ -456,12 +463,15 @@ impl<'a> Scope<'a> {
             ($id:expr, $params:expr, $variadic:expr, $n_returned:expr) => {
                 predeclared_constant!(
                     $id,
-                    ValueRef::from(Value::Function(FunctionValue::new_builtin(
-                        $id,
-                        $params,
-                        $variadic,
-                        $n_returned
-                    )))
+                    ValueRef::new(
+                        Value::Function(FunctionValue::new_builtin(
+                            $id,
+                            $params,
+                            $variadic,
+                            $n_returned
+                        )),
+                        predeclared_location.clone(),
+                    )
                 )
             };
         }

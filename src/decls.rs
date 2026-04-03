@@ -70,7 +70,10 @@ fn visit_binding_decl_spec<'a>(
     mutable: bool,
 ) {
     for &id in &node.ids {
-        let symbol = Symbol::new_ref(ctx.pin(id), mutable, ValueRef::new_bottom());
+        let name = ctx.pin(id);
+        let value = ValueRef::new_bottom(name.pinned_location());
+
+        let symbol = Symbol::new_ref(name, mutable, value);
 
         ctx.declare_new_symbol(symbol);
     }
@@ -84,7 +87,10 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         return;
     }
 
-    let symbol = Symbol::new_ref(ctx.pin(node.name), false, ValueRef::new_bottom());
+    let name = ctx.pin(node.name);
+    let value = ValueRef::new_bottom(name.pinned_location());
+
+    let symbol = Symbol::new_ref(name, false, value);
 
     ctx.declare_new_symbol(symbol);
 }
