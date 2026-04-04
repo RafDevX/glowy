@@ -298,7 +298,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
 
                 let child = mutator(ctx, child)?;
 
-                composite.set_at_key(index, child, true, ctx.pin(assignment_location.clone()));
+                composite.set_at_key(index, child, ctx.pin(assignment_location.clone()));
 
                 drop(composite);
                 Some(target)
@@ -375,7 +375,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
 
                 let child = mutator(ctx, child)?;
 
-                r#struct.set_const(selector, child, true, ctx.pin(assignment_location.clone()));
+                r#struct.set_const(selector, child);
 
                 drop(r#struct);
                 Some(target)

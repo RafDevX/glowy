@@ -980,29 +980,8 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         )
     }
 
-    pub fn set_const(
-        &mut self,
-        key: K,
-        value: ValueRef<'a>,
-        overwrite: bool,
-        at_location: Pinned<Location>,
-    ) {
-        match self.r#const.entry(key) {
-            Entry::Occupied(mut existing) if !overwrite => {
-                existing.insert(value.nest_backtrace(
-                    LabelBacktraceKind::Assignment,
-                    None,
-                    at_location,
-                    existing.get().backtrace(),
-                ));
-            }
-            Entry::Occupied(mut existing) => {
-                existing.insert(value);
-            }
-            Entry::Vacant(empty) => {
-                empty.insert(value);
-            }
-        }
+    pub fn set_const(&mut self, key: K, value: ValueRef<'a>) {
+        self.r#const.insert(key, value);
     }
 
     // never overwrites
@@ -1175,7 +1154,6 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
-        overwrite: bool,
         at_location: Pinned<Location>,
     );
 
@@ -1197,11 +1175,10 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
         &mut self,
         key: Option<SimpleConstValue>,
         value: ValueRef<'a>,
-        overwrite: bool,
         at_location: Pinned<Location>,
     ) {
         if let Some(key) = key {
-            self.set_at_known_key(key, value, overwrite, at_location);
+            self.set_at_known_key(key, value, at_location);
         } else {
             self.set_at_unknown_key(&value, at_location);
         }
@@ -1226,10 +1203,9 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
-        overwrite: bool,
-        at_location: Pinned<Location>,
+        _at_location: Pinned<Location>,
     ) {
-        self.set_const(key, value, overwrite, at_location);
+        self.set_const(key, value);
     }
 
     fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
@@ -1259,11 +1235,10 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
-        overwrite: bool,
         at_location: Pinned<Location>,
     ) {
         if let SimpleConstValue::Integer(key) = key {
-            self.set_const(key, value, overwrite, at_location);
+            self.set_const(key, value);
         } else {
             self.set_dyn(&value, at_location);
         }

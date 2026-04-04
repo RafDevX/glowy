@@ -389,7 +389,6 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     composite.set_at_key(
         SimpleConstValue::try_resolve_from_expr(key),
         ValueRef::new_bottom(location.clone()),
-        true,
         location,
     );
 
