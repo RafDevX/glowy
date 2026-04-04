@@ -110,16 +110,6 @@ pub fn visit_raw_binding_decl_spec<'a>(
     let mut any_new = false;
 
     for (name, rhs) in ids.iter().copied().zip(rhs_values) {
-        if name.content() == "_" {
-            // blank identifier, so we don't really need to do anything else
-            // except visiting the expression to process e.g. function calls
-            // (needed to detect insecure flows wrt integrity, for example),
-            // but this was necessarily already done or we wouldn't have the
-            // corresponding value
-
-            continue;
-        }
-
         let mut explicit_backtrace = None;
 
         if let Some(annotation) = annotation {
@@ -154,6 +144,19 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     location: annotation.location.clone(),
                 }),
             }
+        }
+
+        // only check here since `var _ = value` should still be accepted as a
+        // valid sink/assertion point, otherwise user might misinterpret absence
+        // of errors as "all good" (even though nothing was ever checked)
+        if name.content() == "_" {
+            // blank identifier, so we don't really need to do anything else
+            // except visiting the expression to process e.g. function calls
+            // (needed to detect insecure flows wrt integrity, for example),
+            // but this was necessarily already done or we wouldn't have the
+            // corresponding value
+
+            continue;
         }
 
         let symbol = Symbol::new_ref(
