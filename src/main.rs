@@ -3,6 +3,7 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
     process,
+    time::Instant,
 };
 
 use annotate_snippets::AnnotationKind;
@@ -27,9 +28,9 @@ fn main() {
     let config = Config::parse();
 
     let (_warnings, errors) = if config.multi {
-        analyze_multi(&config.directory)
+        analyze_multi(&config.directory, config.time_analysis)
     } else {
-        analyze_single(&config.directory)
+        analyze_single(&config.directory, config.time_analysis)
     };
 
     if errors > 0 {
@@ -37,7 +38,7 @@ fn main() {
     }
 }
 
-fn analyze_single<P: AsRef<Path>>(path: P) -> (usize, usize) {
+fn analyze_single<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize) {
     let analyzer = glowy::Analyzer::from_directory(path)
         .unwrap_or_else(|_| {
             fatal(
@@ -52,7 +53,20 @@ fn analyze_single<P: AsRef<Path>>(path: P) -> (usize, usize) {
             )
         });
 
+    let start = Instant::now();
+
     let result = analyzer.analyze();
+
+    if time_analysis {
+        let elapsed = start.elapsed();
+
+        println!(
+            "{} {} {}\n",
+            "@@@ Analysis duration:".bright_magenta().bold(),
+            format!("{:?}", elapsed).blue().bold(),
+            "@@@".bright_magenta().bold()
+        )
+    }
 
     match result {
         Ok(_) => {
@@ -85,7 +99,7 @@ fn analyze_single<P: AsRef<Path>>(path: P) -> (usize, usize) {
     }
 }
 
-fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
+fn analyze_multi<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize) {
     let mut modules: Vec<_> = fs::read_dir(path)
         .and_then(Iterator::collect::<Result<Vec<_>, io::Error>>)
         .unwrap_or_else(|_| {
@@ -111,6 +125,8 @@ fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
     let mut results = vec![];
 
     let width = 1 + modules.len() / 10;
+    let start = Instant::now();
+
     for (i, module) in modules.into_iter().enumerate() {
         let title = ColoredGroup::new()
             .push(format!("#{:0>width$} - ", i + 1).cyan())
@@ -120,13 +136,27 @@ fn analyze_multi<P: AsRef<Path>>(path: P) -> (usize, usize) {
 
         results.push((
             module.to_string_lossy().into_owned(),
-            analyze_single(module),
+            analyze_single(module, time_analysis),
         ));
 
         println!("\n");
     }
 
     println!("{}", build_header("SUMMARY".cyan()));
+
+    if time_analysis {
+        let elapsed = start.elapsed();
+
+        println!(
+            "{} {} {} {}\n",
+            "@@@@@@@@@@ TOTAL ANALYSIS DURATION:"
+                .bright_magenta()
+                .bold(),
+            format!("{:?}", elapsed).blue().bold(),
+            "(all modules)".bright_magenta().italic(),
+            "@@@@@@@@@@".bright_magenta().bold()
+        )
+    }
 
     let mut n_failed = 0;
     let mut n_warned = 0;
@@ -190,6 +220,9 @@ struct Config {
     /// Analyze a directory of directories with Go modules, vs. just one module.
     #[arg(long)]
     multi: bool,
+    /// Repord elapsed time for the entire analysis process (including parsing).
+    #[arg(long)]
+    time_analysis: bool,
 }
 
 // group can just be format! ?
