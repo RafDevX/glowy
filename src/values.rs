@@ -1168,7 +1168,9 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
         key: &SimpleConstValue,
         at_location: Pinned<Location>,
     ) -> ValueRef<'a>;
+
     fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a>;
+
     fn set_at_known_key(
         &mut self,
         key: SimpleConstValue,
@@ -1176,7 +1178,34 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
         overwrite: bool,
         at_location: Pinned<Location>,
     );
+
     fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>);
+
+    fn get_at_key(
+        &self,
+        key: Option<&SimpleConstValue>,
+        at_location: Pinned<Location>,
+    ) -> ValueRef<'a> {
+        if let Some(key) = key {
+            self.get_at_known_key(key, at_location)
+        } else {
+            self.get_at_unknown_key(at_location)
+        }
+    }
+
+    fn set_at_key(
+        &mut self,
+        key: Option<SimpleConstValue>,
+        value: ValueRef<'a>,
+        overwrite: bool,
+        at_location: Pinned<Location>,
+    ) {
+        if let Some(key) = key {
+            self.set_at_known_key(key, value, overwrite, at_location);
+        } else {
+            self.set_at_unknown_key(&value, at_location);
+        }
+    }
 }
 
 // trivial implementation

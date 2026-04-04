@@ -386,16 +386,12 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     let location = ctx.pin(node.location.clone());
 
-    if let Some(r#const) = SimpleConstValue::try_resolve_from_expr(key) {
-        composite.set_at_known_key(
-            r#const,
-            ValueRef::new_bottom(location.clone()),
-            true,
-            location,
-        );
-    } else {
-        composite.set_at_unknown_key(&ValueRef::new_bottom(location.clone()), location);
-    }
+    composite.set_at_key(
+        SimpleConstValue::try_resolve_from_expr(key),
+        ValueRef::new_bottom(location.clone()),
+        true,
+        location,
+    );
 
     drop(composite);
 

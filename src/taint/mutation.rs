@@ -278,8 +278,6 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
     ) {
         exprs::visit_single_expr(ctx, &self.index); // trigger side effects
 
-        let index = SimpleConstValue::try_resolve_from_expr(&self.index);
-
         #[expect(
             clippy::shadow_unrelated,
             reason = "Same context, just threaded through closures"
@@ -294,24 +292,13 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                     return None;
                 };
 
-                let child = if let Some(index) = &index {
-                    composite.get_at_known_key(index, ctx.pin(self.location.clone()))
-                } else {
-                    composite.get_at_unknown_key(ctx.pin(self.location.clone()))
-                };
+                let index = SimpleConstValue::try_resolve_from_expr(&self.index);
+
+                let child = composite.get_at_key(index.as_ref(), ctx.pin(self.location.clone()));
 
                 let child = mutator(ctx, child)?;
 
-                if let Some(index) = &index {
-                    composite.set_at_known_key(
-                        index.clone(),
-                        child,
-                        true,
-                        ctx.pin(assignment_location.clone()),
-                    );
-                } else {
-                    composite.set_at_unknown_key(&child, ctx.pin(assignment_location.clone()));
-                }
+                composite.set_at_key(index, child, true, ctx.pin(assignment_location.clone()));
 
                 drop(composite);
                 Some(target)

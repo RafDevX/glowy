@@ -47,12 +47,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
 
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);
 
-    let result = if let Some(index) = index {
-        composite.get_at_known_key(&index, location.clone())
-    } else {
-        composite.get_at_unknown_key(location.clone())
-    };
-
+    let result = composite.get_at_key(index.as_ref(), location.clone());
 
     if base.is_map() {
         // indexing a map returns a second value corresponding to whether the
