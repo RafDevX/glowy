@@ -22,6 +22,7 @@ mod explicit;
 mod exprs;
 mod funcs;
 mod implicit;
+mod mutation;
 
 /// Structured information representing a declared sink.
 ///

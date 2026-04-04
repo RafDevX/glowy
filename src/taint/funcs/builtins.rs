@@ -19,7 +19,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
-    taint::{explicit::LeftValue, exprs},
+    taint::{exprs, mutation::LeftValue},
     values::{
         BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
         ValueRef,
