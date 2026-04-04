@@ -10,6 +10,7 @@ use parser::{
 
 use super::exprs;
 use crate::{
+    Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
@@ -335,6 +336,73 @@ pub trait LeftValue<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
         location: &Location,
     );
+
+    #[must_use]
+    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>>;
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    );
+
+    #[must_use]
+    fn is_root_in_current_scope(&self, ctx: &mut AnalysisContext<'a>) -> bool {
+        let Some(root) = self.root_operand(ctx) else {
+            return false;
+        };
+
+        if let Some(symbol) = exprs::resolve_operand_name(ctx, root, None) {
+            ctx.symtab().is_symbol_in_current_scope(&symbol)
+        } else {
+            false
+        }
+    }
+
+    #[must_use]
+    fn should_override(&self, ctx: &mut AnalysisContext<'a>, simple_assignment: bool) -> bool {
+        // for complex assignments like `x += y` we need to keep x's
+        // label, but for simple assignments like `x = y` we can usually
+        // overwrite it and drop the previous x label, except if x was
+        // not declared in the current scope, in which case we
+        // (heuristically) have to conservatively assume that this is
+        // e.g. an if branch and so the other branch might not have a
+        // simple assignment, so we can't forget x's previous label
+        // FIXME: try to improve symtab alt branch support to avoid this
+        simple_assignment && self.is_root_in_current_scope(ctx)
+    }
+}
+
+fn as_valid_left_value<'a, 'b>(
+    ctx: &mut AnalysisContext<'a>,
+    expr: &'b ExprNode<'a>,
+) -> Option<&'b dyn LeftValue<'a>> {
+    let inner: &'b dyn LeftValue = match expr {
+        ExprNode::Name(name) => name,
+        ExprNode::Indexing(indexing) => indexing,
+        ExprNode::Selection(selection) => selection,
+
+        // not using wildcard to force revisiting this implementation if a new
+        // kind of expression is ever added (need to decide whether to implement
+        // LeftValue for it or not)
+        ExprNode::Literal(_)
+        | ExprNode::Call(_)
+        | ExprNode::Make(_)
+        | ExprNode::Slicing(_)
+        | ExprNode::Conversion(_)
+        | ExprNode::TypeAssertion(_)
+        | ExprNode::UnaryOp { .. }
+        | ExprNode::BinaryOp { .. } => {
+            ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                location: exprs::get_expr_location(expr),
+            });
+
+            return None;
+        }
+    };
+
+    Some(inner)
 }
 
 // maybe it sends the wrong message for this to be implemented for ExprNode even
@@ -350,28 +418,9 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        let inner: &dyn LeftValue = match self {
-            ExprNode::Name(name) => name,
-            ExprNode::Indexing(indexing) => indexing,
-            ExprNode::Selection(selection) => selection,
-
-            // not using wildcard to force revisiting this implementation if a
-            // new kind of expression is ever added (need to decide whether to
-            // implement LeftValue for it or not)
-            ExprNode::Literal(_)
-            | ExprNode::Call(_)
-            | ExprNode::Make(_)
-            | ExprNode::Slicing(_)
-            | ExprNode::Conversion(_)
-            | ExprNode::TypeAssertion(_)
-            | ExprNode::UnaryOp { .. }
-            | ExprNode::BinaryOp { .. } => {
-                ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
-                    location: exprs::get_expr_location(self),
-                });
-
-                return;
-            }
+        let Some(inner) = as_valid_left_value(ctx, self) else {
+            // error already reported
+            return;
         };
 
         inner.assign(
@@ -382,6 +431,24 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
             explicit_backtrace,
             location,
         );
+    }
+
+    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>> {
+        as_valid_left_value(ctx, self)?.root_operand(ctx)
+    }
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    ) {
+        let Some(inner) = as_valid_left_value(ctx, self) else {
+            // error already reported
+            return;
+        };
+
+        inner.mutate_target(ctx, assignment_location, mutator);
     }
 }
 
@@ -401,6 +468,57 @@ impl<'a> LeftValue<'a> for Span<'a> {
             return;
         }
 
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.mutate_target(ctx, location, &|ctx, target| {
+            let mutated = if self.should_override(ctx, simple) {
+                // for complex assignments like `x += y` we need to keep x's
+                // label, but for simple assignments like `x = y` we can usually
+                // overwrite it and drop the previous x label, except if x was
+                // not declared in the current scope, in which case we
+                // (heuristically) have to conservatively assume that this is
+                // e.g. an if branch and so the other branch might not have a
+                // simple assignment, so we can't forget x's previous label
+                // FIXME: try to improve symtab alt branch support to avoid this
+
+                rhs.nest_backtrace(
+                    backtrace_kind,
+                    Some(self.content()),
+                    ctx.pin(location.clone()),
+                    explicit_backtrace
+                        .into_iter()
+                        .chain(ctx.branch_backtrace())
+                        .cloned(),
+                )
+            } else {
+                target.nest_backtrace(
+                    backtrace_kind,
+                    Some(self.content()),
+                    ctx.pin(location.clone()),
+                    explicit_backtrace
+                        .cloned()
+                        .into_iter()
+                        .chain(rhs.backtrace())
+                        .chain(ctx.branch_backtrace().cloned()),
+                )
+            };
+
+            Some(mutated)
+        });
+    }
+
+    fn root_operand(&self, _ctx: &mut AnalysisContext<'a>) -> Option<Self> {
+        Some(*self)
+    }
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        _assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    ) {
         let Some(symbol) = exprs::resolve_operand_name(ctx, *self, None) else {
             // no symbol found, but error already reported
             return;
@@ -412,43 +530,16 @@ impl<'a> LeftValue<'a> for Span<'a> {
             return;
         }
 
-        let in_current_scope = ctx.symtab().is_symbol_in_current_scope(&symbol);
+        // we need to clone_inner to ensure compliance with the AssumedImmutable
+        // restrictions (cannot directly mutate a Symbol's value)
+        // See: Symbol::value
+        let value = symbol.borrow().value().get().clone_inner();
 
-        let mut borrowed = symbol.borrow_mut();
-
-        let value = if simple && in_current_scope {
-            // for complex assignments like `x += y` we need to keep x's label,
-            // but for simple assignments like `x = y` we can usually overwrite
-            // it and drop the previous x label, except if x was not declared in
-            // the current scope, in which case we (heuristically) have to
-            // conservatively assume that this is e.g. an if branch and so the
-            // other branch might not have a simple assignment, so we can't
-            // forget x's previous label either
-            // FIXME: try to improve symtab alt branch support to avoid this
-
-            rhs.nest_backtrace(
-                backtrace_kind,
-                Some(self.content()), // symbol.declared_name()?
-                ctx.pin(location.clone()),
-                explicit_backtrace
-                    .into_iter()
-                    .chain(ctx.branch_backtrace())
-                    .cloned(),
-            )
-        } else {
-            borrowed.value().get().nest_backtrace(
-                backtrace_kind,
-                Some(self.content()), // symbol.declared_name()?
-                ctx.pin(location.clone()),
-                explicit_backtrace
-                    .into_iter()
-                    .cloned()
-                    .chain(rhs.backtrace())
-                    .chain(ctx.branch_backtrace().cloned()),
-            )
+        let Some(mutated) = mutator(ctx, value) else {
+            return;
         };
 
-        borrowed.set_value(value);
+        symbol.borrow_mut().set_value(mutated);
     }
 }
 
@@ -462,58 +553,83 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        let mut base = exprs::visit_single_expr(ctx, &self.base);
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.mutate_target(ctx, location, &|ctx, target| {
+            let new_value = rhs.nest_backtrace(
+                backtrace_kind,
+                None,
+                ctx.pin(location.clone()),
+                explicit_backtrace
+                    .cloned()
+                    .into_iter()
+                    .chain(ctx.branch_backtrace().cloned()),
+            );
 
-        let Some(mut composite) = base.as_composite_mut() else {
-            ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
-                location: self.location.clone(),
-            });
+            let mutated = merge_assigned_target_value(
+                &target,
+                &new_value,
+                self.should_override(ctx, simple),
+                backtrace_kind,
+                &ctx.pin(location.clone()),
+            );
 
-            return;
-        };
+            Some(mutated)
+        });
+    }
 
-        let value = rhs.nest_backtrace(
-            backtrace_kind,
-            None,
-            ctx.pin(location.clone()),
-            explicit_backtrace
-                .cloned()
-                .into_iter()
-                .chain(ctx.branch_backtrace().cloned()),
-        );
+    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>> {
+        self.base.root_operand(ctx)
+    }
 
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    ) {
         exprs::visit_single_expr(ctx, &self.index); // trigger side effects
 
         let index = SimpleConstValue::try_resolve_from_expr(&self.index);
 
-        let overwrite = simple && root_indexing_in_current_scope(ctx, self);
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.base
+            .mutate_target(ctx, assignment_location, &|ctx, mut target| {
+                let Some(mut composite) = target.as_composite_mut() else {
+                    ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
+                        location: self.location.clone(),
+                    });
 
-        if let Some(index) = index {
-            composite.set_at_known_key(index, value, overwrite, ctx.pin(location.clone()));
-        } else {
-            composite.set_at_unknown_key(&value, ctx.pin(location.clone()));
-        }
-    }
-}
+                    return None;
+                };
 
-fn root_indexing_in_current_scope<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    node: &IndexingNode<'a>,
-) -> bool {
-    #[expect(
-        clippy::wildcard_enum_match_arm,
-        reason = "We explicitly want to be conservative for the unknown case"
-    )]
-    match &*node.base {
-        ExprNode::Name(operand) => {
-            if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {
-                ctx.symtab().is_symbol_in_current_scope(&symbol)
-            } else {
-                false
-            }
-        }
-        ExprNode::Indexing(inner) => root_indexing_in_current_scope(ctx, inner),
-        _ => false, // too complex to determine; err on the side of caution
+                let child = if let Some(index) = &index {
+                    composite.get_at_known_key(index, ctx.pin(self.location.clone()))
+                } else {
+                    composite.get_at_unknown_key(ctx.pin(self.location.clone()))
+                };
+
+                let child = mutator(ctx, child)?;
+
+                if let Some(index) = &index {
+                    composite.set_at_known_key(
+                        index.clone(),
+                        child,
+                        true,
+                        ctx.pin(assignment_location.clone()),
+                    );
+                } else {
+                    composite.set_at_unknown_key(&child, ctx.pin(assignment_location.clone()));
+                }
+
+                drop(composite);
+                Some(target)
+            });
     }
 }
 
@@ -527,46 +643,88 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        let base = exprs::visit_single_expr(ctx, &self.base);
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.mutate_target(ctx, location, &|ctx, target| {
+            let pinned_location = ctx.pin(location.clone());
 
-        let Some(mut r#struct) = base.as_struct_mut() else {
-            ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
-                location: self.location.clone(),
+            let new_value = rhs.nest_backtrace(
+                backtrace_kind,
+                None,
+                pinned_location.clone(),
+                explicit_backtrace
+                    .cloned()
+                    .into_iter()
+                    .chain(ctx.branch_backtrace().cloned()),
+            );
+
+            let mutated = merge_assigned_target_value(
+                &target,
+                &new_value,
+                self.should_override(ctx, simple),
+                backtrace_kind,
+                &pinned_location,
+            );
+
+            Some(mutated)
+        });
+    }
+
+    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>> {
+        self.base.root_operand(ctx)
+    }
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    ) {
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.base
+            .mutate_target(ctx, assignment_location, &|ctx, target| {
+                let selector = self.selector.content().to_owned();
+
+                let Some(mut r#struct) = target.as_struct_mut() else {
+                    ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
+                        location: self.location.clone(),
+                    });
+
+                    return None;
+                };
+
+                let child = r#struct.get_const(&selector, ctx.pin(self.location.clone()));
+
+                let child = mutator(ctx, child)?;
+
+                r#struct.set_const(selector, child, true, ctx.pin(assignment_location.clone()));
+
+                drop(r#struct);
+                Some(target)
             });
+    }
+}
 
-            return;
-        };
-
-        let value = rhs.nest_backtrace(
+fn merge_assigned_target_value<'a>(
+    current: &ValueRef<'a>,
+    assigned: &ValueRef<'a>,
+    overwrite: bool,
+    backtrace_kind: LabelBacktraceKind,
+    merge_location: &Pinned<Location>,
+) -> ValueRef<'a> {
+    if overwrite {
+        assigned.clone()
+    } else {
+        assigned.nest_backtrace(
             backtrace_kind,
             None,
-            ctx.pin(location.clone()),
-            explicit_backtrace
-                .cloned()
-                .into_iter()
-                .chain(ctx.branch_backtrace().cloned()),
-        );
-
-        let overwrite = if simple {
-            if let ExprNode::Name(operand) = &*self.base {
-                if let Some(symbol) = exprs::resolve_operand_name(ctx, *operand, None) {
-                    ctx.symtab().is_symbol_in_current_scope(&symbol)
-                } else {
-                    false
-                }
-            } else {
-                // too complex to determine; err on the side of caution
-                false
-            }
-        } else {
-            false
-        };
-
-        r#struct.set_const(
-            self.selector.content().to_owned(),
-            value,
-            overwrite,
-            ctx.pin(location.clone()),
-        );
+            merge_location.clone(),
+            current.backtrace(),
+        )
     }
 }
