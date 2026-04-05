@@ -1,5 +1,5 @@
 [package]
-name = "glowy"
+name = "glowy-cli"
 description = "Information flow control analysis for Go"
 documentation = "https://glowy.rso.pt/glowy"
 readme = "README.md"
@@ -13,7 +13,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [workspace]
-members = [".", "parser"]
+members = [".", "lib", "parser"]
 
 [workspace.dependencies]
 codespan-reporting = "0.13.1"
@@ -38,5 +38,4 @@ annotate-snippets = "0.12.10"
 anstream = "1.0.0"
 clap = { version = "4.5.51", features = ["derive"] }
 colored = "3.1.1"
-parser = { path = "parser" }
-uuid = { version = "1.19.0", features = ["v4"] }
+glowy = { path = "./lib" }

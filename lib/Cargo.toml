@@ -1,0 +1,16 @@
+[package]
+name = "glowy"
+description = "Information flow control analysis for Go"
+readme = "../README.md"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+parser = { path = "../parser" }
+uuid = { version = "1.19.0", features = ["v4"] }

@@ -17,12 +17,7 @@ use glowy::{
 #[cfg(not(debug_assertions))] // release mode
 const DOCS_ROOT_URL: &str = "https://glowy.rso.pt/glowy";
 #[cfg(debug_assertions)] // debug mode
-const DOCS_ROOT_URL: &str = concat!(
-    "file://",
-    env!("CARGO_MANIFEST_DIR"),
-    "/target/doc/",
-    env!("CARGO_CRATE_NAME")
-);
+const DOCS_ROOT_URL: &str = concat!("file://", env!("CARGO_MANIFEST_DIR"), "/target/doc/glowy",);
 
 fn main() {
     let config = Config::parse();
@@ -368,7 +363,7 @@ impl<'a> SnippetBuilder<'a> {
         StructuredSnippet::new(path.to_string_lossy(), source)
     }
 
-    fn eof(&self) -> parser::Location {
+    fn eof(&self) -> glowy::Location {
         self.eof_for(self.home)
     }
 
@@ -376,7 +371,7 @@ impl<'a> SnippetBuilder<'a> {
     // make its source field public, meaning we cannot calculate EOF without
     // access to the analyzer's file repository.
     // Note that this might return an empty range if the source file is empty.
-    fn eof_for(&self, path: &'a Path) -> parser::Location {
+    fn eof_for(&self, path: &'a Path) -> glowy::Location {
         let source = self
             .analyzer
             .file_contents(path)
@@ -448,13 +443,13 @@ impl<'a> From<StructuredSnippet<'a>>
 #[derive(PartialEq, Debug, Clone)]
 struct StructuredAnnotation<'a> {
     kind: AnnotationKind,
-    location: parser::Location,
+    location: glowy::Location,
     label: Option<Cow<'a, str>>,
     highlight_source: bool,
 }
 
 impl<'a> StructuredAnnotation<'a> {
-    fn new(kind: AnnotationKind, location: parser::Location) -> Self {
+    fn new(kind: AnnotationKind, location: glowy::Location) -> Self {
         Self {
             kind,
             location,
@@ -463,11 +458,11 @@ impl<'a> StructuredAnnotation<'a> {
         }
     }
 
-    fn primary(location: parser::Location) -> Self {
+    fn primary(location: glowy::Location) -> Self {
         Self::new(AnnotationKind::Primary, location)
     }
 
-    fn context(location: parser::Location) -> Self {
+    fn context(location: glowy::Location) -> Self {
         Self::new(AnnotationKind::Context, location)
     }
 
@@ -528,7 +523,7 @@ fn get_structured_error_info<'a>(
 ) -> StructuredErrorInfo<'a> {
     match kind {
         AnalysisErrorKind::Parsing(inner) => {
-            let diagnostics = parser::Diagnostics::diagnostics(inner);
+            let diagnostics = glowy::Diagnostics::diagnostics(inner);
             let location = if let Some(ctx) = diagnostics.context {
                 ctx.location()
             } else {
