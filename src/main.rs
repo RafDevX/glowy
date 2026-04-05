@@ -27,8 +27,10 @@ const DOCS_ROOT_URL: &str = concat!(
 fn main() {
     let config = Config::parse();
 
-    let (_warnings, errors) = if config.multi {
-        analyze_multi(&config.directory, config.time_analysis)
+    let (_warnings, errors) = if config.multi_suites {
+        analyze_multi_suites(&config.directory, config.time_analysis)
+    } else if config.suite {
+        analyze_suite(&config.directory, config.time_analysis)
     } else {
         analyze_single(&config.directory, config.time_analysis)
     };
@@ -99,20 +101,7 @@ fn analyze_single<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize
     }
 }
 
-fn analyze_multi<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize) {
-    let mut modules: Vec<_> = fs::read_dir(path)
-        .and_then(Iterator::collect::<Result<Vec<_>, io::Error>>)
-        .unwrap_or_else(|_| {
-            fatal(
-                "IO error occurred when reading the specified directory.",
-                "Does the path provided exist?",
-            )
-        })
-        .into_iter()
-        .filter(|entry| entry.file_type().as_ref().is_ok_and(fs::FileType::is_dir))
-        .map(|entry| entry.path())
-        .collect();
-
+fn analyze_multi(mut modules: Vec<PathBuf>, time_analysis: bool) -> (usize, usize) {
     if modules.is_empty() {
         fatal(
             "No directories found in the specified modules directory.",
@@ -211,6 +200,38 @@ fn analyze_multi<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize)
     aggregate
 }
 
+fn analyze_suite<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize) {
+    let modules = list_dirs_in_dir(path).collect();
+
+    analyze_multi(modules, time_analysis)
+}
+
+fn analyze_multi_suites<P: AsRef<Path>>(path: P, time_analysis: bool) -> (usize, usize) {
+    let mut modules = vec![];
+
+    for suite in list_dirs_in_dir(path) {
+        let suite_modules = list_dirs_in_dir(suite);
+
+        modules.extend(suite_modules);
+    }
+
+    analyze_multi(modules, time_analysis)
+}
+
+fn list_dirs_in_dir<P: AsRef<Path>>(path: P) -> impl Iterator<Item = PathBuf> {
+    fs::read_dir(path)
+        .and_then(Iterator::collect::<Result<Vec<_>, io::Error>>)
+        .unwrap_or_else(|_| {
+            fatal(
+                "IO error occurred when reading the specified directory.",
+                "Does the path provided exist?",
+            )
+        })
+        .into_iter()
+        .filter(|entry| entry.file_type().as_ref().is_ok_and(fs::FileType::is_dir))
+        .map(|entry| entry.path())
+}
+
 #[derive(clap::Parser)]
 #[command(version, about)]
 struct Config {
@@ -218,8 +239,11 @@ struct Config {
     directory: PathBuf,
     // ^ positional because no #[arg]
     /// Analyze a directory of directories with Go modules, vs. just one module.
+    #[arg(long, alias("multi"))]
+    suite: bool,
+    /// Analyze multiple suites (directories of directories with Go modules).
     #[arg(long)]
-    multi: bool,
+    multi_suites: bool,
     /// Repord elapsed time for the entire analysis process (including parsing).
     #[arg(long)]
     time_analysis: bool,
