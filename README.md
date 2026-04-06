@@ -11,8 +11,8 @@ Institute of Technology. However, Glowy's initial conceptualization and
 [first prototype](https://github.com/ist199211-ist19311/glowy-langsec) is the
 work of both [Rafael Oliveira](https://github.com/RafDevX) and
 [Diogo Correia](https://github.com/diogotcorreia) as part of a joint project for
-KTH course DD2525 Language-Based Security. A significant portion of the code has
-been completely rewritten; see
+KTH course DD2525 Language-Based Security. Most of the code has been completely
+rewritten for robustness, soundness fixes, and feature support; see the
 [diff](https://github.com/RafDevX/glowy/compare/langsec-project-submission...master).
 
 ## Usage Instructions
