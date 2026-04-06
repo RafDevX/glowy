@@ -263,10 +263,15 @@ impl<'a> From<LabelBacktrace<'a>> for ValueRef<'a> {
 }
 
 pub trait BacktraceContainer<'a> {
-    // custom trait because From would not allow passing Location as parameter
     fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>>;
 
     fn is_bottom(&self) -> bool;
+
+    // whether the only information that would be lost if this value was to be
+    // replaced with a Value::Simple would literally be just the shape
+    // discrimination (e.g., this is always true for a MobiusValue because it
+    // stores no additional metadata besides the fact of its own existence)
+    fn allows_lossless_downgrade(&self) -> bool;
 }
 
 impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
@@ -276,6 +281,10 @@ impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
 
     fn is_bottom(&self) -> bool {
         self.value.borrow().is_bottom()
+    }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        self.value.borrow().allows_lossless_downgrade()
     }
 }
 
@@ -388,6 +397,10 @@ impl<'a> BacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
     fn is_bottom(&self) -> bool {
         self.is_none()
     }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        true
+    }
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
@@ -482,6 +495,10 @@ impl<'a> BacktraceContainer<'a> for Value<'a> {
 
     fn is_bottom(&self) -> bool {
         self.sub_container().is_bottom()
+    }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        self.sub_container().allows_lossless_downgrade()
     }
 }
 
@@ -679,6 +696,12 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
             .chain(self.secondary.iter())
             .all(BacktraceContainer::is_bottom)
     }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        self.secondary
+            .iter()
+            .all(|v| v.is_bottom() && v.allows_lossless_downgrade())
+    }
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
@@ -802,6 +825,10 @@ impl<'a> BacktraceContainer<'a> for MobiusValue<'a> {
     fn is_bottom(&self) -> bool {
         self.0.is_bottom()
     }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        true
+    }
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
@@ -880,6 +907,10 @@ impl<'a> BacktraceContainer<'a> for PackageRefValue<'a> {
 
     fn is_bottom(&self) -> bool {
         true
+    }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        false
     }
 }
 
@@ -1043,6 +1074,12 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
         } else {
             self.r#const.iter().all(|(_, v)| v.is_bottom())
         }
+    }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        self.r#const
+            .values()
+            .all(|v| v.is_bottom() && v.allows_lossless_downgrade())
     }
 }
 
@@ -1376,13 +1413,14 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
     }
 
     fn is_bottom(&self) -> bool {
-        if self.backtrace.is_some() {
-            false
-        } else if let Some(outcome) = &self.outcome {
-            outcome.iter().all(ValueRef::is_bottom)
-        } else {
-            true
-        }
+        self.backtrace.is_none()
+    }
+
+    fn allows_lossless_downgrade(&self) -> bool {
+        self.signature.is_none()
+            && self.outcome.is_none()
+            && self.deferred_checks.is_empty()
+            && self.call_count() == 0
     }
 }
 

@@ -594,7 +594,7 @@ fn calculate_call_result<'a>(
         //     .enumerate();
 
         for (index, (id, variadic)) in ids.iter().copied().enumerate() {
-            if realized.is_bottom() {
+            if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 
                 result.push(realized);

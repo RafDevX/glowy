@@ -98,7 +98,7 @@ fn visit_integer_keyed_composite_literal<'a>(
     for (opt_key, el) in values {
         let value = visit_array_literal_element(ctx, el, &location);
 
-        if value.is_bottom() {
+        if value.is_bottom() && value.allows_lossless_downgrade() {
             // we don't need to bloat the HashMap with None backtraces
             next_default_key += 1;
 
@@ -144,7 +144,7 @@ fn visit_map_composite_literal<'a>(
     for (opt_key, el) in values {
         let value = visit_array_literal_element(ctx, el, &location);
 
-        if value.is_bottom() {
+        if value.is_bottom() && value.allows_lossless_downgrade() {
             // we don't need to bloat the HashMap with None backtraces
             continue;
         }
@@ -181,7 +181,7 @@ fn visit_struct_composite_literal<'a>(
             for (field_name, element) in entries {
                 let value = visit_array_literal_element(ctx, element, &location);
 
-                if value.is_bottom() {
+                if value.is_bottom() && value.allows_lossless_downgrade() {
                     // we don't need to bloat the HashMap with None backtraces
                     continue;
                 }
@@ -273,7 +273,7 @@ fn visit_array_literal_element<'a>(
                 .iter()
                 .map(|(_, v)| v)
                 .map(|el| visit_array_literal_element(ctx, el, location))
-                .filter(|v| !v.is_bottom())
+                .filter(|v| !v.is_bottom() || !v.allows_lossless_downgrade())
                 .collect();
 
             if values.is_empty() {
