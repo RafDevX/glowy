@@ -1,4 +1,4 @@
-use std::cmp;
+use std::{borrow::Cow, cmp};
 
 use crate::{Annotation, Location, Span};
 
@@ -215,6 +215,38 @@ pub enum ExprNode<'a> {
         right: Box<ExprNode<'a>>,
         location: Location, // for better error messages
     },
+}
+
+impl ExprNode<'_> {
+    #[must_use]
+    #[inline]
+    pub fn location(&self) -> Cow<'_, Location> {
+        let r#ref = match self {
+            ExprNode::Name(name) => return Cow::Owned(name.location()),
+            ExprNode::Literal(
+                LiteralNode::Int { location, .. }
+                | LiteralNode::Float { location, .. }
+                | LiteralNode::Rune { location, .. }
+                | LiteralNode::String { location, .. }
+                | LiteralNode::Function { location, .. }
+                | LiteralNode::Array { location, .. }
+                | LiteralNode::Slice { location, .. }
+                | LiteralNode::Map { location, .. }
+                | LiteralNode::Struct { location, .. },
+            )
+            | ExprNode::UnaryOp { location, .. }
+            | ExprNode::BinaryOp { location, .. } => location,
+            ExprNode::Call(call) => &call.location,
+            ExprNode::Make(make) => &make.location,
+            ExprNode::Selection(selection) => &selection.location,
+            ExprNode::Indexing(indexing) => &indexing.location,
+            ExprNode::Slicing(slicing) => &slicing.location,
+            ExprNode::Conversion(conversion) => &conversion.location,
+            ExprNode::TypeAssertion(assertion) => &assertion.location,
+        };
+
+        Cow::Borrowed(r#ref)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -512,6 +544,62 @@ pub enum StatementNode<'a> {
         expr: ExprNode<'a>, // should be a Call, but hard for parser to ensure
         location: Location, // for better error messages
     },
+}
+
+impl StatementNode<'_> {
+    #[must_use]
+    #[inline]
+    pub fn location(&self) -> Cow<'_, Location> {
+        let r#ref = match self {
+            StatementNode::Empty { location }
+            | StatementNode::Send(SendNode { location, .. })
+            | StatementNode::Inc { location, .. }
+            | StatementNode::Dec { location, .. }
+            | StatementNode::Assignment(AssignmentNode { location, .. })
+            | StatementNode::ShortVarDecl(ShortVarDeclNode { location, .. })
+            | StatementNode::Decl(
+                DeclNode::Const { location, .. }
+                | DeclNode::Var { location, .. }
+                | DeclNode::Type { location, .. },
+            )
+            | StatementNode::If(IfNode { location, .. })
+            | StatementNode::For(ForNode { location, .. })
+            | StatementNode::Select(SelectNode { location, .. })
+            | StatementNode::Switch(
+                SwitchNode::Expr(ExprSwitchNode { location, .. })
+                | SwitchNode::Type(TypeSwitchNode { location, .. }),
+            )
+            | StatementNode::Fallthrough { location }
+            | StatementNode::Continue { location, .. }
+            | StatementNode::Break { location, .. }
+            | StatementNode::Return { location, .. }
+            | StatementNode::Goto { location, .. }
+            | StatementNode::Go { location, .. }
+            | StatementNode::Defer { location, .. } => location,
+            StatementNode::Decl(DeclNode::Function(function)) => &function.location,
+            StatementNode::Expr { expr, .. } => return expr.location(),
+            StatementNode::Labeled { label, inner } => {
+                let loc = inner.location();
+
+                return Cow::Owned(label.location().start..loc.end);
+            }
+            StatementNode::Block(stmts) => {
+                if let Some(first) = stmts.first() {
+                    if let Some(last) = stmts.last() {
+                        let first_loc = first.location();
+                        let last_loc = last.location();
+
+                        return Cow::Owned(first_loc.start..last_loc.end);
+                    }
+                }
+
+                return Cow::Owned(0..usize::MAX);
+                // FIXME: ^ can't have location information for an empty block
+            }
+        };
+
+        Cow::Borrowed(r#ref)
+    }
 }
 
 impl<'a> From<SendNode<'a>> for StatementNode<'a> {

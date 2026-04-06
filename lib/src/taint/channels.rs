@@ -102,7 +102,7 @@ pub fn visit_select<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectNode<'a>) {
 
         let Some(channel) = extract_select_case_channel(case) else {
             ctx.report_error(AnalysisErrorKind::IllegalSelectCase {
-                location: super::get_statement_location(case),
+                location: case.location().into_owned(),
             });
 
             continue;

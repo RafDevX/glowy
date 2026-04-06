@@ -1,10 +1,6 @@
 use parser::{
     Location, Span,
-    ast::{
-        AssignmentNode, BlockNode, DeclNode, ExprNode, ExprSwitchNode, ForNode, IfNode,
-        ImportSpecNode, SelectNode, SendNode, ShortVarDeclNode, SourceFileNode, StatementNode,
-        SwitchNode, TypeSwitchNode,
-    },
+    ast::{BlockNode, DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
 };
 
 use crate::{
@@ -174,7 +170,7 @@ fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNo
     for statement in statements {
         if disallow_further {
             ctx.report_error(AnalysisErrorKind::Unreachable {
-                location: get_statement_location(statement),
+                location: statement.location().into_owned(),
             });
 
             break;
@@ -197,7 +193,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             if let Some(annotation) = annotation {
                 match annotation.directive {
                     "assert" => {
-                        let location = exprs::get_expr_location(expr);
+                        let location = expr.location().into_owned();
 
                         if values.is_empty() {
                             ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
@@ -289,62 +285,6 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             exprs::visit_expr(ctx, expr);
         }
     }
-}
-
-fn get_statement_location(node: &StatementNode) -> Location {
-    let location = match node {
-        StatementNode::Empty { location }
-        | StatementNode::Send(SendNode { location, .. })
-        | StatementNode::Inc { location, .. }
-        | StatementNode::Dec { location, .. }
-        | StatementNode::Assignment(AssignmentNode { location, .. })
-        | StatementNode::ShortVarDecl(ShortVarDeclNode { location, .. })
-        | StatementNode::Decl(
-            DeclNode::Const { location, .. }
-            | DeclNode::Var { location, .. }
-            | DeclNode::Type { location, .. },
-        )
-        | StatementNode::If(IfNode { location, .. })
-        | StatementNode::For(ForNode { location, .. })
-        | StatementNode::Select(SelectNode { location, .. })
-        | StatementNode::Switch(
-            SwitchNode::Expr(ExprSwitchNode { location, .. })
-            | SwitchNode::Type(TypeSwitchNode { location, .. }),
-        )
-        | StatementNode::Fallthrough { location }
-        | StatementNode::Continue { location, .. }
-        | StatementNode::Break { location, .. }
-        | StatementNode::Return { location, .. }
-        | StatementNode::Goto { location, .. }
-        | StatementNode::Go { location, .. }
-        | StatementNode::Defer { location, .. } => location,
-        StatementNode::Decl(DeclNode::Function(function)) => &function.location,
-        StatementNode::Expr { expr, .. } => return exprs::get_expr_location(expr),
-        StatementNode::Labeled { label, inner } => {
-            let loc = get_statement_location(inner);
-
-            return label.location().start..loc.end;
-        }
-        StatementNode::Block(stmts) => {
-            if let Some(first) = stmts.first() {
-                if let Some(last) = stmts.last() {
-                    let first = get_statement_location(first);
-                    let last = get_statement_location(last);
-
-                    return first.start..last.end;
-                }
-            }
-
-            return 0..usize::MAX;
-            // FIXME: ^ can't have location information for an empty block
-        }
-    };
-
-    location.clone()
-    // it would be preferable if this function could return &'a Location, but
-    // this doesn't work for expressions, since get_expr_location returns a
-    // Location and we can't rt a reference to it (since this function owns it).
-    // in addition, block & labeled need to create a new location altogether
 }
 
 fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {

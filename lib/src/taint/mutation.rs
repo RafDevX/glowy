@@ -81,7 +81,7 @@ fn as_valid_left_value<'a, 'b>(
         | ExprNode::UnaryOp { .. }
         | ExprNode::BinaryOp { .. } => {
             ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
-                location: exprs::get_expr_location(expr),
+                location: expr.location().into_owned(),
             });
 
             return None;

@@ -1,6 +1,6 @@
 use parser::{
-    Location, Span,
-    ast::{ExprNode, LiteralNode, TypeAssertionNode, UnaryOpKind},
+    Span,
+    ast::{ExprNode, TypeAssertionNode, UnaryOpKind},
 };
 
 use super::{channels, funcs};
@@ -60,11 +60,11 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
 
     if result.is_empty() {
         ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
-            location: get_expr_location(node),
+            location: node.location().into_owned(),
         });
     } else if result.len() > 1 {
         ctx.report_error(AnalysisErrorKind::UnexpectedMultiValueExpression {
-            location: get_expr_location(node),
+            location: node.location().into_owned(),
         });
     } else {
         let mut value = result.pop().unwrap(); // already checked
@@ -79,7 +79,7 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
         };
     }
 
-    ValueRef::new_bottom(ctx.pin(get_expr_location(node)))
+    ValueRef::new_bottom(ctx.pin(node.location().into_owned()))
 }
 
 pub fn visit_multi_exprs<'a>(
@@ -209,31 +209,4 @@ fn visit_type_assertion<'a>(
     let expandable = ExpandableValue::new(value, vec![secondary]);
 
     ValueRef::new(Value::Expandable(expandable), location)
-}
-
-pub fn get_expr_location(node: &ExprNode<'_>) -> Location {
-    match node {
-        ExprNode::Name(name) => name.location(),
-        ExprNode::Literal(
-            LiteralNode::Int { location, .. }
-            | LiteralNode::Float { location, .. }
-            | LiteralNode::Rune { location, .. }
-            | LiteralNode::String { location, .. }
-            | LiteralNode::Function { location, .. }
-            | LiteralNode::Array { location, .. }
-            | LiteralNode::Slice { location, .. }
-            | LiteralNode::Map { location, .. }
-            | LiteralNode::Struct { location, .. },
-        ) => location.clone(),
-        ExprNode::Call(call) => call.location.clone(),
-        ExprNode::Make(make) => make.location.clone(),
-        ExprNode::Selection(selection) => selection.location.clone(),
-        ExprNode::Indexing(indexing) => indexing.location.clone(),
-        ExprNode::Slicing(slicing) => slicing.location.clone(),
-        ExprNode::Conversion(conversion) => conversion.location.clone(),
-        ExprNode::TypeAssertion(assertion) => assertion.location.clone(),
-        ExprNode::UnaryOp { location, .. } | ExprNode::BinaryOp { location, .. } => {
-            location.clone()
-        }
-    }
 }

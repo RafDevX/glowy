@@ -32,7 +32,7 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
         ctx.push_branch_backtrace(expr_backtrace.into_single_child(
             LabelBacktraceKind::Branch,
             None,
-            ctx.pin(exprs::get_expr_location(&node.cond)),
+            ctx.pin(node.cond.location().into_owned()),
         ));
 
         true
@@ -141,7 +141,7 @@ fn visit_for_range<'a>(
         ForRangeNode::None { range_expr } => (0, range_expr),
     };
 
-    let rhs_location = ctx.pin(exprs::get_expr_location(range_expr));
+    let rhs_location = ctx.pin(range_expr.location().into_owned());
     let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
     rhs_values.truncate(lhs_len);
 
@@ -333,7 +333,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
             ctx.push_branch_backtrace(bt.into_single_child(
                 LabelBacktraceKind::Branch,
                 None,
-                ctx.pin(exprs::get_expr_location(expr)),
+                ctx.pin(expr.location().into_owned()),
             ));
 
             n_pushes += 1;
@@ -350,12 +350,14 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         let start = clause
             .exprs
             .first()
-            .map(exprs::get_expr_location)
+            .map(ExprNode::location)
+            .map(Cow::into_owned)
             .map_or(0, |l| l.start);
         let end = clause
             .exprs
             .last()
-            .map(exprs::get_expr_location)
+            .map(ExprNode::location)
+            .map(Cow::into_owned)
             .map_or(usize::MAX, |l| l.end);
 
         let folded = LabelBacktrace::fold(
@@ -401,7 +403,7 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
         ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id), true, value.clone()));
     }
 
-    let expr_location = ctx.pin(exprs::get_expr_location(&node.expr));
+    let expr_location = ctx.pin(node.expr.location().into_owned());
     let pushed = if let Some(bt) = value.backtrace() {
         ctx.push_branch_backtrace(bt.into_single_child(
             LabelBacktraceKind::Branch,
