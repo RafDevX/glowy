@@ -155,7 +155,7 @@ pub fn visit_operand_name<'a>(
         .with_location(location)
 }
 
-/// Reports error for unknown symbol or unknown qualifier, if applicable
+/// Reports error for unknown symbol or unknown qualifier, if applicable.
 pub fn resolve_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     name: Span<'a>,

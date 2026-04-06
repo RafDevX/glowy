@@ -53,19 +53,19 @@ use crate::{
 
 #[derive(Debug)]
 pub struct SymbolTable<'a> {
-    /// Universe block with pre-declared identifiers
+    /// Universe block with pre-declared identifiers.
     universe_scope: Scope<'a>,
-    /// Root scopes associated with each package (None if blackbox)
+    /// Root scopes associated with each package (None if blackbox).
     package_scopes: HashMap<FullPackagePath, Option<PackageScopeEnvelope<'a>>>,
 
-    /// Other packages imported by the current file, with an assigned qualifier
+    /// Other packages imported by the current file, with an assigned qualifier.
     current_file_named_imports: HashMap<String, FullPackagePath>,
-    /// Other packages imported by the current file, via `import . "path"`
+    /// Other packages imported by the current file, via `import . "path"`.
     current_file_wildcard_imports: Vec<FullPackagePath>,
 
-    /// Currently selected (package or sub-package) scope
+    /// Currently selected (package or sub-package) scope.
     current_scope: ScopeRef<'a>,
-    /// Count of traversed children, for each level (last value = current level)
+    /// Count of traversed children for each level (last value = current level).
     ///
     /// For example, a cursor of:
     ///   - `[0]` means that nothing has been declared yet in the package scope;
@@ -383,11 +383,11 @@ pub enum QualifiedSymbolResolutionResult<'a> {
 
 #[derive(Debug)]
 struct PackageScopeEnvelope<'a> {
-    /// Package name (!= package path's last component)
+    /// Package name (!= package path's last component).
     package_name: Pinned<Span<'a>>,
-    /// The package's root scope
+    /// The package's root scope.
     scope: ScopeRef<'a>,
-    /// Next child to be selected, for cross-file synergy (allow resuming count)
+    /// Next child to be selected, for cross-file synergy/allow resuming count.
     next_child_index: usize,
 }
 
@@ -411,12 +411,12 @@ type ScopeRef<'a> = Rc<RefCell<Scope<'a>>>;
 // AST nodes to be mutable and hold analysis metadata (separation of
 // concerns), hence this separate Scope struct.
 struct Scope<'a> {
-    /// Mapping between name (identifier) and its corresponding symbol
+    /// Mapping between name (identifier) and its corresponding symbol.
     symbols: HashMap<&'a str, SymbolRef<'a>>,
 
-    /// Parent scope, unless this is the root scope (package block, & universe)
+    /// Parent scope, unless this is the root scope (package block, & universe).
     parent: Option<ScopeRef<'a>>,
-    /// Children scopes, if any
+    /// Children scopes, if any.
     children: Vec<ScopeRef<'a>>,
 }
 
@@ -608,11 +608,11 @@ pub type SymbolRef<'a> = Rc<RefCell<Symbol<'a>>>;
 
 #[derive(Debug)]
 pub struct Symbol<'a> {
-    /// Original symbol name within symbol declaration
+    /// Original symbol name within symbol declaration.
     declared_name: Pinned<Span<'a>>,
-    /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`)
+    /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`).
     mutable: bool,
-    /// This symbol's current value, including its accumulated security label
+    /// This symbol's current value, including its accumulated security label.
     value: ValueRef<'a>,
 }
 

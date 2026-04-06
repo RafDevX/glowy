@@ -58,7 +58,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    /// Copy by value or by reference according to Go aliasing rules
+    /// Copy by value or by reference according to Go aliasing rules.
     pub fn copy(&self) -> Self {
         let borrowed = self.value.borrow();
 
@@ -72,7 +72,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    /// Force cloning inner value (copy by value)
+    /// Force cloning inner value (copy by value).
     pub fn clone_inner(&self) -> Self {
         let borrowed = self.value.borrow();
 
@@ -107,7 +107,7 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Map(_))
     }
 
-    /// Downgrade a complex shape into a [`Value::Simple`] of same backtrace
+    /// Downgrade a complex shape into a [`Value::Simple`] of same backtrace.
     pub fn downgrade<F>(&self, location_if_bottom: F) -> Self
     where
         F: FnOnce() -> Pinned<Location>,
@@ -115,7 +115,7 @@ impl<'a> ValueRef<'a> {
         Self::from_backtrace_or_bottom_at(self.backtrace(), location_if_bottom)
     }
 
-    /// Coerce a [`Value::Simple`] to take a complex shape when it is first used
+    /// Coerce a [`Value::Simple`] to take a complex shape when first used.
     fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
         let borrow = self.value.borrow();
 

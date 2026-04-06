@@ -12,19 +12,19 @@ use crate::{
 };
 
 pub struct AnalysisContext<'a> {
-    /// Current step of the analysis
+    /// Current step of the analysis.
     stage: AnalysisStage,
-    /// Global symbol manager, including all scope logic
+    /// Global symbol manager, including all scope logic.
     symbol_table: SymbolTable<'a>,
-    /// Current file under analysis (absolute path, where root = module base)
+    /// Current file under analysis (absolute path, where root = module base).
     current_file: Option<&'a Path>,
-    /// Errors emitted during analysis
+    /// Errors emitted during analysis.
     errors: Vec<AnalysisError<'a>>,
 
-    /// Current stack of functions being declared
+    /// Current stack of functions being declared.
     funcs: Vec<ValueRef<'a>>,
 
-    /// Stack of (independent but always a child of previous) branch backtraces
+    /// Stack of (independent but always a child of previous) branch backtraces.
     branch_backtraces: Vec<LabelBacktrace<'a>>,
     /// Branch backtraces that are out of scope but are still in effect.
     ///
@@ -281,10 +281,12 @@ impl<'a> From<AnalysisContext<'a>> for Result<(), Vec<AnalysisError<'a>>> {
 
 #[derive(Default)]
 pub enum AnalysisStage {
-    /// Scan all files for top-level declarations and record them
+    /// Scan all files for top-level declarations and record them.
     #[default]
     RecordDeclarations,
+    /// Repeatedly visit symbols until all security labels stabilize.
     StabilizeLabels,
+    /// Find and report data flow violations based on stable security labels.
     EnforceSecurityPolicies,
 }
 
@@ -296,11 +298,12 @@ impl AnalysisStage {
         )
     }
 
-    /// This returns whether the present stage if the first stage of analysis.
+    /// Returns whether the present stage if the first stage of analysis.
     ///
     /// If a value of false is returned, the invoker may assume that all input
-    /// files have already been reviewed at least one (meaning that, for
-    /// example, package clause and import spec registration should be complete)
+    /// files have already been reviewed at least once (meaning that, for
+    /// example, package clause and import spec registration should be fully
+    /// complete).
     pub fn is_first(&self) -> bool {
         matches!(self, Self::RecordDeclarations)
     }

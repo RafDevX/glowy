@@ -1,5 +1,5 @@
 //! Used exclusively for Stage 1: `RecordDeclarations`
-//! (visit top-level declarations)
+//! (visit top-level declarations).
 
 use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
 

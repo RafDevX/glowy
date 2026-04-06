@@ -1,4 +1,4 @@
-//! Handling of Go Built-in Functions
+//! Handling of Go Built-in Functions.
 //!
 //! Built-in functions are treated in a special manner because they have no
 //! signature (per spec) and can have special effects. This module contains

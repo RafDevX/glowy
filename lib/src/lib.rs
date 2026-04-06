@@ -41,6 +41,7 @@
     clippy::default_numeric_fallback, // probably not?
     clippy::deref_by_slicing,
     clippy::doc_include_without_cfg,
+    clippy::doc_paragraphs_missing_punctuation,
     clippy::empty_enum_variants_with_brackets,
     clippy::empty_structs_with_brackets,
     clippy::error_impl_error,

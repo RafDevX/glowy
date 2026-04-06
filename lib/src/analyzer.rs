@@ -31,10 +31,11 @@ use crate::{
 /// # Ok::<(), std::io::Error>(())
 /// ```
 pub struct Analyzer {
-    /// Go module path base, such as `example.com/company-name/proj`
+    /// Go module path base, such as `example.com/company-name/proj`.
     module_base: FullPackagePath,
-    /// Files to analyze, always ordered by (virtual) file path
-    /// (Ordering reduces the need for switching context between packages)
+    /// Files to analyze, always ordered by (virtual) file path.
+    ///
+    /// (Ordering reduces the need for switching context between packages).
     files: Vec<SourceFile>,
 }
 
