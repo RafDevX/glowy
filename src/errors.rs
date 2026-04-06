@@ -13,7 +13,7 @@ pub fn get_structured_error_info<'a>(
 ) -> StructuredErrorInfo<'a> {
     match kind {
         AnalysisErrorKind::Parsing(inner) => {
-            let diagnostics = glowy::Diagnostics::diagnostics(inner);
+            let diagnostics = glowy::ParsingDiagnostics::diagnostics(inner);
             let location = if let Some(ctx) = diagnostics.context {
                 ctx.location()
             } else {

@@ -60,7 +60,9 @@ pub enum AnalysisErrorKind<'a> {
     /// Go source code parsing failure.
     ///
     /// This encapsulates a [`parser::ParsingError`], which provides more
-    /// information, including through [`parser::Diagnostics::diagnostics`].
+    /// information, including through [`ParsingDiagnostics::diagnostics`][PDd].
+    ///
+    /// [PDd]: crate::ParsingDiagnostics::diagnostics
     Parsing(ParsingError<'a>),
 
     /// Reuse of virtual file path.

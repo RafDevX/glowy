@@ -151,7 +151,7 @@ use std::{
 
 pub use analyzer::Analyzer;
 pub use files::SourceFile;
-pub use parser::{Diagnostics, Location, Span};
+pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
 pub use taint::{SinkDescriptor, SinkKind};
 
 mod analyzer;
@@ -169,10 +169,10 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 // ^ note that auth is not necessarily the package name!
 // must check package clause for files in auth/
 
-/// Source file content snippet bound to a specific location.
+/// Object, component, or metadata bound to a specific file.
 ///
 /// This is a wrapper over an inner type `T` that records contextual information
-/// regarding which file the underlying content was found in. Usually, within
+/// regarding which file the underlying entity relates to. Usually, within
 /// Glowy, this is used with an inner type of either [`Span`] or [`Location`].
 ///
 /// Both [`Span`] and [`Location`] already have information on where within a
