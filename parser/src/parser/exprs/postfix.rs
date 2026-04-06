@@ -1,6 +1,6 @@
 use super::{parse_expression, parse_expressions_list_while};
 use crate::{
-    ParsingError, Token, TokenStream,
+    ParsingError, TokenStream,
     ast::{
         CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode, SlicingNode, TypeAssertionNode,
     },
@@ -19,7 +19,7 @@ fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, Ex
         }
     }
 
-    let paren = expect(s, TokenKind::ParenL, Some("function call"))?;
+    expect(s, TokenKind::ParenL, Some("function call"))?;
     let annotation = s.take_last_annotation();
 
     // TODO: support trailing comma
@@ -56,12 +56,14 @@ fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, Ex
 
     expect(s, TokenKind::ParenR, Some("function call"))?;
 
+    let location = s.location_starting_at(func.location().start);
+
     let call = CallNode {
         func: Box::new(func),
         type_arg,
         args,
         variadic,
-        location: s.location_since(&paren),
+        location,
         annotation,
     };
 
@@ -111,11 +113,11 @@ fn parse_selection<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
 ) -> PResult<'a, SelectionNode<'a>> {
-    let beginning = expect(s, TokenKind::Period, Some("selection expression"))?;
+    expect(s, TokenKind::Period, Some("selection expression"))?;
 
     let selector = expect(s, TokenKind::Ident, Some("selector"))?.span;
 
-    let location = s.location_since(&beginning);
+    let location = s.location_starting_at(base.location().start);
 
     Ok(SelectionNode {
         base: Box::new(base),
@@ -128,7 +130,6 @@ fn parse_slicing<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
     low: Option<ExprNode<'a>>,
-    start: &Token<'a>,
 ) -> PResult<'a, SlicingNode<'a>> {
     expect(s, TokenKind::Colon, Some("slicing expression"))?;
 
@@ -153,12 +154,14 @@ fn parse_slicing<'a>(
 
     expect(s, TokenKind::SquareR, Some("slicing expression"))?;
 
+    let location = s.location_starting_at(base.location().start);
+
     Ok(SlicingNode {
         base: Box::new(base),
         low: low.map(Box::new),
         high: high.map(Box::new),
         max: max.map(Box::new),
-        location: s.location_since(start),
+        location,
     })
 }
 
@@ -166,16 +169,16 @@ fn parse_indexing_or_slice<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
 ) -> PResult<'a, ExprNode<'a>> {
-    let open = expect(s, TokenKind::SquareL, Some("indexing/slicing expression"))?;
+    expect(s, TokenKind::SquareL, Some("indexing/slicing expression"))?;
 
     if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
-        return parse_slicing(s, base, None, &open).map(Into::into);
+        return parse_slicing(s, base, None).map(Into::into);
     }
 
     let index = parse_expression(s)?;
 
     if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
-        return parse_slicing(s, base, Some(index), &open).map(Into::into);
+        return parse_slicing(s, base, Some(index)).map(Into::into);
     }
 
     // optional trailing comma
@@ -185,10 +188,12 @@ fn parse_indexing_or_slice<'a>(
 
     expect(s, TokenKind::SquareR, Some("indexing expression"))?;
 
+    let location = s.location_starting_at(base.location().start);
+
     let indexing = IndexingNode {
         base: Box::new(base),
         index: Box::new(index),
-        location: s.location_since(&open),
+        location,
     };
 
     Ok(indexing.into())
@@ -198,7 +203,7 @@ fn parse_type_assertion<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
 ) -> PResult<'a, TypeAssertionNode<'a>> {
-    let start = expect(s, TokenKind::Period, Some("type assertion"))?;
+    expect(s, TokenKind::Period, Some("type assertion"))?;
 
     expect(s, TokenKind::ParenL, Some("type assertion"))?;
 
@@ -208,10 +213,12 @@ fn parse_type_assertion<'a>(
 
     expect(s, TokenKind::ParenR, Some("type assertion"))?;
 
+    let location = s.location_starting_at(base.location().start);
+
     Ok(TypeAssertionNode {
         expr: Box::new(base),
         r#type,
-        location: s.location_since(&start),
+        location,
     })
 }
 
@@ -292,7 +299,7 @@ mod tests {
                         left: Box::new(ExprNode::Selection(SelectionNode {
                             base: Box::new(ExprNode::Name(Span::new("abc", 1, 1))),
                             selector: Span::new("def", 5, 1),
-                            location: 4..8
+                            location: 1..8
                         })),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 14,
@@ -332,13 +339,13 @@ mod tests {
                         })
                     ],
                     variadic: true,
-                    location: 14..35,
+                    location: 1..35,
                     annotation: None,
                 })),
                 type_arg: None,
                 args: vec![],
                 variadic: false,
-                location: 35..37,
+                location: 1..37,
                 annotation: None
             }),
             parse("(abc.def + 14)(21 + 7 * -9, 'a'...)()").unwrap()
@@ -355,7 +362,7 @@ mod tests {
                         left: Box::new(ExprNode::Selection(SelectionNode {
                             base: Box::new(ExprNode::Name(Span::new("abc", 1, 1))),
                             selector: Span::new("def", 5, 1),
-                            location: 4..8
+                            location: 1..8
                         })),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 14,
@@ -372,12 +379,12 @@ mod tests {
                         })),
                         location: 15..20,
                     }),
-                    location: 14..22,
+                    location: 1..22,
                 })),
                 type_arg: None,
                 args: vec![],
                 variadic: false,
-                location: 22..24,
+                location: 1..24,
                 annotation: None
             }),
             parse("(abc.def + 14)[k + 2,]()").unwrap()
@@ -391,7 +398,7 @@ mod tests {
                 func: Box::new(ExprNode::Selection(SelectionNode {
                     base: Box::new(ExprNode::Name(Span::new("p", 0, 1))),
                     selector: Span::new("f", 2, 1),
-                    location: 1..3
+                    location: 0..3
                 })),
                 type_arg: Some(TypeNode::Channel {
                     r#type: Box::new(TypeNode::Name {
@@ -439,16 +446,16 @@ mod tests {
                             }),
                             args: vec![],
                             variadic: false,
-                            location: 35..57,
+                            location: 34..57,
                             annotation: None,
                         })],
                         variadic: false,
-                        location: 21..58,
+                        location: 20..58,
                         annotation: None,
                     })
                 ],
                 variadic: true,
-                location: 3..62,
+                location: 0..62,
                 annotation: None,
             }),
             // TODO: ... g(<-chan u32), when supported

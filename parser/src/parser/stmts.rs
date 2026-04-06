@@ -27,16 +27,17 @@ mod flow;
 // continue from the right-hand side
 fn resume_parsing_assignment_rhs<'a>(
     s: &mut TokenStream<'a>,
-    starting_at: &Token<'a>,
     lhs: Vec<ExprNode<'a>>,
     kind: AssignmentKind,
 ) -> PResult<'a, StatementNode<'a>> {
     if let Some(rhs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind))? {
+        let location = s.location_starting_at(lhs.first().unwrap().location().start);
+
         Ok(StatementNode::Assignment(AssignmentNode {
             kind,
             lhs,
             rhs,
-            location: s.location_since(starting_at),
+            location,
         }))
     } else {
         // reached end-of-file...
@@ -49,7 +50,6 @@ fn resume_parsing_assignment_rhs<'a>(
 // continue from the left-hand side
 fn resume_parsing_assignment_lhs<'a>(
     s: &mut TokenStream<'a>,
-    starting_at: &Token<'a>,
     mut lhs: Vec<ExprNode<'a>>,
 ) -> PResult<'a, StatementNode<'a>> {
     // collect the rest of the expressions, if any
@@ -57,7 +57,7 @@ fn resume_parsing_assignment_lhs<'a>(
         s.next(); // step over operator
 
         lhs.extend(rest);
-        resume_parsing_assignment_rhs(s, starting_at, lhs, kind)
+        resume_parsing_assignment_rhs(s, lhs, kind)
     } else {
         // reached end-of-file and found no assignment operator...
         Err(ParsingError::UnexpectedConstruct {
@@ -69,8 +69,6 @@ fn resume_parsing_assignment_lhs<'a>(
 
 // statements that start with an expression and then diverge wrt operator
 fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let peeked = s.peek().cloned(); // need to remember location
-
     let lhs = parse_expression(s)?;
 
     // this needs to be separate so we don't consume the semicolon, as well as
@@ -90,33 +88,29 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
         }
     }
 
+    // necessary to make the borrow checker happy (lhs passed before location)
+    let lhs_location = lhs.location().into_owned();
+
     let node = match s.next().transpose()? {
         Some(of_kind!(TokenKind::LtMinus)) => StatementNode::Send(SendNode {
             channel: lhs,
             expr: parse_expression(s)?,
-            location: s.location_since(&peeked.unwrap().unwrap()),
+            location: s.location_starting_at(lhs_location.start),
             annotation: s.take_last_annotation(),
         }),
         Some(of_kind!(TokenKind::PlusPlus)) => StatementNode::Inc {
             operand: lhs,
-            location: s.location_since(&peeked.unwrap().unwrap()),
+            location: s.location_starting_at(lhs_location.start),
         },
         Some(of_kind!(TokenKind::MinusMinus)) => StatementNode::Dec {
             operand: lhs,
-            location: s.location_since(&peeked.unwrap().unwrap()),
+            location: s.location_starting_at(lhs_location.start),
         },
-        Some(of_kind!(TokenKind::Comma)) => {
-            resume_parsing_assignment_lhs(s, &peeked.unwrap().unwrap(), vec![lhs])?
-        }
+        Some(of_kind!(TokenKind::Comma)) => resume_parsing_assignment_lhs(s, vec![lhs])?,
         found => {
             if let Some(token) = found.clone() {
                 if let Ok(kind) = AssignmentKind::try_from(token.kind) {
-                    return resume_parsing_assignment_rhs(
-                        s,
-                        &peeked.unwrap().unwrap(),
-                        vec![lhs],
-                        kind,
-                    );
+                    return resume_parsing_assignment_rhs(s, vec![lhs], kind);
                 }
             }
 

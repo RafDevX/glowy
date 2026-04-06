@@ -33,14 +33,14 @@ fn infix_binding_power(op: BinaryOpKind) -> (u8, u8) {
 }
 
 fn parse_unary<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let Some(Ok(token)) = s.peek().cloned() {
-        if let Ok(op) = token.kind.clone().try_into() {
+    if let Some(Ok(operator)) = s.peek().cloned() {
+        if let Ok(op) = operator.kind.clone().try_into() {
             s.next(); // advance
 
             return Ok(ExprNode::UnaryOp {
                 kind: op,
                 operand: Box::new(parse_unary(s)?),
-                location: s.location_since(&token),
+                location: s.location_since(&operator),
             });
         }
     }
@@ -49,7 +49,6 @@ fn parse_unary<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
 }
 
 pub fn parse_expression_bp<'a>(s: &mut TokenStream<'a>, min_bp: u8) -> PResult<'a, ExprNode<'a>> {
-    let peeked = s.peek().cloned(); // need to remember location
     let mut lhs = parse_unary(s)?;
 
     while let Some(token) = s.peek().cloned().transpose()? {
@@ -67,11 +66,13 @@ pub fn parse_expression_bp<'a>(s: &mut TokenStream<'a>, min_bp: u8) -> PResult<'
         s.next(); // step past operator token
         let rhs = parse_expression_bp(s, r_bp)?;
 
+        let location = s.location_starting_at(lhs.location().start);
+
         lhs = ExprNode::BinaryOp {
             kind: op,
             left: Box::new(lhs),
             right: Box::new(rhs),
-            location: s.location_since(&peeked.clone().unwrap().unwrap()),
+            location,
         }
     }
 
@@ -245,7 +246,7 @@ mod tests {
                         operand: Box::new(ExprNode::Selection(SelectionNode {
                             base: Box::new(ExprNode::Name(Span::new("ab", 13, 2))),
                             selector: Span::new("cd", 16, 2),
-                            location: 15..18
+                            location: 13..18
                         })),
                         location: 11..18
                     }),

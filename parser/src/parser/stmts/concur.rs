@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub fn parse_go_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let token = expect(s, TokenKind::Go, Some("go statement"))?;
+    let beginning = expect(s, TokenKind::Go, Some("go statement"))?;
 
     // alas, it would be difficult to get a CallNode directly because we'd need
     // to hook into the expression parsing internal postfix logic, so it's
@@ -17,14 +17,14 @@ pub fn parse_go_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementN
 
     Ok(StatementNode::Go {
         expr,
-        location: s.location_since(&token),
+        location: s.location_since(&beginning),
     })
 }
 
 // this is considered concurrency-adjacent because it is often most useful to
 // defer unlocking shared-access locks, in conjunction with go statements
 pub fn parse_defer_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let token = expect(s, TokenKind::Defer, Some("defer statement"))?;
+    let beginning = expect(s, TokenKind::Defer, Some("defer statement"))?;
 
     // alas, it would be difficult to get a CallNode directly because we'd need
     // to hook into the expression parsing internal postfix logic, so it's
@@ -35,12 +35,12 @@ pub fn parse_defer_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stateme
 
     Ok(StatementNode::Defer {
         expr,
-        location: s.location_since(&token),
+        location: s.location_since(&beginning),
     })
 }
 
 pub fn parse_select_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, SelectNode<'a>> {
-    let start = expect(s, TokenKind::Select, Some("select statement"))?;
+    let beginning = expect(s, TokenKind::Select, Some("select statement"))?;
 
     expect(s, TokenKind::CurlyL, Some("select statement"))?;
 
@@ -80,6 +80,6 @@ pub fn parse_select_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Select
 
     Ok(SelectNode {
         clauses,
-        location: s.location_since(&start),
+        location: s.location_since(&beginning),
     })
 }

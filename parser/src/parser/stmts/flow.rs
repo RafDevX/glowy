@@ -485,25 +485,25 @@ pub fn parse_break_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stateme
 }
 
 pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let token = expect(s, TokenKind::Return, Some("return statement"))?;
+    let beginning = expect(s, TokenKind::Return, Some("return statement"))?;
 
     let exprs = parse_expressions_list_while(s, |token| !terminal_token(&token.kind))?
         .unwrap_or_else(Vec::new); // a potentially better error will be thrown higher up the chain
 
     Ok(StatementNode::Return {
         exprs,
-        location: s.location_since(&token),
+        location: s.location_since(&beginning),
     })
 }
 
 pub fn parse_goto_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let start = expect(s, TokenKind::Goto, Some("goto statement"))?;
+    let beginning = expect(s, TokenKind::Goto, Some("goto statement"))?;
 
     let label = expect(s, TokenKind::Ident, Some("goto statement"))?.span;
 
     Ok(StatementNode::Goto {
         label,
-        location: s.location_since(&start),
+        location: s.location_since(&beginning),
     })
 }
 
@@ -598,7 +598,7 @@ mod tests {
                                 ExprNode::Selection(SelectionNode {
                                     base: Box::new(ExprNode::Name(Span::new("m", 334, 11))),
                                     selector: Span::new("r", 336, 11),
-                                    location: 335..337
+                                    location: 334..337
                                 }),
                             ],
                             rhs: vec![
@@ -672,7 +672,7 @@ mod tests {
                                 type_arg: None,
                                 args: vec![],
                                 variadic: false,
-                                location: 203..205,
+                                location: 202..205,
                                 annotation: None
                             }),
                             annotation: None
@@ -743,7 +743,7 @@ mod tests {
                                     type_arg: None,
                                     args: vec![],
                                     variadic: false,
-                                    location: 142..144,
+                                    location: 141..144,
                                     annotation: None
                                 }),
                                 annotation: None
@@ -770,7 +770,7 @@ mod tests {
                                     type_arg: None,
                                     args: vec![],
                                     variadic: false,
-                                    location: 188..190,
+                                    location: 187..190,
                                     annotation: None
                                 }),
                                 annotation: None
@@ -787,7 +787,7 @@ mod tests {
                             type_arg: None,
                             args: vec![],
                             variadic: false,
-                            location: 255..257,
+                            location: 254..257,
                             annotation: None
                         })],
                         location: 249..257,
@@ -842,7 +842,7 @@ mod tests {
                                         type_arg: None,
                                         args: vec![],
                                         variadic: false,
-                                        location: 490..492,
+                                        location: 489..492,
                                         annotation: None
                                     }),
                                     annotation: None
@@ -867,7 +867,7 @@ mod tests {
                                     type_arg: None,
                                     args: vec![],
                                     variadic: false,
-                                    location: 645..647,
+                                    location: 644..647,
                                     annotation: None
                                 }),
                                 annotation: None
@@ -969,7 +969,7 @@ mod tests {
                                         type_arg: None,
                                         args: vec![],
                                         variadic: false,
-                                        location: 245..247,
+                                        location: 244..247,
                                         annotation: None
                                     }),
                                     annotation: None
@@ -1005,7 +1005,7 @@ mod tests {
                             location: 360..361
                         })],
                         variadic: false,
-                        location: 359..362,
+                        location: 358..362,
                         annotation: None
                     }),
                     clauses: vec![TypeSwitchCaseClause {
@@ -1020,7 +1020,7 @@ mod tests {
                                 type_arg: None,
                                 args: vec![ExprNode::Name(Span::new("z", 416, 12))],
                                 variadic: false,
-                                location: 415..418,
+                                location: 414..418,
                                 annotation: None
                             }),
                             annotation: None

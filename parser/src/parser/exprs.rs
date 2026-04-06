@@ -225,7 +225,7 @@ fn parse_composite_literal_element_list<'a>(
 }
 
 fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'a>> {
-    let start = s.peek().map(Result::as_ref).and_then(Result::ok).cloned();
+    let beginning = s.peek().map(Result::as_ref).and_then(Result::ok).cloned();
 
     let r#type = parse_type(s)?;
 
@@ -235,7 +235,7 @@ fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'
 
     expect(s, TokenKind::ParenR, Some("explicit conversion"))?;
 
-    let location = s.location_since(&start.unwrap());
+    let location = s.location_since(&beginning.unwrap());
     // ^ unwrap is safe since next token definitely exists
     // (otherwise we would not have gotten this far; `expect` would have failed)
 

@@ -31,8 +31,7 @@ impl<'a> TokenStream<'a> {
             .as_ref()
     }
 
-    pub fn location_since(&self, start: &Token<'a>) -> Location {
-        let from = start.span.location().start;
+    pub fn location_starting_at(&self, from: usize) -> Location {
         let to = self
             .last_location
             .clone()
@@ -41,6 +40,12 @@ impl<'a> TokenStream<'a> {
             .end;
 
         from..to
+    }
+
+    pub fn location_since(&self, start: &Token<'a>) -> Location {
+        let from = start.span.location().start;
+
+        self.location_starting_at(from)
     }
 
     // note that this will take even peeks into account!
