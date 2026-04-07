@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, cmp};
 
 use parser::{
     Location, Span,
@@ -233,7 +233,7 @@ fn get_for_range_values<'a>(
         let yield_type = func
             .signature()
             .and_then(|sig| sig.params.first())
-            .filter(|param| param.ids.len() == 1)
+            .filter(|param| param.ids.len() <= 1)
             .map(|param| &param.r#type);
 
         if let Some(TypeNode::Function { signature }) = yield_type {
@@ -244,7 +244,11 @@ fn get_for_range_values<'a>(
             }) = &signature.result
             {
                 if yield_result.content() == "bool" {
-                    let n_values: usize = signature.params.iter().map(|p| p.ids.len()).sum();
+                    let n_values: usize = signature
+                        .params
+                        .iter()
+                        .map(|p| cmp::max(1, p.ids.len()))
+                        .sum();
 
                     if n_values == 0 {
                         // note: this is wrong, we should return an empty Vec,
