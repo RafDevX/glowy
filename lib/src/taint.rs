@@ -60,6 +60,8 @@ impl SnapshotAware for SinkDescriptor<'_> {
 pub enum SinkKind {
     /// A variable/constant declaration.
     Declaration,
+    /// An assignment to an existing symbol.
+    Assignment,
     /// A function call.
     Call,
     /// A send statement.

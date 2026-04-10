@@ -266,12 +266,53 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         rhs_values = expanded;
     }
 
+    let mut explicit_backtrace = None;
+    if let Some(annotation) = node.annotation.as_deref() {
+        match annotation.directive {
+            "label" => {
+                explicit_backtrace = Some(LabelBacktrace::new_root(
+                    LabelBacktraceKind::ExplicitAnnotation,
+                    Label::from_tags(&annotation.tags),
+                    None,
+                    ctx.pin(node.location.clone()),
+                ));
+            }
+            "sink" => {
+                let sink = SinkDescriptor::new(
+                    SinkKind::Assignment,
+                    &annotation.tags,
+                    node.location.clone(),
+                );
+
+                for rhs in &rhs_values {
+                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), rhs.backtrace());
+                }
+            }
+            "assert" => {
+                let sequence = Label::sequence_from_tags(&annotation.tags);
+
+                for rhs in &rhs_values {
+                    enforcement::trigger_assertion(
+                        ctx,
+                        &sequence,
+                        rhs.backtrace(),
+                        node.location.clone(),
+                    );
+                }
+            }
+            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
+                directive: annotation.directive,
+                location: annotation.location.clone(),
+            }),
+        }
+    }
+
     visit_raw_assignment(
         ctx,
         node.kind,
         node.lhs.iter(),
         rhs_values.into_iter(),
-        None, // TODO: support annotations in assignments
+        explicit_backtrace.as_ref(),
         &node.location,
     );
 }
@@ -324,6 +365,7 @@ pub fn visit_incdec<'a>(
                 location: location.clone(),
             })],
             location: location.clone(),
+            annotation: None,
         },
     );
 }
