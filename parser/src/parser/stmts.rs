@@ -12,7 +12,7 @@ use super::{
     exprs::{parse_expression, parse_expressions_list, parse_expressions_list_while},
 };
 use crate::{
-    ParsingError, TokenStream,
+    Annotation, ParsingError, TokenStream,
     ast::{
         AssignmentKind, AssignmentNode, BlockNode, ExprNode, SendNode, ShortVarDeclNode,
         StatementNode,
@@ -29,6 +29,7 @@ fn resume_parsing_assignment_rhs<'a>(
     s: &mut TokenStream<'a>,
     lhs: Vec<ExprNode<'a>>,
     kind: AssignmentKind,
+    annotation: Option<Box<Annotation<'a>>>,
 ) -> PResult<'a, StatementNode<'a>> {
     if let Some(rhs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind))? {
         let location = s.location_starting_at(lhs.first().unwrap().location().start);
@@ -38,6 +39,7 @@ fn resume_parsing_assignment_rhs<'a>(
             lhs,
             rhs,
             location,
+            annotation,
         }))
     } else {
         // reached end-of-file...
@@ -57,7 +59,10 @@ fn resume_parsing_assignment_lhs<'a>(
         s.next(); // step over operator
 
         lhs.extend(rest);
-        resume_parsing_assignment_rhs(s, lhs, kind)
+
+        let annotation = s.take_last_annotation();
+
+        resume_parsing_assignment_rhs(s, lhs, kind, annotation)
     } else {
         // reached end-of-file and found no assignment operator...
         Err(ParsingError::UnexpectedConstruct {
@@ -110,7 +115,9 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
         found => {
             if let Some(token) = found.clone() {
                 if let Ok(kind) = AssignmentKind::try_from(token.kind) {
-                    return resume_parsing_assignment_rhs(s, vec![lhs], kind);
+                    let annotation = s.take_last_annotation();
+
+                    return resume_parsing_assignment_rhs(s, vec![lhs], kind, annotation);
                 }
             }
 
@@ -354,6 +361,7 @@ mod tests {
                         ExprNode::Name(Span::new("d", 98, 5))
                     ],
                     location: 88..99,
+                    annotation: None,
                 }),
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
@@ -397,6 +405,7 @@ mod tests {
                         ExprNode::Name(Span::new("x", 148, 6))
                     ],
                     location: 121..149,
+                    annotation: None,
                 }),
                 StatementNode::ShortVarDecl(ShortVarDeclNode {
                     ids: vec![
@@ -414,14 +423,19 @@ mod tests {
                 }),
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
-                    lhs: vec![ExprNode::Name(Span::new("a", 211, 8))],
-                    rhs: vec![ExprNode::Name(Span::new("b", 215, 8))],
-                    location: 211..216,
+                    lhs: vec![ExprNode::Name(Span::new("a", 263, 10))],
+                    rhs: vec![ExprNode::Name(Span::new("b", 267, 10))],
+                    location: 263..268,
+                    annotation: Some(Box::new(Annotation {
+                        directive: "directive",
+                        tags: vec!["a", "b", "c"],
+                        location: 215..242,
+                    })),
                 }),
                 StatementNode::ShortVarDecl(ShortVarDeclNode {
-                    ids: vec![Span::new("c", 238, 9)],
-                    exprs: vec![ExprNode::Name(Span::new("d", 243, 9))],
-                    location: 238..244,
+                    ids: vec![Span::new("c", 290, 11)],
+                    exprs: vec![ExprNode::Name(Span::new("d", 295, 11))],
+                    location: 290..296,
                     annotation: None
                 })
             ],
@@ -433,6 +447,8 @@ mod tests {
                     a, b = c, d;
                     -4, x, (k) = 4 * 2, 5 + 2, x;
                     k, r, v := m, n, o;
+
+                    // glowy::directive::{a, b, c}
                     a = b;
                     c := d;
                 }

@@ -679,6 +679,7 @@ pub struct AssignmentNode<'a> {
     pub lhs: Vec<ExprNode<'a>>,
     pub rhs: Vec<ExprNode<'a>>,
     pub location: Location, // for better error messages
+    pub annotation: Option<Box<Annotation<'a>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

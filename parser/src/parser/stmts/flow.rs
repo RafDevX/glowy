@@ -560,6 +560,7 @@ mod tests {
                             location: 124..125
                         })],
                         location: 120..125,
+                        annotation: None,
                     })
                 ],
                 otherwise: Some(ElseNode::If(Box::new(IfNode {
@@ -612,6 +613,7 @@ mod tests {
                                 }),
                             ],
                             location: 331..346,
+                            annotation: None,
                         })
                     ])),
                     location: 158..373,
@@ -854,7 +856,8 @@ mod tests {
                                         value: 3,
                                         location: 529..530
                                     })],
-                                    location: 525..530
+                                    location: 525..530,
+                                    annotation: None,
                                 }),
                                 StatementNode::Fallthrough { location: 563..574 }
                             ]
@@ -957,7 +960,8 @@ mod tests {
                                     })),
                                     location: 164..174
                                 }],
-                                location: 155..174
+                                location: 155..174,
+                                annotation: None,
                             })]
                         },
                         TypeSwitchCaseClause {
