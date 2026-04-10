@@ -327,6 +327,45 @@ impl<'a> Label<'a> {
         }
     }
 
+    /// Returns whether this [`Label`] contains a given [`LabelTag`].
+    ///
+    /// For example, `{a, b, c}` contains `c` but not `d`. If `self` is
+    /// [`Label::Bottom`], it is considered not to contain any tag, as expected.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::{Label, LabelTag};
+    /// #
+    /// let x = Label::from_tags(&["alice", "bob", "charlie"]);
+    /// let y = Label::from_single(LabelTag::Concrete("david"));
+    /// let z = Label::Bottom;
+    ///
+    /// assert!(x.contains(&LabelTag::Concrete("bob")));
+    /// assert!(!x.contains(&LabelTag::Concrete("david")));
+    /// assert!(y.contains(&LabelTag::Concrete("david")));
+    /// assert!(!y.contains(&LabelTag::Concrete("charlie")));
+    /// assert!(!z.contains(&LabelTag::Concrete("alice")));
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn contains(&self, tag: &LabelTag<'a>) -> bool {
+        match self {
+            Self::Bottom => false,
+            Self::Tags(tags) => tags.contains(tag),
+        }
+    }
+
+    pub(crate) fn as_single(&self) -> Option<&LabelTag<'a>> {
+        if let Self::Tags(tags) = self {
+            if tags.len() == 1 {
+                return tags.first();
+            }
+        }
+
+        None
+    }
+
     pub(crate) fn has_any_synthetic(&self) -> bool {
         let Self::Tags(tags) = self else {
             return false;
@@ -340,15 +379,11 @@ impl<'a> Label<'a> {
         param_func: &FunctionRef<'a>,
         param_index: Option<usize>,
     ) -> bool {
-        let Self::Tags(tags) = self else {
+        let Some(single) = self.as_single() else {
             return false;
         };
 
-        if tags.len() != 1 {
-            return false;
-        }
-
-        let Some(LabelTag::Synthetic { func, index, .. }) = tags.first() else {
+        let LabelTag::Synthetic { func, index, .. } = single else {
             return false;
         };
 
@@ -588,7 +623,10 @@ impl<'a> LabelBacktrace<'a> {
         from_index: Option<usize>, // None for receiver
         concrete: Option<&Self>,
     ) -> Option<Self> {
-        if self.kind == LabelBacktraceKind::FunctionParameter {
+        if matches!(
+            self.kind,
+            LabelBacktraceKind::FunctionParameter | LabelBacktraceKind::ClosureCapture
+        ) {
             if self
                 .label()
                 .is_synthetic_func_param_decl(from_func, from_index)
@@ -713,6 +751,8 @@ pub enum LabelBacktraceKind {
     FunctionArgument,
     /// Aggregate label for all arguments passed to a variadic parameter.
     FunctionVariadicAggregation,
+    /// Synthetic label assigned to a captured symbol shared with outer scope.
+    ClosureCapture,
     /// Individual label for one particular expression in a return statement.
     Return,
     /// Conservative label returned by a function without known implementation.

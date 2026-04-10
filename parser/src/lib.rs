@@ -45,7 +45,7 @@ pub type Location = Range<usize>;
 /// [`Span`] implements [`Copy`] for maximum convenience, which is possible
 /// since it mostly holds a reference to source file contents it does not own
 /// (as indicated by the exposed lifetime `'a`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span<'a> {
     content: &'a str,
     offset: usize,

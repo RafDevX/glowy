@@ -542,6 +542,11 @@ fn label_backtrace_to_snippets<'a>(
                 backtrace.symbol().unwrap_or("?"),
                 backtrace.label()
             ),
+            LabelBacktraceKind::ClosureCapture => format!(
+                "outer symbol `{}` was captured by this closure and assigned synthetic label {}",
+                backtrace.symbol().unwrap_or("?"),
+                backtrace.label(),
+            ),
             LabelBacktraceKind::Return => {
                 format!("function returns with label {}", backtrace.label())
             }

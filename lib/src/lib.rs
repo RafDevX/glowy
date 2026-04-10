@@ -180,7 +180,7 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 /// file some content is located, and this struct complements it by further
 /// scoping its inner instance to a specific file (by virtual path, rooted in
 /// the module base).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash)]
 pub struct Pinned<T: Clone + fmt::Debug + PartialEq> {
     virtual_file_path: PathBuf,
     inner: T,

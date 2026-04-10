@@ -7,7 +7,7 @@ use crate::{
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
-    symbols::{SymbolRef, SymbolTable},
+    symbols::{ScopeTreeRef, SymbolRef, SymbolTable},
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -21,8 +21,8 @@ pub struct AnalysisContext<'a> {
     /// Errors emitted during analysis.
     errors: Vec<AnalysisError<'a>>,
 
-    /// Current stack of functions being declared.
-    funcs: Vec<ValueRef<'a>>,
+    /// Current stack of functions being declared (fn value, scope boundary).
+    funcs: Vec<(ValueRef<'a>, ScopeTreeRef<'a>)>,
 
     /// Stack of (independent but always a child of previous) branch backtraces.
     branch_backtraces: Vec<LabelBacktrace<'a>>,
@@ -102,6 +102,10 @@ impl<'a> AnalysisContext<'a> {
         self.current_file = Some(virtual_path);
     }
 
+    pub fn current_function_and_boundary(&self) -> Option<(ValueRef<'a>, &ScopeTreeRef<'a>)> {
+        self.funcs.last().map(|(f, b)| (f.clone(), b))
+    }
+
     pub fn current_function(&self) -> Option<ValueRef<'a>> {
         // FIXME: ideally, would .and_then(|v| v.as_function()) here so that we
         // could return Option<Ref<FunctionValue<'a>>>, but borrow checker hates
@@ -109,11 +113,11 @@ impl<'a> AnalysisContext<'a> {
         // cannot tell that all values are stored in symbols anyway so it's ok,
         // meaning that we must offload this function-checking to the invoker
 
-        self.funcs.last().cloned()
+        self.current_function_and_boundary().map(|(f, _)| f)
     }
 
-    pub fn push_function(&mut self, func: ValueRef<'a>) {
-        self.funcs.push(func);
+    pub fn push_function(&mut self, func: ValueRef<'a>, boundary: ScopeTreeRef<'a>) {
+        self.funcs.push((func, boundary));
     }
 
     pub fn pop_function(&mut self) {

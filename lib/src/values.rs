@@ -1296,6 +1296,13 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
+    // symbols from outer lexical scopes captured by this closure, if applicable
+    // (key is original symbol declaration, which must be pinned since this
+    // closure might be called from another file, and value is the fake unique
+    // param index we are using to refer to this capture so we can hook into the
+    // existing parameter realization system even for closure capture resolution
+    // whenever the function literal is actually invoked)
+    captures: HashMap<Pinned<Span<'a>>, usize>, // empty if not function literal
     // how many times this function has been called
     // (must be a shared ref, rather than a raw usize, since otherwise mutation
     // would not work as we'd only modify derived operand-name-access tainted
@@ -1316,6 +1323,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             deferred_checks: vec![],
+            captures: HashMap::new(),
             call_count: Rc::new(RefCell::new(0)),
         }
     }
@@ -1395,6 +1403,43 @@ impl<'a> FunctionValue<'a> {
         self.deferred_checks.push(check);
     }
 
+    // note this is meaningless for functions without known declarations
+    // (i.e., if we don't know their signature), but it's ok not to return an
+    // Option<usize> since this method is private and so we can optimize a bit
+    // for convenience, under the assumption that we control all the call sites
+    fn parameter_count(&self) -> usize {
+        self.signature().map_or(0, |sig| {
+            sig.params
+                .iter()
+                .map(|param| cmp::max(1, param.ids.len()))
+                .sum()
+        })
+    }
+
+    pub fn captures(&self) -> impl Iterator<Item = (&Pinned<Span<'a>>, usize)> {
+        self.captures.iter().map(|(d, i)| (d, *i))
+    }
+
+    #[must_use]
+    pub fn register_capture(&mut self, symbol_declaration: Cow<Pinned<Span<'a>>>) -> usize {
+        // cannot use HashMap's Entry API because we need to borrow self for
+        // calculations as the same time it'd be immutably borrowed for Entry
+
+        if let Some(existing) = self.captures.get(&symbol_declaration) {
+            *existing
+        } else {
+            // we manufacture a unique parameter index to use within the
+            // realization pipeline which represents this ""parameter""
+            // (i.e., the captured symbol)
+            let fake_index = self.parameter_count() + self.captures.len();
+
+            self.captures
+                .insert(symbol_declaration.into_owned(), fake_index);
+
+            fake_index
+        }
+    }
+
     pub fn call_count(&self) -> usize {
         *self.call_count.borrow()
     }
@@ -1421,6 +1466,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
             && self.outcome.is_none()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
+            && self.captures.is_empty()
     }
 }
 
@@ -1454,6 +1500,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             deferred_checks,
+            captures: self.captures.clone(),
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
@@ -1478,6 +1525,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             deferred_checks: self.deferred_checks.clone(),
+            captures: self.captures.clone(),
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
@@ -1498,6 +1546,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self
                 .deferred_checks
                 .snapshot_aware_eq(&other.deferred_checks)
+            && self.captures == other.captures
         // intentionally ignoring call count
     }
 }

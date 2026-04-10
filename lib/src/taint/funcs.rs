@@ -69,7 +69,7 @@ fn visit_function_def<'a>(
         ctx.declare_new_symbol(symbol);
     }
 
-    ctx.symtab_mut().select_next_child_scope(); // push
+    let boundary = ctx.symtab_mut().select_next_child_scope(); // push
 
     macro_rules! declare_param {
         ($id:expr, $index:expr) => {
@@ -126,7 +126,7 @@ fn visit_function_def<'a>(
         }
     }
 
-    ctx.push_function(value.clone());
+    ctx.push_function(value.clone(), boundary);
     ctx.increase_branch_scope_depth();
 
     super::visit_statements(ctx, body);
@@ -187,17 +187,22 @@ pub fn visit_return<'a>(
         return;
     };
 
-    let outcome = calculate_outcome(ctx, func.signature(), exprs, location);
+    // unfortunately we need to do this as otherwise we'd get a runtime borrow
+    // error since calculate_outcome must be able to borrow func as mutable, and
+    // that's not possible if we're still holding a ref to it
+    let signature = func.signature().cloned();
+    let existing_outcome = func.outcome().cloned();
+    drop(func);
+
+    let outcome = calculate_outcome(ctx, signature.as_ref(), exprs, location);
 
     // merge with existing outcome, if any
     // (this allows for multiple return statements within the same function)
-    let outcome = if let Some(existing) = func.outcome() {
+    let outcome = if let Some(existing) = existing_outcome.as_deref() {
         merge_outcomes(ctx, existing, outcome, location)
     } else {
         outcome
     };
-
-    drop(func);
 
     let Some(mut func_mut) = value.as_function_mut() else {
         ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
@@ -543,6 +548,20 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
+    for (symbol_declaration, fake_index) in func.captures() {
+        let symbol = ctx
+            .symtab()
+            .get_symbol_by_declaration(symbol_declaration)
+            .unwrap();
+
+        let concrete = symbol.borrow().value().get().backtrace();
+
+        deferred_checks = deferred_checks
+            .iter()
+            .filter_map(|check| check.realize(func.r#ref(), Some(fake_index), concrete.as_ref()))
+            .collect();
+    }
+
     // we don't need to -1 because this value is before the call count has been
     // incremented for the current call, so it already corresponds to a 0-index
     let call_index = func.call_count();
@@ -605,6 +624,25 @@ fn calculate_call_result<'a>(
             let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
 
             realized = realized.realize(func.r#ref(), Some(index), concrete.as_ref());
+        }
+
+        for (symbol_declaration, fake_index) in func.captures() {
+            if realized.is_bottom() && realized.allows_lossless_downgrade() {
+                // no sense in continuing, we'll never evolve from this state
+
+                result.push(realized);
+
+                continue 'components;
+            }
+
+            let symbol = ctx
+                .symtab()
+                .get_symbol_by_declaration(symbol_declaration)
+                .unwrap();
+
+            let concrete = symbol.borrow().value().get().backtrace();
+
+            realized = realized.realize(func.r#ref(), Some(fake_index), concrete.as_ref());
         }
 
         result.push(realized);

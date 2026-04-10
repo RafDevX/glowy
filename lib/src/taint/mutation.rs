@@ -40,6 +40,8 @@ pub trait LeftValue<'a> {
         };
 
         if let Some(symbol) = exprs::resolve_operand_name(ctx, root, None) {
+            let symbol = symbol.into_symbol();
+
             ctx.symtab().is_symbol_in_current_scope(&symbol)
         } else {
             false
@@ -209,6 +211,8 @@ impl<'a> LeftValue<'a> for Span<'a> {
             // no symbol found, but error already reported
             return;
         };
+
+        let symbol = symbol.into_symbol();
 
         if !symbol.borrow().mutable() {
             ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: *self });
