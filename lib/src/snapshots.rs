@@ -114,6 +114,12 @@ impl SnapshotAware for LabelBacktrace<'_> {
 
 // utility blanket impls for common types
 
+impl<T: SnapshotAware> SnapshotAware for &T {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        (*self).snapshot_aware_eq(*other)
+    }
+}
+
 impl<T: SnapshotAware> SnapshotAware for Option<T> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -133,11 +139,5 @@ impl<T: SnapshotAware> SnapshotAware for Vec<T> {
         self.iter()
             .zip(other.iter())
             .all(|(a, b)| a.snapshot_aware_eq(b))
-    }
-}
-
-impl<T: SnapshotAware> SnapshotAware for &T {
-    fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        (*self).snapshot_aware_eq(*other)
     }
 }
