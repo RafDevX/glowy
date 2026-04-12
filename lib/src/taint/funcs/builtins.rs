@@ -11,7 +11,7 @@
 //! treated as function calls by the parser, but rather as their own unique
 //! kinds of expressions that are then dispatched by the analyzer on visit.
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use parser::ast::{CallNode, MakeNode, TypeNode};
 
@@ -120,7 +120,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 n,
                 m,
                 LabelBacktraceKind::Expression,
-                location.clone(),
+                Cow::Borrowed(&location),
             );
 
             ValueRef::from_backtrace_or_bottom_at(backtrace, || location)
@@ -216,7 +216,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
         dst.backtrace(),
         src.backtrace(),
         LabelBacktraceKind::Expression,
-        location.clone(),
+        Cow::Borrowed(&location),
     );
 
     let Some(mut slice) = dst.as_slice_mut() else {

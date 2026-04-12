@@ -13,7 +13,7 @@
 //! These labels' evolution and propagation history can be easily tracked using
 //! a hierarchy structure, which is here implemented via [`LabelBacktrace`].
 
-use std::{cmp, collections::BTreeSet, fmt, iter};
+use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, iter};
 
 use parser::{Location, Span};
 
@@ -606,13 +606,13 @@ impl<'a> LabelBacktrace<'a> {
         a: Option<Self>,
         b: Option<Self>,
         with_kind: LabelBacktraceKind,
-        at_location: Pinned<Location>,
+        at_location: Cow<Pinned<Location>>,
     ) -> Option<Self> {
         match (&a, &b) {
             (None, None) => None,
             (Some(_), None) => a,
             (None, Some(_)) => b,
-            (Some(x), Some(y)) => Some(x.union(y, with_kind, at_location)),
+            (Some(x), Some(y)) => Some(x.union(y, with_kind, at_location.into_owned())),
         }
     }
 

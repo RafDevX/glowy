@@ -50,7 +50,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
                 left,
                 right,
                 LabelBacktraceKind::Expression,
-                ctx.pin(location.clone()),
+                Cow::Owned(ctx.pin(location.clone())),
             );
 
             ValueRef::from_backtrace_or_bottom_at(backtrace, || ctx.pin(location.clone()))

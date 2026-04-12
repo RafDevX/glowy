@@ -18,7 +18,7 @@ pub fn trigger_sink<'a>(
         backtrace,
         ctx.branch_backtrace().cloned(),
         LabelBacktraceKind::EnforcementAggregation,
-        ctx.pin(sink.location.clone()),
+        Cow::Owned(ctx.pin(sink.location.clone())),
     );
 
     let label = found.as_ref().map_or(&Label::Bottom, LabelBacktrace::label);
@@ -57,7 +57,7 @@ pub fn trigger_assertion<'a>(
         backtrace,
         ctx.branch_backtrace().cloned(),
         LabelBacktraceKind::EnforcementAggregation,
-        ctx.pin(location.clone()),
+        Cow::Owned(ctx.pin(location.clone())),
     );
 
     let label = found.as_ref().map_or(&Label::Bottom, LabelBacktrace::label);

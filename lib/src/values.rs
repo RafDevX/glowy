@@ -1021,7 +1021,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             self.r#dyn.clone(),
             value.backtrace(),
             LabelBacktraceKind::Assignment,
-            at_location,
+            Cow::Owned(at_location),
         );
     }
 }
