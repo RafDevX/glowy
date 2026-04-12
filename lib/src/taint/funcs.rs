@@ -427,14 +427,8 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // treat it as a blackbox and assume the label of all its outputs is the
         // union of the label of all its inputs; we can't do anything fancy
 
-        let mut children = vec![];
-
-        for child in arg_backtraces.iter().flatten() {
-            children.push(child.clone());
-        }
-
         let bt = LabelBacktrace::fold(
-            children.iter().chain(func.backtrace()),
+            arg_backtraces.iter().flatten().chain(func.backtrace()),
             LabelBacktraceKind::BlackboxCall,
             None,
             call_location.clone(),
