@@ -23,8 +23,7 @@ pub trait LeftValue<'a> {
         location: &Location,
     );
 
-    #[must_use]
-    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>>;
+    fn root_operand(&self) -> Option<Span<'a>>;
 
     fn mutate_target(
         &self,
@@ -35,7 +34,7 @@ pub trait LeftValue<'a> {
 
     #[must_use]
     fn is_root_in_current_scope(&self, ctx: &mut AnalysisContext<'a>) -> bool {
-        let Some(root) = self.root_operand(ctx) else {
+        let Some(root) = self.root_operand() else {
             return false;
         };
 
@@ -63,8 +62,8 @@ pub trait LeftValue<'a> {
 }
 
 fn as_valid_left_value<'a, 'b>(
-    ctx: &mut AnalysisContext<'a>,
     expr: &'b ExprNode<'a>,
+    ctx: Option<&mut AnalysisContext<'a>>,
 ) -> Option<&'b dyn LeftValue<'a>> {
     let inner: &'b dyn LeftValue = match expr {
         ExprNode::Name(name) => name,
@@ -82,9 +81,11 @@ fn as_valid_left_value<'a, 'b>(
         | ExprNode::TypeAssertion(_)
         | ExprNode::UnaryOp { .. }
         | ExprNode::BinaryOp { .. } => {
-            ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
-                location: expr.location().into_owned(),
-            });
+            if let Some(ctx) = ctx {
+                ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                    location: expr.location().into_owned(),
+                });
+            }
 
             return None;
         }
@@ -106,7 +107,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Location,
     ) {
-        let Some(inner) = as_valid_left_value(ctx, self) else {
+        let Some(inner) = as_valid_left_value(self, Some(ctx)) else {
             // error already reported
             return;
         };
@@ -121,8 +122,8 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         );
     }
 
-    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>> {
-        as_valid_left_value(ctx, self)?.root_operand(ctx)
+    fn root_operand(&self) -> Option<Span<'a>> {
+        as_valid_left_value(self, None)?.root_operand()
     }
 
     fn mutate_target(
@@ -131,7 +132,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         assignment_location: &Location,
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
     ) {
-        let Some(inner) = as_valid_left_value(ctx, self) else {
+        let Some(inner) = as_valid_left_value(self, Some(ctx)) else {
             // error already reported
             return;
         };
@@ -197,7 +198,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
         });
     }
 
-    fn root_operand(&self, _ctx: &mut AnalysisContext<'a>) -> Option<Self> {
+    fn root_operand(&self) -> Option<Self> {
         Some(*self)
     }
 
@@ -270,8 +271,8 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         });
     }
 
-    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>> {
-        self.base.root_operand(ctx)
+    fn root_operand(&self) -> Option<Span<'a>> {
+        self.base.root_operand()
     }
 
     fn mutate_target(
@@ -349,8 +350,8 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         });
     }
 
-    fn root_operand(&self, ctx: &mut AnalysisContext<'a>) -> Option<Span<'a>> {
-        self.base.root_operand(ctx)
+    fn root_operand(&self) -> Option<Span<'a>> {
+        self.base.root_operand()
     }
 
     fn mutate_target(
