@@ -1579,6 +1579,14 @@ impl<'a> FunctionRef<'a> {
             Self::Anonymous(_) | Self::BlackboxInference(_) => None,
         }
     }
+
+    pub fn is_main(&self) -> bool {
+        if let Self::Named(name) = self {
+            name.content() == "main" && name.file() == "/main.go"
+        } else {
+            false
+        }
+    }
 }
 
 impl fmt::Display for FunctionRef<'_> {

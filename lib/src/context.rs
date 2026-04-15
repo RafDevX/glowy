@@ -211,7 +211,19 @@ impl<'a> AnalysisContext<'a> {
         let mut value = self.current_function().unwrap();
         // ^ should be safe if this method is used correctly (only within a fn)
 
-        value.as_function_mut().unwrap().defer_check(check);
+        let mut func = value.as_function_mut().unwrap();
+
+        assert!(
+            !func.r#ref().is_main(),
+            concat!(
+                "attempt to defer an enforcement check within the main entrypoint",
+                " (this is a bug: synthetics must not escape their respective function)",
+                " [check = {:?}]"
+            ),
+            &check
+        );
+
+        func.defer_check(check);
     }
 
     pub fn report_error_at(&mut self, file: &'a Path, kind: AnalysisErrorKind<'a>) {
