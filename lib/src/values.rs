@@ -155,6 +155,12 @@ macro_rules! extract_inner {
     ($variant:path) => {
         |value| extract_inner!($variant, value)
     };
+    (*, $variant:path) => {
+        |value| extract_inner!($variant, value).map(|r#box| &**r#box)
+    };
+    (*mut, $variant:path) => {
+        |value| extract_inner!($variant, value).map(|r#box| &mut **r#box)
+    };
 }
 
 #[expect(
@@ -243,13 +249,17 @@ impl<'a> ValueRef<'a> {
     pub fn as_function(&self) -> Option<Ref<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
-        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Function)).ok()
+        Ref::filter_map(self.value.borrow(), extract_inner!(*, Value::Function)).ok()
     }
 
     pub fn as_function_mut(&mut self) -> Option<RefMut<'_, FunctionValue<'a>>> {
         self.try_upgrade_to(Value::Function);
 
-        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Function)).ok()
+        RefMut::filter_map(
+            self.value.borrow_mut(),
+            extract_inner!(*mut, Value::Function),
+        )
+        .ok()
     }
 }
 
@@ -465,7 +475,7 @@ pub enum Value<'a> {
     Slice(CompositeValue<'a, u64>),
     Map(CompositeValue<'a, SimpleConstValue>),
     Struct(CompositeValue<'a, String>),
-    Function(FunctionValue<'a>),
+    Function(Box<FunctionValue<'a>>),
 }
 
 impl<'a> Value<'a> {
@@ -483,7 +493,7 @@ impl<'a> Value<'a> {
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
-            Self::Function(func) => func,
+            Self::Function(func) => &**func,
         }
     }
 }
@@ -527,7 +537,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Struct(composite) => Self::Struct(recurs!(composite)),
-            Self::Function(func) => Self::Function(recurs!(func)),
+            Self::Function(func) => Self::Function(Box::new(recurs!(&**func))),
         }
     }
 
@@ -553,7 +563,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Struct(composite) => Self::Struct(recurs!(composite)),
-            Self::Function(func) => Self::Function(recurs!(func)),
+            Self::Function(func) => Self::Function(Box::new(recurs!(&**func))),
         }
     }
 }
@@ -651,6 +661,12 @@ impl SnapshotAware for Value<'_> {
 trait Upgrade<'a> {
     // Coerce from a Value::Simple to Self, preserving inner backtrace
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self;
+}
+
+impl<'a, T: Upgrade<'a>> Upgrade<'a> for Box<T> {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
+        Self::new(T::upgrade(backtrace, location))
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

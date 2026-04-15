@@ -62,7 +62,7 @@ fn visit_function_def<'a>(
     // blackbox function without implementation (which would have unset outcome)
     func_val.set_outcome(bottom_outcome);
 
-    let mut value = ValueRef::new(Value::Function(func_val), value_location);
+    let mut value = ValueRef::new(Value::Function(Box::new(func_val)), value_location);
 
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());

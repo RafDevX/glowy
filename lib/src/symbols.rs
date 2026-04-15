@@ -493,12 +493,12 @@ impl<'a> Scope<'a> {
                 predeclared_constant!(
                     $id,
                     ValueRef::new(
-                        Value::Function(FunctionValue::new_builtin(
+                        Value::Function(Box::new(FunctionValue::new_builtin(
                             $id,
                             $params,
                             $variadic,
                             $n_returned
-                        )),
+                        ))),
                         predeclared_location.clone(),
                     )
                 )
