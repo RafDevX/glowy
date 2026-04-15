@@ -21,16 +21,13 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
     let mut context = BacktrackingContext::new(s);
     let b = context.stream();
 
-    let stmt = if let Ok(stmt) = parse_statement(b, false) {
-        if let Some(Ok(of_kind!(TokenKind::SemiColon))) = b.next() {
-            // got it, we can continue with the main stream from now on
-            context.commit()?;
+    let stmt = if let Ok(stmt) = parse_statement(b, false)
+        && let Some(Ok(of_kind!(TokenKind::SemiColon))) = b.next()
+    {
+        // got it, we can continue with the main stream from now on
+        context.commit()?;
 
-            Some(Box::new(stmt))
-        } else {
-            // nope, rollback
-            None
-        }
+        Some(Box::new(stmt))
     } else {
         // nope, rollback
         None

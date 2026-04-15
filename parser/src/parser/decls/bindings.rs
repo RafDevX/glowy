@@ -85,11 +85,11 @@ fn parse_spec<'a>(
             Some(_) => {
                 r#type = Some(parse_type(s)?);
 
-                if let Some(Ok(next)) = s.peek() {
-                    if matches!(next.kind, TokenKind::SemiColon | TokenKind::ParenR) {
-                        // empty expressions list (sometimes allowed)
-                        break;
-                    }
+                if let Some(Ok(next)) = s.peek()
+                    && matches!(next.kind, TokenKind::SemiColon | TokenKind::ParenR)
+                {
+                    // empty expressions list (sometimes allowed)
+                    break;
                 }
 
                 // otherwise, it's either an = or illegal

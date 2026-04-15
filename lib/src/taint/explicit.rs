@@ -58,16 +58,16 @@ fn visit_binding_decl_spec<'a>(
     let mut rhs_values = exprs::visit_multi_exprs(ctx, &node.exprs);
 
     let mut expanded = None;
-    if node.ids.len() > 1 {
-        if let [single] = rhs_values.as_slice() {
-            if let Some(expandable) = single.as_expandable() {
-                // cannot assign directly to rhs_values here because the borrow
-                // checker is very cool and awesome and does not allow it while
-                // rhs_values is borrowed from the if-let, so we do this instead
-                expanded = Some(expandable.expand());
-            } else if let Some(mobius) = single.as_mobius() {
-                expanded = Some(mobius.expand_to(node.ids.len()));
-            }
+    if node.ids.len() > 1
+        && let [single] = rhs_values.as_slice()
+    {
+        if let Some(expandable) = single.as_expandable() {
+            // cannot assign directly to rhs_values here because the borrow
+            // checker is very cool and awesome and does not allow it while
+            // rhs_values is borrowed from the if-let, so we do this instead
+            expanded = Some(expandable.expand());
+        } else if let Some(mobius) = single.as_mobius() {
+            expanded = Some(mobius.expand_to(node.ids.len()));
         }
     }
 
@@ -249,16 +249,16 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
     let mut rhs_values = exprs::visit_multi_exprs(ctx, &node.rhs);
 
     let mut expanded = None;
-    if node.lhs.len() > 1 {
-        if let [single] = rhs_values.as_slice() {
-            if let Some(expandable) = single.as_expandable() {
-                // cannot assign directly to rhs_values here because the borrow
-                // checker is very cool and awesome and does not allow it while
-                // rhs_values is borrowed from the if-let, so we do this instead
-                expanded = Some(expandable.expand());
-            } else if let Some(mobius) = single.as_mobius() {
-                expanded = Some(mobius.expand_to(node.lhs.len()));
-            }
+    if node.lhs.len() > 1
+        && let [single] = rhs_values.as_slice()
+    {
+        if let Some(expandable) = single.as_expandable() {
+            // cannot assign directly to rhs_values here because the borrow
+            // checker is very cool and awesome and does not allow it while
+            // rhs_values is borrowed from the if-let, so we do this instead
+            expanded = Some(expandable.expand());
+        } else if let Some(mobius) = single.as_mobius() {
+            expanded = Some(mobius.expand_to(node.lhs.len()));
         }
     }
 

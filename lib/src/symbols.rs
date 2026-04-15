@@ -120,10 +120,10 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn save_package_progress(&mut self, path: &FullPackagePath) {
-        if let Some(&index) = self.current_cursor.first() {
-            if let Some(Some(envelope)) = self.package_scopes.get_mut(path) {
-                envelope.next_child_index = index;
-            }
+        if let Some(&index) = self.current_cursor.first()
+            && let Some(Some(envelope)) = self.package_scopes.get_mut(path)
+        {
+            envelope.next_child_index = index;
         }
     }
 
@@ -194,10 +194,10 @@ impl<'a> SymbolTable<'a> {
 
         if name.chars().next().is_some_and(char::is_uppercase) {
             for path in &self.current_file_wildcard_imports {
-                if let Some(Some(envelope)) = self.package_scopes.get(path) {
-                    if let Some(symbol) = envelope.scope.borrow().get_local_symbol(name) {
-                        return Some(symbol);
-                    }
+                if let Some(Some(envelope)) = self.package_scopes.get(path)
+                    && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
+                {
+                    return Some(symbol);
                 }
             }
         }
@@ -220,12 +220,10 @@ impl<'a> SymbolTable<'a> {
     ) -> QualifiedSymbolResolutionResult<'a> {
         if let Some(path) = self.current_file_named_imports.get(qualifier) {
             if let Some(Some(envelope)) = self.package_scopes.get(path) {
-                if name.chars().next().is_some_and(char::is_uppercase) {
-                    if let Some(symbol) = envelope.scope.borrow().get_local_symbol(name) {
-                        QualifiedSymbolResolutionResult::Success(symbol)
-                    } else {
-                        QualifiedSymbolResolutionResult::UnknownSymbol
-                    }
+                if name.chars().next().is_some_and(char::is_uppercase)
+                    && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
+                {
+                    QualifiedSymbolResolutionResult::Success(symbol)
                 } else {
                     QualifiedSymbolResolutionResult::UnknownSymbol
                 }
@@ -352,10 +350,10 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn is_package_blackbox(&self, qualifier: &str) -> bool {
-        if let Some(path) = self.current_file_named_imports.get(qualifier) {
-            if let Some(envelope) = self.package_scopes.get(path) {
-                return envelope.is_none();
-            }
+        if let Some(path) = self.current_file_named_imports.get(qualifier)
+            && let Some(envelope) = self.package_scopes.get(path)
+        {
+            return envelope.is_none();
         }
 
         false
@@ -570,10 +568,10 @@ impl<'a> Scope<'a> {
     }
 
     fn get_symbol_by_declaration(&self, declaration: &Pinned<Span<'a>>) -> Option<SymbolRef<'a>> {
-        if let Some(local) = self.symbols.get(declaration.content()) {
-            if local.borrow().declared_name() == declaration {
-                return Some(Rc::clone(local));
-            }
+        if let Some(local) = self.symbols.get(declaration.content())
+            && local.borrow().declared_name() == declaration
+        {
+            return Some(Rc::clone(local));
         }
 
         for child in &self.children {

@@ -584,13 +584,13 @@ impl StatementNode<'_> {
                 return Cow::Owned(label.location().start..loc.end);
             }
             StatementNode::Block(stmts) => {
-                if let Some(first) = stmts.first() {
-                    if let Some(last) = stmts.last() {
-                        let first_loc = first.location();
-                        let last_loc = last.location();
+                if let Some(first) = stmts.first()
+                    && let Some(last) = stmts.last()
+                {
+                    let first_loc = first.location();
+                    let last_loc = last.location();
 
-                        return Cow::Owned(first_loc.start..last_loc.end);
-                    }
+                    return Cow::Owned(first_loc.start..last_loc.end);
                 }
 
                 return Cow::Owned(0..usize::MAX);

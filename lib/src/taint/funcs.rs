@@ -95,12 +95,11 @@ fn visit_function_def<'a>(
         };
     }
 
-    if let Some(receiver) = receiver {
-        if let [id] = receiver.ids.as_slice() {
-            if id.content() != "_" {
-                declare_param!(*id, None);
-            }
-        }
+    if let Some(receiver) = receiver
+        && let [id] = receiver.ids.as_slice()
+        && id.content() != "_"
+    {
+        declare_param!(*id, None);
     }
 
     let mut param_index = 0;
@@ -237,18 +236,16 @@ fn calculate_outcome<'a>(
 
     let mut outcome = vec![];
 
-    let exprs = if exprs.is_empty() {
-        if let Some(FunctionResultNode::Params(result)) = signature.map(|sig| &sig.result) {
-            // naked returns
+    let exprs = if exprs.is_empty()
+        && let Some(FunctionResultNode::Params(result)) = signature.map(|sig| &sig.result)
+    {
+        // naked returns
 
-            result
-                .iter()
-                .flat_map(|p| p.ids.clone())
-                .map(ExprNode::Name)
-                .collect()
-        } else {
-            vec![]
-        }
+        result
+            .iter()
+            .flat_map(|p| p.ids.clone())
+            .map(ExprNode::Name)
+            .collect()
     } else {
         Vec::from(exprs)
     };
@@ -371,19 +368,19 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     // can only check for correct cardinality if we have a signature,
     // otherwise we just assume everything is fine (would be wrong to error)
-    if let Some(ids) = &ids {
-        if node.args.len() != ids.len() {
-            let variadic = ids.last().is_some_and(|(_, variadic)| *variadic);
+    if let Some(ids) = &ids
+        && node.args.len() != ids.len()
+    {
+        let variadic = ids.last().is_some_and(|(_, variadic)| *variadic);
 
-            if !(variadic && node.args.len() > ids.len()) {
-                ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                    expected: ids.len(),
-                    found: node.args.len(),
-                    location: node.location.clone(),
-                });
+        if !(variadic && node.args.len() > ids.len()) {
+            ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+                expected: ids.len(),
+                found: node.args.len(),
+                location: node.location.clone(),
+            });
 
-                return vec![];
-            }
+            return vec![];
         }
     }
 

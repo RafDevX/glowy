@@ -172,15 +172,13 @@ fn parse_composite_literal_element_list<'a>(
             }
         }
 
-        if optional_keys {
-            if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
-                // no key, just nested
-                let value = parse_composite_literal_element_list(s, optional_keys)?;
+        if optional_keys && let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+            // no key, just nested
+            let value = parse_composite_literal_element_list(s, optional_keys)?;
 
-                values.push((None, CompositeLiteralElementNode::Nested(value)));
+            values.push((None, CompositeLiteralElementNode::Nested(value)));
 
-                continue;
-            }
+            continue;
         }
 
         // take an expression, initially assumed as a value candidate

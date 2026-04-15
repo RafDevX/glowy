@@ -222,10 +222,9 @@ fn derive_concrete_backtrace_or_fallback<'a>(
         .as_ref()
         .map(LabelBacktrace::label)
         .is_some_and(Label::has_any_synthetic)
+        && let Some(fallback) = binding.hybrid_fallback()
     {
-        if let Some(fallback) = binding.hybrid_fallback() {
-            return fallback.cloned();
-        }
+        return fallback.cloned();
     }
 
     hybrid

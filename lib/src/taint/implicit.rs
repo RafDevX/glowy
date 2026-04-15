@@ -93,18 +93,16 @@ fn visit_for_clause<'a>(
         super::visit_statement(ctx, init);
     }
 
-    let pushed = if let Some(cond) = &clause.cond {
-        if let Some(cond_backtrace) = exprs::get_expr_backtrace(ctx, cond) {
-            ctx.push_branch_backtrace(cond_backtrace.into_single_child(
-                LabelBacktraceKind::Branch,
-                None,
-                ctx.pin(header_location.clone()),
-            ));
+    let pushed = if let Some(cond) = &clause.cond
+        && let Some(cond_backtrace) = exprs::get_expr_backtrace(ctx, cond)
+    {
+        ctx.push_branch_backtrace(cond_backtrace.into_single_child(
+            LabelBacktraceKind::Branch,
+            None,
+            ctx.pin(header_location.clone()),
+        ));
 
-            true
-        } else {
-            false
-        }
+        true
     } else {
         false
     };
@@ -236,31 +234,29 @@ fn get_for_range_values<'a>(
             .filter(|param| param.ids.len() <= 1)
             .map(|param| &param.r#type);
 
-        if let Some(TypeNode::Function { signature }) = yield_type {
-            if let FunctionResultNode::Single(TypeNode::Name {
+        if let Some(TypeNode::Function { signature }) = yield_type
+            && let FunctionResultNode::Single(TypeNode::Name {
                 package: None,
                 id: yield_result,
                 ..
             }) = &signature.result
-            {
-                if yield_result.content() == "bool" {
-                    let n_values: usize = signature
-                        .params
-                        .iter()
-                        .map(|p| cmp::max(1, p.ids.len()))
-                        .sum();
+            && yield_result.content() == "bool"
+        {
+            let n_values: usize = signature
+                .params
+                .iter()
+                .map(|p| cmp::max(1, p.ids.len()))
+                .sum();
 
-                    if n_values == 0 {
-                        // note: this is wrong, we should return an empty Vec,
-                        // but that would lead to an incorrect branch backtrace
-                        // being set, which is worse -- branch must depend on
-                        // the label of `value`, since a function might have
-                        // side effects
-                        return vec![value.downgrade(|| location.clone())];
-                    } else if n_values == 1 || n_values == 2 {
-                        // FIXME: don't know how to propagate this as a sink
-                    }
-                }
+            if n_values == 0 {
+                // note: this is wrong, we should return an empty Vec,
+                // but that would lead to an incorrect branch backtrace
+                // being set, which is worse -- branch must depend on
+                // the label of `value`, since a function might have
+                // side effects
+                return vec![value.downgrade(|| location.clone())];
+            } else if n_values == 1 || n_values == 2 {
+                // FIXME: don't know how to propagate this as a sink
             }
         }
 
@@ -332,16 +328,16 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
     // have no backtraces (e.g., `case 3:`).
     let mut n_pushes = 0_usize;
 
-    if let Some(expr) = &node.expr {
-        if let Some(bt) = exprs::get_expr_backtrace(ctx, expr) {
-            ctx.push_branch_backtrace(bt.into_single_child(
-                LabelBacktraceKind::Branch,
-                None,
-                ctx.pin(expr.location().into_owned()),
-            ));
+    if let Some(expr) = &node.expr
+        && let Some(bt) = exprs::get_expr_backtrace(ctx, expr)
+    {
+        ctx.push_branch_backtrace(bt.into_single_child(
+            LabelBacktraceKind::Branch,
+            None,
+            ctx.pin(expr.location().into_owned()),
+        ));
 
-            n_pushes += 1;
-        }
+        n_pushes += 1;
     }
 
     for clause in &node.clauses {

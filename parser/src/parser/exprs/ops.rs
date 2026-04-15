@@ -33,16 +33,16 @@ fn infix_binding_power(op: BinaryOpKind) -> (u8, u8) {
 }
 
 fn parse_unary<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let Some(Ok(operator)) = s.peek().cloned() {
-        if let Ok(op) = operator.kind.clone().try_into() {
-            s.next(); // advance
+    if let Some(Ok(operator)) = s.peek().cloned()
+        && let Ok(op) = operator.kind.clone().try_into()
+    {
+        s.next(); // advance
 
-            return Ok(ExprNode::UnaryOp {
-                kind: op,
-                operand: Box::new(parse_unary(s)?),
-                location: s.location_since(&operator),
-            });
-        }
+        return Ok(ExprNode::UnaryOp {
+            kind: op,
+            operand: Box::new(parse_unary(s)?),
+            location: s.location_since(&operator),
+        });
     }
 
     super::parse_primary_expression(s)

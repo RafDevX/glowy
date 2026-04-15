@@ -12,11 +12,11 @@ use crate::{
 };
 
 fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let ExprNode::Name(id) = func {
-        if id.content() == "make" {
-            // make(T, ...) is treated specially, not as a function call
-            return Ok(parse_make(s, id.location().start)?.into());
-        }
+    if let ExprNode::Name(id) = func
+        && id.content() == "make"
+    {
+        // make(T, ...) is treated specially, not as a function call
+        return Ok(parse_make(s, id.location().start)?.into());
     }
 
     expect(s, TokenKind::ParenL, Some("function call"))?;

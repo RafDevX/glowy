@@ -136,12 +136,10 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn try_singularize_simple_mobius(&mut self) {
-        let new = if let Value::Mobius(mobius) = &*self.value.borrow() {
-            if let value @ Value::Simple(_) = &*mobius.inner().value.borrow() {
-                Some(value.clone())
-            } else {
-                None
-            }
+        let new = if let Value::Mobius(mobius) = &*self.value.borrow()
+            && let value @ Value::Simple(_) = &*mobius.inner().value.borrow()
+        {
+            Some(value.clone())
         } else {
             None
         };
@@ -518,11 +516,11 @@ impl SimpleConstValue {
                     BinaryOpKind::Sum => {
                         // check right before left to avoid having to clone either
                         // (since we never need ownership of right)
-                        if let Self::String(right) = &right {
-                            if let Self::String(left) = left {
-                                // string concatenation
-                                return Some(Self::String(left + right));
-                            }
+                        if let Self::String(right) = &right
+                            && let Self::String(left) = left
+                        {
+                            // string concatenation
+                            return Some(Self::String(left + right));
                         }
                     }
                     BinaryOpKind::Eq => return Some(Self::Boolean(left == right)),

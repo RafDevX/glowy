@@ -78,19 +78,19 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
 
     // this needs to be separate so we don't consume the semicolon, as well as
     // to avoid using peek on the match (would require .next in every branch)
-    if let Some(Ok(of_kind!(kind))) = s.peek() {
-        if terminal_token(kind) {
-            let stmt = StatementNode::Expr {
-                expr: lhs,
-                annotation: s.take_last_annotation(),
-                // ^ FIXME: in some cases, e.g. if lhs is a function call, this
-                // take_last_annotation won't return anything since any
-                // annotation will have already been taken by the expression
-                // upon its parsing (sometimes desired, sometimes not)
-            };
+    if let Some(Ok(of_kind!(kind))) = s.peek()
+        && terminal_token(kind)
+    {
+        let stmt = StatementNode::Expr {
+            expr: lhs,
+            annotation: s.take_last_annotation(),
+            // ^ FIXME: in some cases, e.g. if lhs is a function call, this
+            // take_last_annotation won't return anything since any
+            // annotation will have already been taken by the expression
+            // upon its parsing (sometimes desired, sometimes not)
+        };
 
-            return Ok(stmt);
-        }
+        return Ok(stmt);
     }
 
     // necessary to make the borrow checker happy (lhs passed before location)
@@ -113,12 +113,12 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
         },
         Some(of_kind!(TokenKind::Comma)) => resume_parsing_assignment_lhs(s, vec![lhs])?,
         found => {
-            if let Some(token) = found.clone() {
-                if let Ok(kind) = AssignmentKind::try_from(token.kind) {
-                    let annotation = s.take_last_annotation();
+            if let Some(token) = found.clone()
+                && let Ok(kind) = AssignmentKind::try_from(token.kind)
+            {
+                let annotation = s.take_last_annotation();
 
-                    return resume_parsing_assignment_rhs(s, vec![lhs], kind, annotation);
-                }
+                return resume_parsing_assignment_rhs(s, vec![lhs], kind, annotation);
             }
 
             return Err(ParsingError::UnexpectedTokenKind {
@@ -254,10 +254,10 @@ pub fn parse_statements_until<'a>(
         stmts.push(parse_statement(s, true)?);
 
         // spec allows omitting semicolon before closing } and )
-        if let Some(Ok(t @ of_kind!(TokenKind::CurlyR | TokenKind::ParenR))) = s.peek() {
-            if stop(t) {
-                break;
-            }
+        if let Some(Ok(t @ of_kind!(TokenKind::CurlyR | TokenKind::ParenR))) = s.peek()
+            && stop(t)
+        {
+            break;
         }
 
         expect(s, TokenKind::SemiColon, Some("statements list"))?;

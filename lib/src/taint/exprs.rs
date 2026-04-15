@@ -129,13 +129,13 @@ pub fn visit_operand_name<'a>(
         // a qualifier is valid
 
         return ValueRef::new(Value::PackageRef(PackageRefValue::new(name)), location);
-    } else if let Some(qual) = qualifier {
-        if ctx.symtab().is_package_blackbox(qual.content()) {
-            // we don't know any details about this package, so we just assume
-            // that the requested member (`name`) exists within it
+    } else if let Some(qual) = qualifier
+        && ctx.symtab().is_package_blackbox(qual.content())
+    {
+        // we don't know any details about this package, so we just assume that
+        // the requested member (`name`) exists within it
 
-            return ValueRef::new_bottom(location);
-        }
+        return ValueRef::new_bottom(location);
     }
 
     let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
