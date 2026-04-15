@@ -1298,11 +1298,12 @@ pub struct FunctionValue<'a> {
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
     // symbols from outer lexical scopes captured by this closure, if applicable
     // (key is original symbol declaration, which must be pinned since this
-    // closure might be called from another file, and value is the fake unique
-    // param index we are using to refer to this capture so we can hook into the
-    // existing parameter realization system even for closure capture resolution
-    // whenever the function literal is actually invoked)
-    captures: HashMap<Pinned<Span<'a>>, usize>, // empty if not function literal
+    // closure might be called from another file, and value is meta-information
+    // including the fake unique param index we are using to refer to this
+    // capture so we can hook into the existing parameter realization system
+    // even for closure capture resolution whenever the function literal is
+    // actually invoked) -- map is empty if this is not a function literal
+    captures: HashMap<Pinned<Span<'a>>, CaptureBinding<'a>>,
     // how many times this function has been called
     // (must be a shared ref, rather than a raw usize, since otherwise mutation
     // would not work as we'd only modify derived operand-name-access tainted
@@ -1403,40 +1404,55 @@ impl<'a> FunctionValue<'a> {
         self.deferred_checks.push(check);
     }
 
-    // note this is meaningless for functions without known declarations
-    // (i.e., if we don't know their signature), but it's ok not to return an
-    // Option<usize> since this method is private and so we can optimize a bit
-    // for convenience, under the assumption that we control all the call sites
-    fn parameter_count(&self) -> usize {
-        self.signature().map_or(0, |sig| {
-            sig.params
-                .iter()
-                .map(|param| cmp::max(1, param.ids.len()))
-                .sum()
-        })
+    pub fn parameter_count(&self) -> Option<usize> {
+        let count = self
+            .signature()?
+            .params
+            .iter()
+            .map(|param| cmp::max(1, param.ids.len()))
+            .sum();
+
+        Some(count)
     }
 
-    pub fn captures(&self) -> impl Iterator<Item = (&Pinned<Span<'a>>, usize)> {
-        self.captures.iter().map(|(d, i)| (d, *i))
+    pub fn captures(&self) -> impl Iterator<Item = (&Pinned<Span<'a>>, &CaptureBinding<'a>)> {
+        self.captures.iter()
+    }
+
+    pub fn captures_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&Pinned<Span<'a>>, &mut CaptureBinding<'a>)> {
+        self.captures.iter_mut()
     }
 
     #[must_use]
-    pub fn register_capture(&mut self, symbol_declaration: Cow<Pinned<Span<'a>>>) -> usize {
+    pub fn register_capture(
+        &mut self,
+        outer_decl: Cow<Pinned<Span<'a>>>,
+        local_decl: Pinned<Span<'a>>,
+    ) -> usize {
         // cannot use HashMap's Entry API because we need to borrow self for
         // calculations as the same time it'd be immutably borrowed for Entry
 
-        if let Some(existing) = self.captures.get(&symbol_declaration) {
-            *existing
+        if let Some(existing) = self.captures.get(&outer_decl) {
+            existing.fake_param_index()
         } else {
             // we manufacture a unique parameter index to use within the
             // realization pipeline which represents this ""parameter""
             // (i.e., the captured symbol)
-            let fake_index = self.parameter_count() + self.captures.len();
+            let fake_param_index = self.parameter_count().unwrap_or(0) + self.captures.len();
 
-            self.captures
-                .insert(symbol_declaration.into_owned(), fake_index);
+            // self.captures
+            //     .entry(outer_decl.into_owned())
+            //     .insert_entry(CaptureBinding::new(fake_param_index, local_decl))
+            //     .get()
 
-            fake_index
+            self.captures.insert(
+                outer_decl.into_owned(),
+                CaptureBinding::new(fake_param_index, local_decl),
+            );
+
+            fake_param_index
         }
     }
 
@@ -1494,13 +1510,24 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             .filter_map(|check| check.realize(from_func, from_index, concrete))
             .collect();
 
+        let captures = self
+            .captures
+            .iter()
+            .map(|(outer_decl, binding)| {
+                (
+                    outer_decl.clone(),
+                    binding.realize(from_func, from_index, concrete),
+                )
+            })
+            .collect();
+
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
             outcome,
             backtrace,
             deferred_checks,
-            captures: self.captures.clone(),
+            captures,
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
@@ -1546,7 +1573,13 @@ impl SnapshotAware for FunctionValue<'_> {
             && self
                 .deferred_checks
                 .snapshot_aware_eq(&other.deferred_checks)
-            && self.captures == other.captures
+            && self.captures.len() == other.captures.len()
+            && self.captures.iter().all(|(decl, binding)| {
+                other
+                    .captures
+                    .get(decl)
+                    .is_some_and(|other_binding| binding.snapshot_aware_eq(other_binding))
+            })
         // intentionally ignoring call count
     }
 }
@@ -1639,7 +1672,101 @@ impl PartialOrd for FunctionRef<'_> {
 
 impl SnapshotAware for FunctionRef<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        self == other
+        match (self, other) {
+            (Self::Named(a), Self::Named(b)) => a == b,
+            (Self::Anonymous(a), Self::Anonymous(b)) => a == b,
+            (Self::BuiltIn(a), Self::BuiltIn(b)) => a == b,
+            // UUIDs might differ between analyzer iterations
+            // (they're randomly generated upon upgrade)
+            (Self::BlackboxInference(_), Self::BlackboxInference(_)) => true,
+
+            // not using wildcard to force revisiting impl for any new variants
+            (
+                Self::Named(_) | Self::Anonymous(_) | Self::BuiltIn(_) | Self::BlackboxInference(_),
+                _,
+            ) => false,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CaptureBinding<'a> {
+    // fake function parameter that has been reserved for this capture so that
+    // we can later plug into the existing realization pipeline when the closure
+    // is actually invoked, allowing synthetic tags to become concrete labels
+    fake_param_index: usize,
+    // fake local symbol declaration created within the closure scope for this
+    // capture (with a placeholder synthetic tag as its label)
+    local_decl: Pinned<Span<'a>>,
+    // currently best known hybrid backtrace for this capture's outer symbol,
+    // used as a fallback when fetching the outer symbol's current value yields
+    // a partially or fully synthetic label -- however, there is a risk that
+    // this fallback is stale, in which case using it is silently unsound!
+    // (hybrid means we try our best for it to be fully concrete, but sometimes
+    // it might be impossible to completely realize synthetic tags, so this
+    // backtrace might still be partially or fully synthetic)
+    // fallback value is None if not yet set, while Some(None) means Bottom
+    #[expect(
+        clippy::option_option,
+        reason = "Conveniently represent the presence/absence of an Option<LabelBacktrace>"
+    )]
+    hybrid_fallback: Option<Option<LabelBacktrace<'a>>>,
+}
+
+impl<'a> CaptureBinding<'a> {
+    fn new(fake_param_index: usize, local_decl: Pinned<Span<'a>>) -> Self {
+        Self {
+            fake_param_index,
+            local_decl,
+            hybrid_fallback: None,
+        }
+    }
+
+    pub fn fake_param_index(&self) -> usize {
+        self.fake_param_index
+    }
+
+    pub fn local_decl(&self) -> &Pinned<Span<'a>> {
+        &self.local_decl
+    }
+
+    #[expect(
+        clippy::option_option,
+        reason = "Conveniently represent the presence/absence of an Option<LabelBacktrace>"
+    )]
+    pub fn hybrid_fallback(&self) -> Option<Option<&LabelBacktrace<'a>>> {
+        self.hybrid_fallback.as_ref().map(Option::as_ref)
+    }
+
+    pub fn set_hybrid_fallback(&mut self, hybrid_fallback: Option<LabelBacktrace<'a>>) {
+        self.hybrid_fallback = Some(hybrid_fallback);
+    }
+
+    fn realize(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_index: Option<usize>,
+        concrete: Option<&LabelBacktrace<'a>>,
+    ) -> Self {
+        let mut binding = self.clone();
+
+        if let Some(Some(fallback)) = binding.hybrid_fallback() {
+            let realized = fallback.realize(from_func, from_index, concrete);
+
+            binding.set_hybrid_fallback(realized);
+        }
+
+        binding
+    }
+}
+
+impl SnapshotAware for CaptureBinding<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.fake_param_index == other.fake_param_index
+            && self.local_decl == other.local_decl
+            && self
+                .hybrid_fallback
+                .snapshot_aware_eq(&other.hybrid_fallback)
     }
 }
 

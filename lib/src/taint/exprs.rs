@@ -1,20 +1,17 @@
-use std::{borrow::Cow, rc::Rc};
+use std::borrow::Cow;
 
 use parser::{
-    Location, Span,
+    Span,
     ast::{ExprNode, TypeAssertionNode, UnaryOpKind},
 };
 
 use super::{channels, funcs};
 use crate::{
-    Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
+    labels::{LabelBacktrace, LabelBacktraceKind},
     symbols::{QualifiedSymbolResolutionResult, SymbolRef},
-    values::{
-        ExpandableValue, FunctionRef, PackageRefValue, SelfAwareBacktraceContainer, Value, ValueRef,
-    },
+    values::{ExpandableValue, PackageRefValue, SelfAwareBacktraceContainer, Value, ValueRef},
 };
 
 mod component;
@@ -116,55 +113,6 @@ pub fn get_expr_backtrace<'a>(
     visit_single_expr(ctx, node).backtrace()
 }
 
-pub struct CaptureAwareSymbolRef<'a> {
-    symbol: SymbolRef<'a>,
-    capture: Option<LabelBacktrace<'a>>, // synthetic
-}
-
-impl<'a> CaptureAwareSymbolRef<'a> {
-    fn new_direct(symbol: SymbolRef<'a>) -> Self {
-        Self {
-            symbol,
-            capture: None,
-        }
-    }
-
-    fn new_capture(symbol: SymbolRef<'a>, capture: LabelBacktrace<'a>) -> Self {
-        Self {
-            symbol,
-            capture: Some(capture),
-        }
-    }
-
-    pub fn value(&self, at_location: &Pinned<Location>) -> ValueRef<'a> {
-        let symbol = self.symbol.borrow();
-        let base = symbol.value().get();
-
-        if let Some(capture) = &self.capture {
-            // check if value already has the synthetic
-            if let Some(base_label) = base.backtrace().as_ref().map(LabelBacktrace::label) {
-                if !base_label.contains(capture.label().as_single().unwrap()) {
-                    return base.nest_backtrace(
-                        LabelBacktraceKind::ClosureCapture,
-                        Some(symbol.declared_name().content()),
-                        at_location.clone(),
-                        [capture.clone()],
-                    );
-                }
-            }
-        }
-
-        // we need to clone_inner to ensure compliance with the stated
-        // AssumedImmutable restrictions (cannot allow invokers to directly
-        // mutate a Symbol's value) -- See: Symbol::value
-        base.clone_inner()
-    }
-
-    pub fn into_symbol(self) -> SymbolRef<'a> {
-        self.symbol
-    }
-}
-
 pub fn visit_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     name: Span<'a>,
@@ -196,7 +144,9 @@ pub fn visit_operand_name<'a>(
     };
 
     symbol
-        .value(&location)
+        .borrow()
+        .value()
+        .get()
         .nest_backtrace(
             LabelBacktraceKind::Expression,
             Some(name.content()),
@@ -211,7 +161,7 @@ pub fn resolve_operand_name<'a>(
     ctx: &mut AnalysisContext<'a>,
     name: Span<'a>,
     qualifier: Option<Span<'a>>,
-) -> Option<CaptureAwareSymbolRef<'a>> {
+) -> Option<SymbolRef<'a>> {
     let symbol = if let Some(qualifier) = qualifier {
         match ctx
             .symtab()
@@ -236,49 +186,12 @@ pub fn resolve_operand_name<'a>(
         ctx.symtab().get_symbol(name.content())
     };
 
-    if let Some(symbol) = &symbol {
-        if let Some((mut func, boundary)) = ctx.current_function_and_boundary() {
-            if let Some(mut func) = func.as_function_mut() {
-                if let FunctionRef::Anonymous(location) = func.r#ref() {
-                    if !boundary.contains_symbol(symbol) {
-                        // we're inside a closure and accessing a symbol
-                        // declared outside of its body, meaning that this is
-                        // a "capture" that needs to be treated differently:
-                        // we need to share access to that symbol, meaning that
-                        // if it's later mutated outside of the closure body,
-                        // that'll still reflect within the closure on call
-
-                        let borrow = symbol.borrow();
-                        let decl = borrow.declared_name();
-
-                        let location = location.clone();
-                        let index = func.register_capture(Cow::Borrowed(decl));
-
-                        let synthetic = LabelTag::Synthetic {
-                            func: func.r#ref().clone(),
-                            index: Some(index),
-                            identifier: Some(name),
-                        };
-
-                        return Some(CaptureAwareSymbolRef::new_capture(
-                            Rc::clone(symbol),
-                            LabelBacktrace::new_root(
-                                LabelBacktraceKind::ClosureCapture,
-                                Label::from_single(synthetic),
-                                Some(decl.content()),
-                                location,
-                            ),
-                        ));
-                    }
-                }
-            }
-        }
-    } else {
+    if symbol.is_none() {
         // symbol not found -- report error
         ctx.report_error(AnalysisErrorKind::UnknownSymbol { found: name });
     }
 
-    symbol.map(CaptureAwareSymbolRef::new_direct)
+    symbol
 }
 
 fn visit_type_assertion<'a>(

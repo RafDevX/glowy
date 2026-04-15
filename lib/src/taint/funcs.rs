@@ -22,6 +22,7 @@ use crate::{
 };
 
 pub mod builtins;
+mod captures;
 
 fn visit_function_def<'a>(
     ctx: &mut AnalysisContext<'a>,
@@ -61,7 +62,7 @@ fn visit_function_def<'a>(
     // blackbox function without implementation (which would have unset outcome)
     func_val.set_outcome(bottom_outcome);
 
-    let value = ValueRef::new(Value::Function(func_val), value_location);
+    let mut value = ValueRef::new(Value::Function(func_val), value_location);
 
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
@@ -69,7 +70,7 @@ fn visit_function_def<'a>(
         ctx.declare_new_symbol(symbol);
     }
 
-    let boundary = ctx.symtab_mut().select_next_child_scope(); // push
+    ctx.symtab_mut().select_next_child_scope(); // push
 
     macro_rules! declare_param {
         ($id:expr, $index:expr) => {
@@ -126,10 +127,14 @@ fn visit_function_def<'a>(
         }
     }
 
-    ctx.push_function(value.clone(), boundary);
+    captures::register_closure_captures(ctx, r#ref, signature, receiver, body, &mut value);
+
+    ctx.push_function(value.clone());
     ctx.increase_branch_scope_depth();
 
     super::visit_statements(ctx, body);
+
+    captures::record_closure_capture_fallbacks(ctx, &mut value);
 
     ctx.decrease_branch_scope_depth();
     ctx.trigger_defer_target(DeferTarget::Function);
@@ -382,11 +387,13 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
-    let arg_backtraces: Vec<_> = node
+    let arg_values: Vec<_> = node
         .args
         .iter()
-        .map(|arg| exprs::get_expr_backtrace(ctx, arg))
+        .map(|arg| exprs::visit_single_expr(ctx, arg))
         .collect();
+
+    let with_backtraces: Vec<_> = arg_values.iter().map(|v| (v, v.backtrace())).collect();
 
     if let Some(annotation) = &node.annotation {
         match annotation.directive {
@@ -397,18 +404,18 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                     node.location.clone(), // call, not annotation
                 );
 
-                for arg in &arg_backtraces {
-                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg.clone());
+                for (_, arg_bt) in &with_backtraces {
+                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg_bt.clone());
                 }
             }
             "assert" => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
 
-                for arg in &arg_backtraces {
+                for (_, arg_bt) in &with_backtraces {
                     enforcement::trigger_assertion(
                         ctx,
                         &sequence,
-                        arg.clone(),
+                        arg_bt.clone(),
                         node.location.clone(),
                     );
                 }
@@ -427,8 +434,19 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // treat it as a blackbox and assume the label of all its outputs is the
         // union of the label of all its inputs; we can't do anything fancy
 
+        captures::apply_capture_mutations(ctx, &func);
+
+        // note that this case is still possible even if func is a closure,
+        // since e.g. closures can be assigned to previously declared (but not
+        // initialized) variables in an effort to make them self-recursive, as
+        // the whole point of closure capturing is that outer symbols are only
+        // really "evaluated" when the closure is invoked
+
         let bt = LabelBacktrace::fold(
-            arg_backtraces.iter().flatten().chain(func.backtrace()),
+            with_backtraces
+                .iter()
+                .flat_map(|(_, bt)| bt)
+                .chain(func.backtrace()),
             LabelBacktraceKind::BlackboxCall,
             None,
             call_location.clone(),
@@ -483,15 +501,25 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         None
     };
 
-    handle_deferred_checks(ctx, &func, &ids, &arg_backtraces, &node.location);
+    // reshape this as a ref more friendly for calling downstream functions
+    let with_backtraces: Vec<_> = with_backtraces
+        .iter()
+        .map(|(v, bt)| ((*v).clone(), bt.as_ref()))
+        .collect();
+
+    captures::apply_capture_mutations(ctx, &func);
+
+    handle_deferred_checks(ctx, &func, &ids, &with_backtraces, &node.location);
+
+    let receiver_ref = receiver.as_ref().map(Option::as_ref);
 
     let mut result = calculate_call_result(
         ctx,
         &func,
-        receiver.as_ref().map(Option::as_ref),
+        receiver_ref,
         &ids,
         outcome,
-        &arg_backtraces,
+        &with_backtraces,
         &node.location,
     );
 
@@ -528,10 +556,11 @@ fn handle_deferred_checks<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     ids: &[(Option<&Span<'a>>, bool)],
-    args: &[Option<LabelBacktrace<'a>>],
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
 ) {
     let mut deferred_checks = Vec::from(func.deferred_checks());
+    let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
 
     for (index, (id, variadic)) in ids.iter().copied().enumerate() {
         let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
@@ -542,17 +571,10 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
-    for (symbol_declaration, fake_index) in func.captures() {
-        let symbol = ctx
-            .symtab()
-            .get_symbol_by_declaration(symbol_declaration)
-            .unwrap();
-
-        let concrete = symbol.borrow().value().get().backtrace();
-
+    for (fake_index, concrete) in &capture_concretes {
         deferred_checks = deferred_checks
             .iter()
-            .filter_map(|check| check.realize(func.r#ref(), Some(fake_index), concrete.as_ref()))
+            .filter_map(|check| check.realize(func.r#ref(), Some(*fake_index), concrete.as_ref()))
             .collect();
     }
 
@@ -580,10 +602,11 @@ fn calculate_call_result<'a>(
     receiver: Option<Option<&LabelBacktrace<'a>>>,
     ids: &[(Option<&Span<'a>>, bool)],
     outcome: &Vec<ValueRef<'a>>,
-    args: &[Option<LabelBacktrace<'a>>],
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
 ) -> Vec<ValueRef<'a>> {
     let mut result = vec![];
+    let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
 
     'components: for component in outcome {
         let mut realized = component.clone();
@@ -620,7 +643,7 @@ fn calculate_call_result<'a>(
             realized = realized.realize(func.r#ref(), Some(index), concrete.as_ref());
         }
 
-        for (symbol_declaration, fake_index) in func.captures() {
+        for (fake_index, concrete) in &capture_concretes {
             if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 
@@ -629,14 +652,7 @@ fn calculate_call_result<'a>(
                 continue 'components;
             }
 
-            let symbol = ctx
-                .symtab()
-                .get_symbol_by_declaration(symbol_declaration)
-                .unwrap();
-
-            let concrete = symbol.borrow().value().get().backtrace();
-
-            realized = realized.realize(func.r#ref(), Some(fake_index), concrete.as_ref());
+            realized = realized.realize(func.r#ref(), Some(*fake_index), concrete.as_ref());
         }
 
         result.push(realized);
@@ -650,19 +666,19 @@ fn calculate_concrete_backtrace<'a>(
     index: usize,
     id: Option<&Span<'a>>,
     variadic: bool,
-    args: &[Option<LabelBacktrace<'a>>],
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
 ) -> Option<LabelBacktrace<'a>> {
     if variadic {
-        let children: Vec<_> = args[index..].iter().flatten().cloned().collect();
-
         LabelBacktrace::fold(
-            &children,
+            args[index..].iter().flat_map(|(_, bt)| bt).copied(),
             LabelBacktraceKind::FunctionVariadicAggregation,
             id.map(Span::content),
             ctx.pin(location.clone()),
         )
     } else {
-        args.get(index).and_then(Option::clone)
+        let value = &args[index].0;
+
+        captures::derive_hybrid_complex_aware_backtrace(ctx, value)
     }
 }

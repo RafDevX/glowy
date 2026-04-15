@@ -133,7 +133,7 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
-    pub fn select_next_child_scope(&mut self) -> ScopeTreeRef<'a> {
+    pub fn select_next_child_scope(&mut self) {
         let Some(cursor) = self.current_cursor.last_mut() else {
             // the cursor vector is empty, which can only happen if
             // `enter_package` was never called, which should not be possible
@@ -158,8 +158,6 @@ impl<'a> SymbolTable<'a> {
 
         self.current_scope = Rc::clone(&child);
         self.current_cursor.push(0);
-
-        ScopeTreeRef(child)
     }
 
     pub fn select_parent_scope(&mut self) {
@@ -174,8 +172,12 @@ impl<'a> SymbolTable<'a> {
         self.current_scope.borrow().parent.clone()
     }
 
-    pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
-        let mut checking = Some(Rc::clone(&self.current_scope));
+    fn get_symbol_from_scope_chain(
+        &self,
+        upwards_from: Option<ScopeRef<'a>>,
+        name: &str,
+    ) -> Option<SymbolRef<'a>> {
+        let mut checking = upwards_from;
 
         while let Some(scope) = &checking {
             let borrowed = scope.borrow();
@@ -201,6 +203,14 @@ impl<'a> SymbolTable<'a> {
         }
 
         self.universe_scope.get_local_symbol(name)
+    }
+
+    pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
+        Self::get_symbol_from_scope_chain(self, Some(Rc::clone(&self.current_scope)), name)
+    }
+
+    pub fn get_symbol_above_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
+        Self::get_symbol_from_scope_chain(self, self.get_parent_scope(), name)
     }
 
     pub fn get_qualified_symbol(
@@ -559,16 +569,6 @@ impl<'a> Scope<'a> {
         self.symbols.values().any(|s| Rc::ptr_eq(s, symbol))
     }
 
-    fn tree_contains_symbol(&self, symbol: &SymbolRef<'a>) -> bool {
-        if self.contains_local_symbol(symbol) {
-            true
-        } else {
-            self.children
-                .iter()
-                .any(|child| child.borrow().tree_contains_symbol(symbol))
-        }
-    }
-
     fn get_symbol_by_declaration(&self, declaration: &Pinned<Span<'a>>) -> Option<SymbolRef<'a>> {
         if let Some(local) = self.symbols.get(declaration.content()) {
             if local.borrow().declared_name() == declaration {
@@ -644,22 +644,6 @@ impl fmt::Debug for Scope<'_> {
         } = self;
 
         fmt::Debug::fmt(&Scope { symbols, children }, f)
-    }
-}
-
-/// Represents a Scope and all of its descendants.
-// this is essentially just so we don't have to make ScopeRef public and instead
-// just have here whatever methods we truly want to have publicly accessible
-#[derive(Clone)]
-pub struct ScopeTreeRef<'a>(ScopeRef<'a>);
-
-impl<'a> ScopeTreeRef<'a> {
-    /// Returns whether a Symbol can be found anywhere within a Scope tree.
-    ///
-    /// This is true either if the root Scope contains the Symbol locally, or if
-    /// any of its descendant Scopes contain it.
-    pub fn contains_symbol(&self, symbol: &SymbolRef<'a>) -> bool {
-        self.0.borrow().tree_contains_symbol(symbol)
     }
 }
 
