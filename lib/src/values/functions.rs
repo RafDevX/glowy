@@ -31,7 +31,7 @@ pub struct FunctionValue<'a> {
     // capture so we can hook into the existing parameter realization system
     // even for closure capture resolution whenever the function literal is
     // actually invoked) -- map is empty if this is not a function literal
-    captures: HashMap<Pinned<Span<'a>>, CaptureBinding<'a>>,
+    captures: HashMap<Pinned<'a, Span<'a>>, CaptureBinding<'a>>,
     // how many times this function has been called
     // (must be a shared ref, rather than a raw usize, since otherwise mutation
     // would not work as we'd only modify derived operand-name-access tainted
@@ -143,21 +143,21 @@ impl<'a> FunctionValue<'a> {
         Some(count)
     }
 
-    pub fn captures(&self) -> impl Iterator<Item = (&Pinned<Span<'a>>, &CaptureBinding<'a>)> {
-        self.captures.iter()
+    pub fn captures(&self) -> impl Iterator<Item = (Pinned<'a, Span<'a>>, &CaptureBinding<'a>)> {
+        self.captures.iter().map(|(k, v)| (*k, v))
     }
 
     pub fn captures_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&Pinned<Span<'a>>, &mut CaptureBinding<'a>)> {
-        self.captures.iter_mut()
+    ) -> impl Iterator<Item = (Pinned<'a, Span<'a>>, &mut CaptureBinding<'a>)> {
+        self.captures.iter_mut().map(|(k, v)| (*k, v))
     }
 
     #[must_use]
     pub fn register_capture(
         &mut self,
-        outer_decl: Cow<Pinned<Span<'a>>>,
-        local_decl: Pinned<Span<'a>>,
+        outer_decl: Pinned<'a, Span<'a>>,
+        local_decl: Pinned<'a, Span<'a>>,
     ) -> usize {
         // cannot use HashMap's Entry API because we need to borrow self for
         // calculations as the same time it'd be immutably borrowed for Entry
@@ -170,13 +170,8 @@ impl<'a> FunctionValue<'a> {
             // (i.e., the captured symbol)
             let fake_param_index = self.parameter_count().unwrap_or(0) + self.captures.len();
 
-            // self.captures
-            //     .entry(outer_decl.into_owned())
-            //     .insert_entry(CaptureBinding::new(fake_param_index, local_decl))
-            //     .get()
-
             self.captures.insert(
-                outer_decl.into_owned(),
+                outer_decl,
                 CaptureBinding::new(fake_param_index, local_decl),
             );
 
@@ -194,7 +189,7 @@ impl<'a> FunctionValue<'a> {
 }
 
 impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         self.backtrace
             .clone()
             .map(|bt| (bt.symbol(), bt)) // thanks borrow checker, very cool
@@ -243,7 +238,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             .iter()
             .map(|(outer_decl, binding)| {
                 (
-                    outer_decl.clone(),
+                    *outer_decl,
                     binding.realize(from_func, from_index, concrete),
                 )
             })
@@ -264,7 +259,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         let backtrace = self.backtrace.nest_backtrace(
@@ -287,7 +282,10 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
 }
 
 impl<'a> Upgrade<'a> for FunctionValue<'a> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, _location: Cow<Pinned<Location>>) -> Self {
+    fn upgrade(
+        backtrace: Option<LabelBacktrace<'a>>,
+        _location: Cow<Pinned<'a, Location>>,
+    ) -> Self {
         Self::new_unknown(backtrace)
     }
 }
@@ -323,9 +321,9 @@ pub enum FunctionRef<'a> {
     ///
     /// This is a unique identifier because of the embedded location information
     /// offered by [`Pinned`] and [`Span`].
-    Named(Pinned<Span<'a>>),
+    Named(Pinned<'a, Span<'a>>),
     /// An anonymous function literal.
-    Anonymous(Pinned<Location>),
+    Anonymous(Pinned<'a, Location>),
     /// A built-in function provided by the language or the Go standard library.
     BuiltIn(&'static str),
     /// An inferred function for which no declaration exists/was found.
@@ -425,7 +423,7 @@ pub struct CaptureBinding<'a> {
     fake_param_index: usize,
     // fake local symbol declaration created within the closure scope for this
     // capture (with a placeholder synthetic tag as its label)
-    local_decl: Pinned<Span<'a>>,
+    local_decl: Pinned<'a, Span<'a>>,
     // currently best known hybrid backtrace for this capture's outer symbol,
     // used as a fallback when fetching the outer symbol's current value yields
     // a partially or fully synthetic label -- however, there is a risk that
@@ -442,7 +440,7 @@ pub struct CaptureBinding<'a> {
 }
 
 impl<'a> CaptureBinding<'a> {
-    fn new(fake_param_index: usize, local_decl: Pinned<Span<'a>>) -> Self {
+    fn new(fake_param_index: usize, local_decl: Pinned<'a, Span<'a>>) -> Self {
         Self {
             fake_param_index,
             local_decl,
@@ -454,8 +452,8 @@ impl<'a> CaptureBinding<'a> {
         self.fake_param_index
     }
 
-    pub fn local_decl(&self) -> &Pinned<Span<'a>> {
-        &self.local_decl
+    pub fn local_decl(&self) -> Pinned<'a, Span<'a>> {
+        self.local_decl
     }
 
     #[expect(

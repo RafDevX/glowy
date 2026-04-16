@@ -35,7 +35,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn new(
         r#const: HashMap<K, ValueRef<'a>>,
         others: impl IntoIterator<Item = ValueRef<'a>>,
-        location: Pinned<Location>,
+        location: Pinned<'a, Location>,
     ) -> Self {
         let children: Vec<_> = others
             .into_iter()
@@ -57,7 +57,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         self.r#dyn = None;
     }
 
-    pub fn get_const(&self, key: &K, at_location: Pinned<Location>) -> ValueRef<'a> {
+    pub fn get_const(&self, key: &K, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(key).cloned() {
             Some(value) => value,
             None => ValueRef::new_bottom(at_location.clone()),
@@ -73,7 +73,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             .with_location(at_location)
     }
 
-    pub fn get_dyn(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+    pub fn get_dyn(&self, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         // since we don't know the concrete key, we must take the union of all
         // possibilities, i.e., all entries of const
 
@@ -91,7 +91,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     }
 
     // never overwrites
-    pub fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
+    pub fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.r#dyn = LabelBacktrace::combine_options(
             self.r#dyn.clone(),
             value.backtrace(),
@@ -106,7 +106,7 @@ impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
         &self,
         low: Option<&K>,
         high: Option<&K>,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> Option<LabelBacktrace<'a>> {
         let children: Vec<_> = self
             .r#const
@@ -121,13 +121,13 @@ impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
         LabelBacktrace::fold(&children, LabelBacktraceKind::Expression, None, at_location)
     }
 
-    pub fn slice_dyn(&self, at_location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    pub fn slice_dyn(&self, at_location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         self.backtrace_at_location(at_location)
     }
 }
 
 impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         let children: Vec<_> = self
             .r#const
             .values()
@@ -180,7 +180,7 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         let r#const = self.r#const.clone();
@@ -193,12 +193,12 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
     }
 }
 
-impl<K: Eq + Hash + Clone> Mergeable for CompositeValue<'_, K> {
+impl<'a, K: Eq + Hash + Clone> Mergeable<'a> for CompositeValue<'a, K> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
         let mut r#const = self.r#const.clone();
 
@@ -228,7 +228,10 @@ impl<K: Eq + Hash + Clone> Mergeable for CompositeValue<'_, K> {
 }
 
 impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, _location: Cow<Pinned<Location>>) -> Self {
+    fn upgrade(
+        backtrace: Option<LabelBacktrace<'a>>,
+        _location: Cow<Pinned<'a, Location>>,
+    ) -> Self {
         Self::empty(backtrace)
     }
 }
@@ -257,24 +260,24 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
     fn get_at_known_key(
         &self,
         key: &SimpleConstValue,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> ValueRef<'a>;
 
-    fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a>;
+    fn get_at_unknown_key(&self, at_location: Pinned<'a, Location>) -> ValueRef<'a>;
 
     fn set_at_known_key(
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     );
 
-    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>);
+    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>);
 
     fn get_at_key(
         &self,
         key: Option<&SimpleConstValue>,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> ValueRef<'a> {
         if let Some(key) = key {
             self.get_at_known_key(key, at_location)
@@ -287,7 +290,7 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
         &mut self,
         key: Option<SimpleConstValue>,
         value: ValueRef<'a>,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) {
         if let Some(key) = key {
             self.set_at_known_key(key, value, at_location);
@@ -302,12 +305,12 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
     fn get_at_known_key(
         &self,
         key: &SimpleConstValue,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> ValueRef<'a> {
         self.get_const(key, at_location)
     }
 
-    fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_at_unknown_key(&self, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         self.get_dyn(at_location)
     }
 
@@ -315,12 +318,12 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
-        _at_location: Pinned<Location>,
+        _at_location: Pinned<'a, Location>,
     ) {
         self.set_const(key, value);
     }
 
-    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
+    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.set_dyn(value, at_location);
     }
 }
@@ -330,7 +333,7 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
     fn get_at_known_key(
         &self,
         key: &SimpleConstValue,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> ValueRef<'a> {
         if let SimpleConstValue::Integer(key) = key {
             self.get_const(key, at_location)
@@ -339,7 +342,7 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         }
     }
 
-    fn get_at_unknown_key(&self, at_location: Pinned<Location>) -> ValueRef<'a> {
+    fn get_at_unknown_key(&self, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         self.get_dyn(at_location)
     }
 
@@ -347,7 +350,7 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         &mut self,
         key: SimpleConstValue,
         value: ValueRef<'a>,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) {
         if let SimpleConstValue::Integer(key) = key {
             self.set_const(key, value);
@@ -356,7 +359,7 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
         }
     }
 
-    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<Location>) {
+    fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.set_dyn(value, at_location);
     }
 }

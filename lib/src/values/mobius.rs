@@ -36,7 +36,7 @@ impl<'a> MobiusValue<'a> {
 }
 
 impl<'a> BacktraceContainer<'a> for MobiusValue<'a> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         self.0.backtrace_at_location(location)
     }
 
@@ -63,7 +63,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         Self::new(self.0.nest_backtrace(
@@ -75,19 +75,19 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
     }
 }
 
-impl Mergeable for MobiusValue<'_> {
+impl<'a> Mergeable<'a> for MobiusValue<'a> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
         Self::new(self.0.merge_with(&other.0, with_kind, at_location))
     }
 }
 
 impl<'a> Upgrade<'a> for MobiusValue<'a> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<'a, Location>>) -> Self {
         let inner = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.into_owned());
 
         Self::new(inner)

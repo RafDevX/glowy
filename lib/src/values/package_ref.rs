@@ -26,7 +26,7 @@ impl<'a> PackageRefValue<'a> {
 }
 
 impl<'a> BacktraceContainer<'a> for PackageRefValue<'a> {
-    fn backtrace_at_location(&self, _location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, _location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         None
     }
 
@@ -53,7 +53,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
         &self,
         _parent_kind: LabelBacktraceKind,
         _parent_symbol: Option<&'a str>,
-        _parent_location: Pinned<Location>,
+        _parent_location: Pinned<'a, Location>,
         _extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         self.clone()

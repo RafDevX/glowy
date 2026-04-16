@@ -145,10 +145,7 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 
-use std::{
-    cmp, fmt,
-    path::{Path, PathBuf},
-};
+use std::{cmp, fmt, path::Path};
 
 pub use analyzer::Analyzer;
 pub use files::SourceFile;
@@ -180,16 +177,16 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 /// file some content is located, and this struct complements it by further
 /// scoping its inner instance to a specific file (by virtual path, rooted in
 /// the module base).
-#[derive(Clone, Debug, PartialEq, Hash)]
-pub struct Pinned<T: Clone + fmt::Debug + PartialEq> {
-    virtual_file_path: PathBuf,
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+pub struct Pinned<'a, T: Clone + fmt::Debug + PartialEq> {
+    virtual_file_path: &'a Path,
     inner: T,
 }
 
-impl<T: Eq + Clone + fmt::Debug> Eq for Pinned<T> {}
+impl<T: Eq + Clone + fmt::Debug> Eq for Pinned<'_, T> {}
 
-impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
-    fn new(virtual_file_path: PathBuf, inner: T) -> Self {
+impl<'a, T: Clone + fmt::Debug + PartialEq> Pinned<'a, T> {
+    fn new(virtual_file_path: &'a Path, inner: T) -> Self {
         Self {
             virtual_file_path,
             inner,
@@ -201,7 +198,7 @@ impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
     /// The returned [`Path`] is always rooted and bound to the Go module base.
     #[inline]
     pub fn file(&self) -> &Path {
-        &self.virtual_file_path
+        self.virtual_file_path
     }
 
     /// Returns the underlying intra-file information.
@@ -216,7 +213,7 @@ impl<T: Clone + fmt::Debug + PartialEq> Pinned<T> {
     }
 }
 
-impl<'a> Pinned<Span<'a>> {
+impl<'p, 'a> Pinned<'p, Span<'a>> {
     /// Returns the underlying source code snippet.
     ///
     /// This method is simply a convenient short-hand for invoking
@@ -231,35 +228,35 @@ impl<'a> Pinned<Span<'a>> {
     /// Returns a new instance qualifying the underlying [`Span`]'s location.
     ///
     /// This method uses [`Span::location`] to construct a new [`Pinned`] with
-    /// inner type [`Location`]. The same virtual file path is used (cloned).
+    /// inner type [`Location`]. The same virtual file path is used (copied).
     #[must_use]
     #[inline]
-    pub fn pinned_location(&self) -> Pinned<Location> {
+    pub fn pinned_location(&self) -> Pinned<'p, Location> {
         Pinned {
-            virtual_file_path: self.virtual_file_path.clone(),
+            virtual_file_path: self.virtual_file_path,
             inner: self.inner().location(),
         }
     }
 }
 
-impl Ord for Pinned<Span<'_>> {
+impl Ord for Pinned<'_, Span<'_>> {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.virtual_file_path
-            .cmp(&other.virtual_file_path)
+            .cmp(other.virtual_file_path)
             .then(self.inner().location().cmp(other.inner().location()))
             .then(self.content().cmp(other.content()))
     }
 }
 
-impl PartialOrd for Pinned<Span<'_>> {
+impl PartialOrd for Pinned<'_, Span<'_>> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialOrd for Pinned<Location> {
+impl PartialOrd for Pinned<'_, Location> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         if self.virtual_file_path != other.virtual_file_path {

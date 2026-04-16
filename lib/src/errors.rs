@@ -112,7 +112,7 @@ pub enum AnalysisErrorKind<'a> {
     /// This file is thus skipped from further analysis.
     DistinctPackageName {
         /// The previously declared package name.
-        previous: Pinned<Span<'a>>,
+        previous: Pinned<'a, Span<'a>>,
         /// The disparate package clause identifier.
         found: Span<'a>,
     },
@@ -143,7 +143,7 @@ pub enum AnalysisErrorKind<'a> {
     /// declaration was valid, but the resulting analysis may be incorrect.
     IllegalRedeclaration {
         /// The site of the previous declaration with the same name.
-        previous: Pinned<Span<'a>>,
+        previous: Pinned<'a, Span<'a>>,
         /// The matching identifier causing an illegal attempt at redeclaration.
         found: Span<'a>,
     },

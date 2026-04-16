@@ -36,7 +36,7 @@ impl<'a> ExpandableValue<'a> {
 }
 
 impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         let backtraces: Vec<LabelBacktrace<'a>> = iter::once(&self.primary)
             .chain(self.secondary.iter())
             .filter_map(ValueRef::backtrace)
@@ -85,7 +85,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         let primary = self.primary.nest_backtrace(
@@ -112,12 +112,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
     }
 }
 
-impl Mergeable for ExpandableValue<'_> {
+impl<'a> Mergeable<'a> for ExpandableValue<'a> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
         let primary = self
             .primary
@@ -142,7 +142,7 @@ impl Mergeable for ExpandableValue<'_> {
 }
 
 impl<'a> Upgrade<'a> for ExpandableValue<'a> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<'a, Location>>) -> Self {
         let primary = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.into_owned());
 
         Self::new(primary, Vec::new())

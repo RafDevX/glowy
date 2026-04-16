@@ -460,7 +460,7 @@ pub struct LabelBacktrace<'a> {
     /// Name of symbol with this label, if any/applicable.
     symbol: Option<&'a str>,
     /// Where this operation took place.
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
     /// Other backtraces through which this label is derived via propagation.
     children: Vec<Self>,
 }
@@ -474,7 +474,7 @@ impl<'a> LabelBacktrace<'a> {
         kind: LabelBacktraceKind,
         label: Label<'a>,
         symbol: Option<&'a str>,
-        location: Pinned<Location>,
+        location: Pinned<'a, Location>,
     ) -> Self {
         Self {
             kind,
@@ -490,7 +490,7 @@ impl<'a> LabelBacktrace<'a> {
         kind: LabelBacktraceKind,
         label: Label<'a>,
         symbol: Option<&'a str>,
-        location: Pinned<Location>,
+        location: Pinned<'a, Location>,
         children: impl IntoIterator<Item = &'b Self>,
     ) -> Option<Self>
     where
@@ -540,7 +540,7 @@ impl<'a> LabelBacktrace<'a> {
         children: impl IntoIterator<Item = &'b Self> + Clone,
         with_kind: LabelBacktraceKind,
         with_symbol: Option<&'a str>,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> Option<Self>
     where
         'a: 'b,
@@ -571,7 +571,7 @@ impl<'a> LabelBacktrace<'a> {
         self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
     ) -> Self {
         // note that we're not using Self::new to avoid cloning self and to skip
         // unnecessary checks / label optimizations -- we already know this
@@ -591,7 +591,7 @@ impl<'a> LabelBacktrace<'a> {
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Pinned<Location>,
+        at_location: Pinned<'a, Location>,
     ) -> Self {
         Self::new(
             with_kind,
@@ -608,7 +608,7 @@ impl<'a> LabelBacktrace<'a> {
         a: Option<Self>,
         b: Option<Self>,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Option<Self> {
         match (&a, &b) {
             (None, None) => None,
@@ -710,7 +710,7 @@ impl<'a> LabelBacktrace<'a> {
     /// Returns the location where the operation took place.
     #[must_use]
     #[inline]
-    pub fn location(&self) -> &Pinned<Location> {
+    pub fn location(&self) -> &Pinned<'a, Location> {
         &self.location
     }
 

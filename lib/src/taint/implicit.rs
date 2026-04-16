@@ -210,7 +210,7 @@ fn visit_for_range<'a>(
 fn get_for_range_values<'a>(
     ctx: &mut AnalysisContext<'a>,
     range_expr: &ExprNode<'a>,
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
 ) -> Vec<ValueRef<'a>> {
     // visit range_expr, even if just to trigger side effects
     let value = exprs::visit_single_expr(ctx, range_expr);

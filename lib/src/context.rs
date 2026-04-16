@@ -234,11 +234,10 @@ impl<'a> AnalysisContext<'a> {
         }
     }
 
-    pub fn pin<T: Clone + fmt::Debug + PartialEq>(&self, inner: T) -> Pinned<T> {
+    pub fn pin<T: Clone + fmt::Debug + PartialEq>(&self, inner: T) -> Pinned<'a, T> {
         let file = self
             .current_file
-            .expect("some file should be under analysis")
-            .to_owned();
+            .expect("some file should be under analysis");
 
         Pinned::new(file, inner)
     }
@@ -250,10 +249,10 @@ impl<'a> AnalysisContext<'a> {
     /// some multi-variable short declarations, under some circumstances, as
     /// defined in the Go spec).
     pub fn declare_new_symbol(&mut self, symbol: SymbolRef<'a>) {
-        let name = symbol.borrow().declared_name().clone();
+        let name = symbol.borrow().declared_name();
 
         if let Some(existing) = self.symbol_table.declare_new_symbol(name.content(), symbol) {
-            if *existing.borrow().declared_name() == name {
+            if existing.borrow().declared_name() == name {
                 // we do multiple passes over the source code, so it's not an
                 // error if a previous declaration is at the same location as
                 // this "new" one (i.e., if they're actually the same)
@@ -267,7 +266,7 @@ impl<'a> AnalysisContext<'a> {
             }
 
             self.report_error(AnalysisErrorKind::IllegalRedeclaration {
-                previous: existing.borrow().declared_name().clone(),
+                previous: existing.borrow().declared_name(),
                 found: *name.inner(),
             });
         }
@@ -325,7 +324,7 @@ struct DeferredBranchBacktrace<'a> {
     backtrace: LabelBacktrace<'a>,
     until: DeferTarget<'a>,
     at_depth: u8,
-    because: Pinned<Location>,
+    because: Pinned<'a, Location>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

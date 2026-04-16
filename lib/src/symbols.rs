@@ -41,7 +41,7 @@
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
 
-use std::{cell::RefCell, collections::HashMap, fmt, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt, path::Path, rc::Rc};
 
 use parser::Span;
 
@@ -95,9 +95,9 @@ impl<'a> SymbolTable<'a> {
     /// This function should be called upon starting analysis of each file.
     pub fn enter_package(
         &mut self,
-        name: Pinned<Span<'a>>,
+        name: Pinned<'a, Span<'a>>,
         path: FullPackagePath,
-    ) -> &Pinned<Span<'a>> {
+    ) -> Pinned<'a, Span<'a>> {
         // note that we cannot automatically derive the name from the path!
         // (must be taken from package clause, may differ from dirname)
 
@@ -116,7 +116,7 @@ impl<'a> SymbolTable<'a> {
         self.current_scope = Rc::clone(&envelope.scope);
         self.current_cursor = vec![envelope.next_child_index];
 
-        &envelope.package_name
+        envelope.package_name
     }
 
     pub fn save_package_progress(&mut self, path: &FullPackagePath) {
@@ -238,7 +238,7 @@ impl<'a> SymbolTable<'a> {
 
     pub fn get_symbol_by_declaration(
         &self,
-        declaration: &Pinned<Span<'a>>,
+        declaration: Pinned<'a, Span<'a>>,
     ) -> Option<SymbolRef<'a>> {
         for envelope in self.package_scopes.values().flatten() {
             if let Some(symbol) = envelope
@@ -411,7 +411,7 @@ pub enum QualifiedSymbolResolutionResult<'a> {
 #[derive(Debug)]
 struct PackageScopeEnvelope<'a> {
     /// Package name (!= package path's last component).
-    package_name: Pinned<Span<'a>>,
+    package_name: Pinned<'a, Span<'a>>,
     /// The package's root scope.
     scope: ScopeRef<'a>,
     /// Next child to be selected, for cross-file synergy/allow resuming count.
@@ -419,7 +419,7 @@ struct PackageScopeEnvelope<'a> {
 }
 
 impl<'a> PackageScopeEnvelope<'a> {
-    fn new(package_name: Pinned<Span<'a>>) -> Self {
+    fn new(package_name: Pinned<'a, Span<'a>>) -> Self {
         let scope = Scope::new_root_ref();
 
         Self {
@@ -475,7 +475,7 @@ impl<'a> Scope<'a> {
         // special case (should only happen for predeclared)
         // [note: cannot be `const` because MSRV would need to be raised to 1.91
         // just to support this -- not worth it]
-        let predeclared_location = Pinned::new(PathBuf::new(), 0..1);
+        let predeclared_location = Pinned::new(Path::new(""), 0..1);
 
         macro_rules! predeclared_constant {
             ($id:expr, $value:expr) => {
@@ -567,7 +567,10 @@ impl<'a> Scope<'a> {
         self.symbols.values().any(|s| Rc::ptr_eq(s, symbol))
     }
 
-    fn get_symbol_by_declaration(&self, declaration: &Pinned<Span<'a>>) -> Option<SymbolRef<'a>> {
+    fn get_symbol_by_declaration(
+        &self,
+        declaration: Pinned<'a, Span<'a>>,
+    ) -> Option<SymbolRef<'a>> {
         if let Some(local) = self.symbols.get(declaration.content())
             && local.borrow().declared_name() == declaration
         {
@@ -654,7 +657,7 @@ pub type SymbolRef<'a> = Rc<RefCell<Symbol<'a>>>;
 #[derive(Debug)]
 pub struct Symbol<'a> {
     /// Original symbol name within symbol declaration.
-    declared_name: Pinned<Span<'a>>,
+    declared_name: Pinned<'a, Span<'a>>,
     /// Whether the symbol can be mutated later (e.g., `var`) or not (`const`).
     mutable: bool,
     /// This symbol's current value, including its accumulated security label.
@@ -662,7 +665,7 @@ pub struct Symbol<'a> {
 }
 
 impl<'a> Symbol<'a> {
-    fn new(declared_name: Pinned<Span<'a>>, mutable: bool, value: ValueRef<'a>) -> Self {
+    fn new(declared_name: Pinned<'a, Span<'a>>, mutable: bool, value: ValueRef<'a>) -> Self {
         Self {
             declared_name,
             mutable,
@@ -671,7 +674,7 @@ impl<'a> Symbol<'a> {
     }
 
     pub fn new_ref(
-        declared_name: Pinned<Span<'a>>,
+        declared_name: Pinned<'a, Span<'a>>,
         mutable: bool,
         value: ValueRef<'a>,
     ) -> SymbolRef<'a> {
@@ -681,14 +684,14 @@ impl<'a> Symbol<'a> {
     fn new_predeclared_ref(name: &'a str, value: ValueRef<'a>) -> SymbolRef<'a> {
         Self::new_ref(
             // vv not very pretty, but it should never matter anyway
-            Pinned::new(PathBuf::new(), Span::new(name, 0, 0)),
+            Pinned::new(Path::new(""), Span::new(name, 0, 0)),
             false,
             value,
         )
     }
 
-    pub fn declared_name(&self) -> &Pinned<Span<'a>> {
-        &self.declared_name
+    pub fn declared_name(&self) -> Pinned<'a, Span<'a>> {
+        self.declared_name
     }
 
     pub fn mutable(&self) -> bool {

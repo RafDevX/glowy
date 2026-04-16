@@ -27,7 +27,7 @@ pub fn visit_source_file<'a>(
         // another file has previously declared a different package name for
         // the same package path (which is invalid, so we report the error)
 
-        let previous = original_name.clone();
+        let previous = original_name;
 
         ctx.report_error(AnalysisErrorKind::DistinctPackageName {
             previous,

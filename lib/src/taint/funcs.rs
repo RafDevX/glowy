@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter, path::PathBuf};
+use std::{borrow::Cow, iter, path::Path};
 
 use parser::{
     Location, Span,
@@ -27,7 +27,7 @@ mod captures;
 fn visit_function_def<'a>(
     ctx: &mut AnalysisContext<'a>,
     r#ref: &FunctionRef<'a>,
-    decl_symbol: Option<Pinned<Span<'a>>>,
+    decl_symbol: Option<Pinned<'a, Span<'a>>>,
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
     body: &BlockNode<'a>,
@@ -44,7 +44,7 @@ fn visit_function_def<'a>(
         FunctionRef::BuiltIn(_) | FunctionRef::BlackboxInference(_) => {
             decl_symbol.as_ref().map_or_else(
                 // FIXME: fake location
-                || Pinned::new(PathBuf::new(), 0..1),
+                || Pinned::new(Path::new(""), 0..1),
                 Pinned::pinned_location,
             )
         }
@@ -147,11 +147,9 @@ fn visit_function_def<'a>(
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
     let func_name = ctx.pin(node.name);
 
-    let r#ref = FunctionRef::Named(func_name.clone());
-
     visit_function_def(
         ctx,
-        &r#ref,
+        &FunctionRef::Named(func_name),
         Some(func_name),
         &node.signature,
         node.receiver.as_ref(),

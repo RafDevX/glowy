@@ -49,7 +49,7 @@ pub fn register_closure_captures<'a>(
                 continue;
             }
 
-            borrowed.declared_name().clone()
+            borrowed.declared_name()
         };
 
         let Some(mut func) = value.as_function_mut() else {
@@ -61,7 +61,7 @@ pub fn register_closure_captures<'a>(
         // closures in the chain would clash (would have the same key)
         let local_decl = ctx.pin(Span::new(capture, closure_location.inner().start, 1));
 
-        let index = func.register_capture(Cow::Borrowed(&outer_decl), local_decl.clone());
+        let index = func.register_capture(outer_decl, local_decl);
 
         drop(func);
 
@@ -211,7 +211,7 @@ pub fn derive_best_backtraces_for_captures<'a>(
 
 fn derive_concrete_backtrace_or_fallback<'a>(
     ctx: &AnalysisContext<'a>,
-    outer_decl: &Pinned<Span<'a>>,
+    outer_decl: Pinned<'a, Span<'a>>,
     binding: &CaptureBinding<'a>,
 ) -> Option<LabelBacktrace<'a>> {
     let symbol = ctx.symtab().get_symbol_by_declaration(outer_decl).unwrap();
@@ -273,7 +273,7 @@ fn derive_hybrid_symbol_backtrace<'a>(
     symbol: &SymbolRef<'a>,
 ) -> Option<LabelBacktrace<'a>> {
     let borrowed = symbol.borrow();
-    let declared_name = borrowed.declared_name().clone();
+    let declared_name = borrowed.declared_name();
     let value = borrowed.value().get();
     drop(borrowed);
 
@@ -338,7 +338,7 @@ fn derive_hybrid_symbol_backtrace<'a>(
 fn derive_hybrid_function_outcome_backtrace<'a>(
     func: &FunctionValue<'a>,
     symbol: Option<&'a str>,
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
 ) -> Option<LabelBacktrace<'a>> {
     let children: Vec<_> = func
         .outcome()?

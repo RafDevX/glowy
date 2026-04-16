@@ -36,18 +36,18 @@ mod shapes;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ValueRef<'a> {
     value: Rc<RefCell<Value<'a>>>,
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
 }
 
 impl<'a> ValueRef<'a> {
-    pub fn new(value: Value<'a>, location: Pinned<Location>) -> Self {
+    pub fn new(value: Value<'a>, location: Pinned<'a, Location>) -> Self {
         Self {
             value: Rc::new(RefCell::new(value)),
             location,
         }
     }
 
-    pub fn new_bottom(location: Pinned<Location>) -> Self {
+    pub fn new_bottom(location: Pinned<'a, Location>) -> Self {
         Self::new(Value::Simple(None), location)
     }
 
@@ -56,7 +56,7 @@ impl<'a> ValueRef<'a> {
         bottom_at: F,
     ) -> Self
     where
-        F: FnOnce() -> Pinned<Location>,
+        F: FnOnce() -> Pinned<'a, Location>,
     {
         if let Some(backtrace) = backtrace {
             Self::from(backtrace)
@@ -89,14 +89,14 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub fn with_location(&self, location: Pinned<Location>) -> Self {
+    pub fn with_location(&self, location: Pinned<'a, Location>) -> Self {
         Self {
             value: Rc::clone(&self.value),
             location,
         }
     }
 
-    pub fn location(&self) -> &Pinned<Location> {
+    pub fn location(&self) -> &Pinned<'a, Location> {
         &self.location
     }
 
@@ -117,7 +117,7 @@ impl<'a> ValueRef<'a> {
     /// Downgrade a complex shape into a [`Value::Simple`] of same backtrace.
     pub fn downgrade<F>(&self, location_if_bottom: F) -> Self
     where
-        F: FnOnce() -> Pinned<Location>,
+        F: FnOnce() -> Pinned<'a, Location>,
     {
         Self::from_backtrace_or_bottom_at(self.backtrace(), location_if_bottom)
     }
@@ -278,7 +278,7 @@ impl<'a> From<LabelBacktrace<'a>> for ValueRef<'a> {
 }
 
 pub trait BacktraceContainer<'a> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>>;
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>>;
 
     fn is_bottom(&self) -> bool;
 
@@ -290,7 +290,7 @@ pub trait BacktraceContainer<'a> {
 }
 
 impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         self.with_location(location).backtrace()
     }
 
@@ -317,7 +317,7 @@ pub trait SelfAwareBacktraceContainer<'a> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self;
     // ^ ideally should be Item = &'b LabelBacktrace<'a>, but borrow checker
@@ -345,7 +345,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         let borrowed = self.value.borrow();
@@ -368,21 +368,21 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
 // can't be part of SelfAwareBacktraceContainer because some sub-containers
 // might not want to implement this, such as PackageRefValue (where this would
 // make absolutely no sense and even be semantically incorrect)
-pub trait Mergeable {
+pub trait Mergeable<'a> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self;
 }
 
-impl Mergeable for ValueRef<'_> {
+impl<'a> Mergeable<'a> for ValueRef<'a> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
         let b1 = self.value.borrow();
         let b2 = other.value.borrow();
@@ -403,7 +403,7 @@ impl SnapshotAware for ValueRef<'_> {
 }
 
 impl<'a> BacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Self {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Self {
         self.clone()
             .map(|bt| (bt.symbol(), bt)) // thanks borrow checker, very cool
             .map(|(sym, bt)| bt.into_single_child(LabelBacktraceKind::Expression, sym, location))
@@ -436,7 +436,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         let children: Vec<_> = iter::empty()
@@ -448,12 +448,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
     }
 }
 
-impl Mergeable for Option<LabelBacktrace<'_>> {
+impl<'a> Mergeable<'a> for Option<LabelBacktrace<'a>> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
         match (self, other) {
             (None, None) => None,
@@ -470,11 +470,11 @@ impl Mergeable for Option<LabelBacktrace<'_>> {
 
 trait Upgrade<'a> {
     // Coerce from a Value::Simple to Self, preserving inner backtrace
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self;
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<'a, Location>>) -> Self;
 }
 
 impl<'a, T: Upgrade<'a>> Upgrade<'a> for Box<T> {
-    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<Location>>) -> Self {
+    fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<'a, Location>>) -> Self {
         Self::new(T::upgrade(backtrace, location))
     }
 }

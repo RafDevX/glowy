@@ -389,7 +389,7 @@ fn merge_assigned_target_value<'a>(
     assigned: &ValueRef<'a>,
     overwrite: bool,
     backtrace_kind: LabelBacktraceKind,
-    merge_location: &Pinned<Location>,
+    merge_location: &Pinned<'a, Location>,
 ) -> ValueRef<'a> {
     if overwrite {
         assigned.clone()

@@ -89,7 +89,7 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
 fn visit_integer_keyed_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     values: &CompositeLiteralElementListNode<'a>,
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
 ) -> CompositeValue<'a, u64> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
@@ -136,7 +136,7 @@ fn visit_integer_keyed_composite_literal<'a>(
 fn visit_map_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     values: &CompositeLiteralElementListNode<'a>,
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
 ) -> CompositeValue<'a, SimpleConstValue> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
@@ -171,7 +171,7 @@ fn visit_struct_composite_literal<'a>(
     ctx: &mut AnalysisContext<'a>,
     fields: &StructLiteralFieldsNode<'a>,
     r#type: &TypeNode<'a>,
-    location: Pinned<Location>,
+    location: Pinned<'a, Location>,
 ) -> CompositeValue<'a, String> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
@@ -264,7 +264,7 @@ fn visit_struct_composite_literal<'a>(
 fn visit_array_literal_element<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &CompositeLiteralElementNode<'a>,
-    location: &Pinned<Location>,
+    location: &Pinned<'a, Location>,
 ) -> ValueRef<'a> {
     match &node {
         CompositeLiteralElementNode::Expr(expr) => super::visit_single_expr(ctx, expr),

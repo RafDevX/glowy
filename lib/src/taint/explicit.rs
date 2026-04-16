@@ -178,7 +178,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     None | Some(cmp::Ordering::Greater)
                 ) {
                     redeclarations.push(AnalysisErrorKind::IllegalRedeclaration {
-                        previous: borrowed.declared_name().clone(),
+                        previous: borrowed.declared_name(),
                         found: name,
                     });
 

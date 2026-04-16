@@ -51,7 +51,7 @@ impl<'a> Value<'a> {
 }
 
 impl<'a> BacktraceContainer<'a> for Value<'a> {
-    fn backtrace_at_location(&self, location: Pinned<Location>) -> Option<LabelBacktrace<'a>> {
+    fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         self.sub_container().backtrace_at_location(location)
     }
 
@@ -97,7 +97,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
         &self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
-        parent_location: Pinned<Location>,
+        parent_location: Pinned<'a, Location>,
         extra_children: impl IntoIterator<Item = LabelBacktrace<'a>> + Clone,
     ) -> Self {
         macro_rules! recurs {
@@ -120,12 +120,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
     }
 }
 
-impl Mergeable for Value<'_> {
+impl<'a> Mergeable<'a> for Value<'a> {
     fn merge_with(
         &self,
         other: &Self,
         with_kind: LabelBacktraceKind,
-        at_location: Cow<Pinned<Location>>,
+        at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
         macro_rules! recurs {
             ($a:expr, $b:expr) => {
