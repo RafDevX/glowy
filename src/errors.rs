@@ -1,6 +1,6 @@
 use glowy::{
     errors::{AnalysisErrorCategory, AnalysisErrorKind},
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
 };
 
 use crate::diagnostics::{
@@ -68,6 +68,7 @@ pub fn get_structured_error_info<'a>(
                 code: format!("F{:0>3}", sink.kind as usize + 1).into(),
                 snippets: label_backtrace_to_snippets(
                     backtrace,
+                    &sink.label,
                     Some(format!(
                         "sink has label {}, but {} has label {}",
                         sink.label,
@@ -89,6 +90,7 @@ pub fn get_structured_error_info<'a>(
             snippets: if let Some(backtrace) = found {
                 label_backtrace_to_snippets(
                     backtrace,
+                    expected,
                     Some(format!(
                         "assertion expects label {}, but found label {}",
                         expected,
@@ -479,6 +481,7 @@ pub fn error_category_to_level(
 
 fn label_backtrace_to_snippets<'a>(
     backtrace: &'a LabelBacktrace<'a>,
+    expected: &Label<'a>,
     root_label: Option<String>,
     builder: &SnippetBuilder<'a>,
 ) -> Vec<StructuredSnippet<'a>> {
@@ -590,8 +593,24 @@ fn label_backtrace_to_snippets<'a>(
         StructuredAnnotation::new(kind, backtrace.location().inner().clone()).label(label),
     )];
 
+    let diff = if expected.is_subset_of(backtrace.label()) {
+        // if the actual value just has more tags than the expected label, we
+        // can reduce noise when displaying the error by focusing on just
+        // highlighting why those tags are there (but shouldn't), ignoring those
+        // that are present and are expected to be present
+        Some(backtrace.label().difference(expected))
+    } else {
+        // never mind... use the whole thing
+        None
+    };
+
     for child in backtrace.children() {
-        snippets.extend(label_backtrace_to_snippets(child, None, builder));
+        if diff
+            .as_ref()
+            .is_none_or(|diff| !child.label().intersect(diff).is_bottom())
+        {
+            snippets.extend(label_backtrace_to_snippets(child, expected, None, builder));
+        }
     }
 
     snippets

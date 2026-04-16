@@ -327,6 +327,44 @@ impl<'a> Label<'a> {
         }
     }
 
+    /// Returns whether this [`Label`] is a subset of another [`Label`].
+    ///
+    /// In other words, this method returns if `other` contains at least all
+    /// tags in `self`. As would be expected, a [`Label::Bottom`] is a subset of
+    /// all [`Label`]s (including itself), but no [`Label`] is a subset of
+    /// [`Label::Bottom`] except for itself.
+    ///
+    /// For example, `{a, c}` is a subset of `{a, b, c}` but not of `{a, b, d}`.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let x = Label::from_tags(&["alice", "bob", "charlie", "david"]);
+    /// let y = Label::from_tags(&["alice", "charlie"]);
+    /// let z = Label::from_tags(&["david"]);
+    ///
+    /// assert!(y.is_subset_of(&x));
+    /// assert!(z.is_subset_of(&x));
+    /// assert!(!x.is_subset_of(&y));
+    /// assert!(!y.is_subset_of(&z));
+    /// assert!(!z.is_subset_of(&y));
+    /// assert!(Label::Bottom.is_subset_of(&x));
+    /// assert!(!x.is_subset_of(&Label::Bottom));
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn is_subset_of(&self, other: &Self) -> bool {
+        match self {
+            Self::Bottom => true,
+            Self::Tags(sub) => match other {
+                Self::Bottom => false,
+                Self::Tags(sup) => sub.is_subset(sup),
+            },
+        }
+    }
+
     /// Returns whether this [`Label`] contains a given [`LabelTag`].
     ///
     /// For example, `{a, b, c}` contains `c` but not `d`. If `self` is
@@ -354,6 +392,26 @@ impl<'a> Label<'a> {
             Self::Bottom => false,
             Self::Tags(tags) => tags.contains(tag),
         }
+    }
+
+    /// Returns whether this [`Label`] is a [`Label::Bottom`].
+    ///
+    /// For example, `{a}` and `{a, b, c}` are not Bottom, while `{}` is.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// assert!(Label::Bottom.is_bottom());
+    /// assert!(Label::from_tags(&[]).is_bottom());
+    /// assert!(!Label::from_tags(&["alice"]).is_bottom());
+    /// assert!(!Label::from_tags(&["alice", "bob"]).is_bottom());
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn is_bottom(&self) -> bool {
+        matches!(self, Self::Bottom)
     }
 
     pub(crate) fn as_single(&self) -> Option<&LabelTag<'a>> {
@@ -496,7 +554,7 @@ impl<'a> LabelBacktrace<'a> {
     where
         'a: 'b,
     {
-        if label == Label::Bottom {
+        if label.is_bottom() {
             return None;
         }
 
@@ -669,7 +727,7 @@ impl<'a> LabelBacktrace<'a> {
     fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
         let new_label = self.label.intersect(constraint);
 
-        if new_label == Label::Bottom {
+        if new_label.is_bottom() {
             return None;
         }
 
@@ -694,6 +752,8 @@ impl<'a> LabelBacktrace<'a> {
     }
 
     /// Returns the label in question described by this backtrace.
+    ///
+    /// This is guaranteed to never be [`Label::Bottom`].
     #[must_use]
     #[inline]
     pub fn label(&self) -> &Label<'a> {
