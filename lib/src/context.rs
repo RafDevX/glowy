@@ -61,6 +61,8 @@ pub struct AnalysisContext<'a> {
     /// }
     /// ```
     current_branch_scope_depth: u8,
+    /// Locations of currently active split control-flow regions.
+    split_control_flow_regions: Vec<Pinned<'a, Location>>,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -75,6 +77,7 @@ impl<'a> AnalysisContext<'a> {
             deferred_branch_backtraces: Vec::new(),
             current_calculated_branch_backtrace: None,
             current_branch_scope_depth: 0,
+            split_control_flow_regions: Vec::new(),
         }
     }
 
@@ -201,6 +204,30 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn decrease_branch_scope_depth(&mut self) {
         self.current_branch_scope_depth -= 1;
+    }
+
+    pub fn push_split_control_flow(&mut self, location: Location) {
+        self.split_control_flow_regions.push(self.pin(location));
+    }
+
+    pub fn pop_split_control_flow(&mut self) {
+        self.split_control_flow_regions.pop();
+    }
+
+    pub fn was_symbol_declared_within_active_split(&self, symbol: &SymbolRef<'a>) -> Option<bool> {
+        if self.split_control_flow_regions.is_empty() {
+            // no active split
+            return None;
+        }
+
+        let declaration = symbol.borrow().declared_name().pinned_location();
+
+        let within = self
+            .split_control_flow_regions
+            .iter()
+            .any(|region| declaration.contained_in(region));
+
+        Some(within)
     }
 
     pub fn defer_enforcement_check(&mut self, check: DeferredEnforcementCheck<'a>) {

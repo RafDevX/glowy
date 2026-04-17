@@ -249,9 +249,9 @@ fn calculate_outcome<'a>(
     };
 
     for expr in &exprs {
-        let expr_backtrace = exprs::visit_single_expr(ctx, expr);
+        let expr_value = exprs::visit_single_expr(ctx, expr);
 
-        let backtrace = expr_backtrace.nest_backtrace(
+        let backtrace = expr_value.nest_backtrace(
             LabelBacktraceKind::Return,
             None,
             ctx.pin(location.clone()),

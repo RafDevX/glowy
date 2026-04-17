@@ -268,10 +268,6 @@ impl<'a> SymbolTable<'a> {
             .set_local_symbol(name, symbol)
     }
 
-    pub fn is_symbol_in_current_scope(&self, symbol: &SymbolRef<'a>) -> bool {
-        self.current_scope.borrow().contains_local_symbol(symbol)
-    }
-
     /// Returns None if no qualifier was specified but the package has not yet
     /// been analyzed, so its native name is not yet known. Otherwise, the
     /// return indicates whether the new spec conflicts with a previous spec
@@ -561,10 +557,6 @@ impl<'a> Scope<'a> {
 
     fn set_local_symbol(&mut self, name: &'a str, symbol: SymbolRef<'a>) -> Option<SymbolRef<'a>> {
         self.symbols.insert(name, symbol)
-    }
-
-    fn contains_local_symbol(&self, symbol: &SymbolRef<'a>) -> bool {
-        self.symbols.values().any(|s| Rc::ptr_eq(s, symbol))
     }
 
     fn get_symbol_by_declaration(

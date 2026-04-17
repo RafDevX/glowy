@@ -33,29 +33,28 @@ pub trait LeftValue<'a> {
     );
 
     #[must_use]
-    fn is_root_in_current_scope(&self, ctx: &mut AnalysisContext<'a>) -> bool {
+    fn should_override(&self, ctx: &mut AnalysisContext<'a>, simple_assignment: bool) -> bool {
+        // for complex assignments like `x += y` we need to keep x's
+        // label, but for simple assignments like `x = y` we can usually
+        // overwrite it and drop the previous x label, except if we are
+        // currently inside a control-flow split region and x was declared
+        // outside it, in which case we have to be conservative and disallow
+        // any overriding
+        // FIXME: try to improve symtab alt branch support to avoid this
+        if !simple_assignment {
+            return false;
+        }
+
         let Some(root) = self.root_operand() else {
             return false;
         };
 
-        if let Some(symbol) = exprs::resolve_operand_name(ctx, root, None) {
-            ctx.symtab().is_symbol_in_current_scope(&symbol)
-        } else {
-            false
-        }
-    }
+        let Some(symbol) = exprs::resolve_operand_name(ctx, root, None) else {
+            return false;
+        };
 
-    #[must_use]
-    fn should_override(&self, ctx: &mut AnalysisContext<'a>, simple_assignment: bool) -> bool {
-        // for complex assignments like `x += y` we need to keep x's
-        // label, but for simple assignments like `x = y` we can usually
-        // overwrite it and drop the previous x label, except if x was
-        // not declared in the current scope, in which case we
-        // (heuristically) have to conservatively assume that this is
-        // e.g. an if branch and so the other branch might not have a
-        // simple assignment, so we can't forget x's previous label
-        // FIXME: try to improve symtab alt branch support to avoid this
-        simple_assignment && self.is_root_in_current_scope(ctx)
+        ctx.was_symbol_declared_within_active_split(&symbol)
+            .unwrap_or(true)
     }
 }
 
@@ -161,15 +160,6 @@ impl<'a> LeftValue<'a> for Span<'a> {
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
             let mutated = if self.should_override(ctx, simple) {
-                // for complex assignments like `x += y` we need to keep x's
-                // label, but for simple assignments like `x = y` we can usually
-                // overwrite it and drop the previous x label, except if x was
-                // not declared in the current scope, in which case we
-                // (heuristically) have to conservatively assume that this is
-                // e.g. an if branch and so the other branch might not have a
-                // simple assignment, so we can't forget x's previous label
-                // FIXME: try to improve symtab alt branch support to avoid this
-
                 rhs.nest_backtrace(
                     backtrace_kind,
                     Some(self.content()),

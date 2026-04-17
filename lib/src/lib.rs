@@ -186,9 +186,19 @@ pub struct Pinned<'a, T: Clone + fmt::Debug + PartialEq> {
 impl<T: Eq + Clone + fmt::Debug> Eq for Pinned<'_, T> {}
 
 impl<'a, T: Clone + fmt::Debug + PartialEq> Pinned<'a, T> {
-    fn new(virtual_file_path: &'a Path, inner: T) -> Self {
+    /// Constructs a new [`Pinned`] value bound to a specific file.
+    ///
+    /// The value passed as an argument to `virtual_file_path` may be anything
+    /// borrowed and [`Path`]-like, such as [`&str`](str), [`&Path`](Path), or
+    /// [`&PathBuf`](std::path::PathBuf), with the resulting [`Pinned`] instance
+    /// then living for as long as that reference's lifetime. However, care
+    /// should be taken to pass a valid virtual file path that satisfies the
+    /// invariants assumed by [`Pinned`] (e.g., the path must be rooted and
+    /// represent a Go source file relative to the module base).
+    #[inline]
+    pub fn new<P: AsRef<Path> + ?Sized>(virtual_file_path: &'a P, inner: T) -> Self {
         Self {
-            virtual_file_path,
+            virtual_file_path: virtual_file_path.as_ref(),
             inner,
         }
     }
@@ -236,6 +246,37 @@ impl<'p, 'a> Pinned<'p, Span<'a>> {
             virtual_file_path: self.virtual_file_path,
             inner: self.inner().location(),
         }
+    }
+}
+
+impl Pinned<'_, Location> {
+    /// Returns whether this [`Pinned<Location>`] is physically within another.
+    ///
+    /// This method does not consider `self` to be contained in `other` unless
+    /// they both refer to the same file and `self`'s underlying [`Location`]
+    /// is the same as or is fully contained within `other`'s.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::Pinned;
+    /// #
+    /// let base = Pinned::new("/main.go", 12..27);
+    /// let x = Pinned::new("/main.go", 16..20);
+    /// let y = Pinned::new("/main.go", 16..30);
+    /// let z = Pinned::new("/other.go", 16..20);
+    ///
+    /// assert!(base.contained_in(&base));
+    /// assert!(x.contained_in(&base));
+    /// assert!(!y.contained_in(&base));
+    /// assert!(!z.contained_in(&base));
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn contained_in(&self, other: &Self) -> bool {
+        self.file() == other.file()
+            && self.inner().start >= other.inner().start
+            && self.inner().end <= other.inner().end
     }
 }
 

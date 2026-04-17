@@ -19,6 +19,8 @@ use crate::{
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
+    ctx.push_split_control_flow(node.location.clone());
+
     // Go spec: each if, for and switch is considered to be in its own
     // implicit block, so we select it here
     ctx.symtab_mut().select_next_child_scope();
@@ -56,9 +58,13 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
         // implicit `if !cond`
         ctx.pop_branch_backtrace();
     }
+
+    ctx.pop_split_control_flow();
 }
 
 pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
+    ctx.push_split_control_flow(node.location.clone());
+
     // Go spec: each if, for and switch is considered to be in its own
     // implicit block, so we select it here
     ctx.symtab_mut().select_next_child_scope();
@@ -80,6 +86,8 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
     ctx.trigger_defer_target(DeferTarget::InnermostLoop);
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
+
+    ctx.pop_split_control_flow();
 }
 
 fn visit_for_clause<'a>(
@@ -294,6 +302,13 @@ pub fn visit_continue_break<'a>(
 }
 
 pub fn visit_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &SwitchNode<'a>) {
+    let location = match node {
+        SwitchNode::Expr(expr) => &expr.location,
+        SwitchNode::Type(r#type) => &r#type.location,
+    };
+
+    ctx.push_split_control_flow(location.clone());
+
     // Go spec: each if, for and switch is considered to be in its own
     // implicit block, so we select it here
     ctx.symtab_mut().select_next_child_scope();
@@ -304,6 +319,8 @@ pub fn visit_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &SwitchNode<'a>) {
     }
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
+
+    ctx.pop_split_control_flow();
 }
 
 fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a>) {

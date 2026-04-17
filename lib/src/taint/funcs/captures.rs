@@ -141,6 +141,17 @@ pub fn apply_capture_mutations<'a>(ctx: &mut AnalysisContext<'a>, func: &Functio
             realized = Cow::Owned(local_value.clone_inner());
         }
 
+        if ctx.was_symbol_declared_within_active_split(&outer_symbol) == Some(false) {
+            let outer_value = outer_symbol.borrow().value().get();
+
+            realized = Cow::Owned(realized.nest_backtrace(
+                LabelBacktraceKind::Assignment,
+                Some(outer_decl.content()),
+                outer_value.location().clone(),
+                outer_value.backtrace().into_iter(),
+            ));
+        }
+
         outer_symbol.borrow_mut().set_value(realized.into_owned());
     }
 }
