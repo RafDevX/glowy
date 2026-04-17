@@ -14,7 +14,7 @@ use super::{
 use crate::{
     Annotation, ParsingError, TokenStream,
     ast::{
-        AssignmentKind, AssignmentNode, BlockNode, ExprNode, SendNode, ShortVarDeclNode,
+        AssignmentKind, AssignmentNode, BlockNode, CallNode, ExprNode, SendNode, ShortVarDeclNode,
         StatementNode,
     },
     parser::{BacktrackingContext, of_kind},
@@ -81,13 +81,24 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     if let Some(Ok(of_kind!(kind))) = s.peek()
         && terminal_token(kind)
     {
+        let annotation = s.take_last_annotation();
+
+        let annotation = if let Some(stmt_annotation) = &annotation
+            && let ExprNode::Call(CallNode {
+                annotation: Some(call_annotation),
+                ..
+            }) = &lhs
+            && stmt_annotation == call_annotation
+        {
+            // don't use the same annotation twice
+            None
+        } else {
+            annotation
+        };
+
         let stmt = StatementNode::Expr {
             expr: lhs,
-            annotation: s.take_last_annotation(),
-            // ^ FIXME: in some cases, e.g. if lhs is a function call, this
-            // take_last_annotation won't return anything since any
-            // annotation will have already been taken by the expression
-            // upon its parsing (sometimes desired, sometimes not)
+            annotation,
         };
 
         return Ok(stmt);
