@@ -51,7 +51,7 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```
-    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    /// let analyzer = glowy::Analyzer::new("example.com/company-name/proj");
     /// ```
     ///
     /// # See Also
