@@ -21,7 +21,7 @@ pub use self::{
 };
 use crate::{
     Pinned,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
 };
 
@@ -287,6 +287,9 @@ pub trait BacktraceContainer<'a> {
     // discrimination (e.g., this is always true for a MobiusValue because it
     // stores no additional metadata besides the fact of its own existence)
     fn allows_lossless_downgrade(&self) -> bool;
+
+    // recursion helper for declassification
+    fn subtract_label(&mut self, subtract: &Label<'a>);
 }
 
 impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
@@ -300,6 +303,15 @@ impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
 
     fn allows_lossless_downgrade(&self) -> bool {
         self.value.borrow().allows_lossless_downgrade()
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        if subtract.is_bottom() {
+            // nothing to do
+            return;
+        }
+
+        self.value.borrow_mut().subtract_label(subtract);
     }
 }
 
@@ -415,6 +427,10 @@ impl<'a> BacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
 
     fn allows_lossless_downgrade(&self) -> bool {
         true
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        self.take_if(|bt| !bt.subtract_label(subtract));
     }
 }
 

@@ -7,12 +7,13 @@ use crate::{
     Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::exprs,
-    values::{SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
+    values::{BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
 pub trait LeftValue<'a> {
+    #[expect(clippy::too_many_arguments, reason = "No obvious arg aggregation")]
     fn assign(
         &self,
         ctx: &mut AnalysisContext<'a>,
@@ -20,6 +21,8 @@ pub trait LeftValue<'a> {
         rhs: ValueRef<'a>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
+        // from declassification annotation
+        subtract: &Label<'a>,
         location: &Location,
     );
 
@@ -102,6 +105,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         rhs: ValueRef<'a>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        subtract: &Label<'a>,
         location: &Location,
     ) {
         let Some(inner) = as_valid_left_value(self, Some(ctx)) else {
@@ -115,6 +119,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
             rhs,
             simple,
             explicit_backtrace,
+            subtract,
             location,
         );
     }
@@ -147,6 +152,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
         rhs: ValueRef<'a>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        subtract: &Label<'a>,
         location: &Location,
     ) {
         if simple && self.content() == "_" {
@@ -159,7 +165,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
             reason = "Same context, just threaded through closures"
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
-            let mutated = if self.should_override(ctx, simple) {
+            let mut mutated = if self.should_override(ctx, simple) {
                 rhs.nest_backtrace(
                     backtrace_kind,
                     Some(self.content()),
@@ -181,6 +187,9 @@ impl<'a> LeftValue<'a> for Span<'a> {
                         .chain(ctx.branch_backtrace().cloned()),
                 )
             };
+
+            // apply declassification
+            mutated.subtract_label(subtract);
 
             Some(mutated)
         });
@@ -228,6 +237,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         rhs: ValueRef<'a>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        subtract: &Label<'a>,
         location: &Location,
     ) {
         #[expect(
@@ -245,13 +255,16 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                     .chain(ctx.branch_backtrace().cloned()),
             );
 
-            let mutated = merge_assigned_target_value(
+            let mut mutated = merge_assigned_target_value(
                 &target,
                 &new_value,
                 self.should_override(ctx, simple),
                 backtrace_kind,
                 &ctx.pin(location.clone()),
             );
+
+            // apply declassification
+            mutated.subtract_label(subtract);
 
             Some(mutated)
         });
@@ -305,6 +318,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         rhs: ValueRef<'a>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        subtract: &Label<'a>,
         location: &Location,
     ) {
         #[expect(
@@ -324,13 +338,16 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                     .chain(ctx.branch_backtrace().cloned()),
             );
 
-            let mutated = merge_assigned_target_value(
+            let mut mutated = merge_assigned_target_value(
                 &target,
                 &new_value,
                 self.should_override(ctx, simple),
                 backtrace_kind,
                 &pinned_location,
             );
+
+            // apply declassification
+            mutated.subtract_label(subtract);
 
             Some(mutated)
         });

@@ -2,7 +2,7 @@ use parser::{Location, Span};
 
 use crate::{
     Pinned,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{BacktraceContainer, FunctionRef, SelfAwareBacktraceContainer},
 };
@@ -36,6 +36,10 @@ impl<'a> BacktraceContainer<'a> for PackageRefValue<'a> {
 
     fn allows_lossless_downgrade(&self) -> bool {
         false
+    }
+
+    fn subtract_label(&mut self, _subtract: &Label<'a>) {
+        // nothing to do
     }
 }
 

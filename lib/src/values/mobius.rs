@@ -4,7 +4,7 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{
         BacktraceContainer, FunctionRef, Mergeable, SelfAwareBacktraceContainer, Upgrade, ValueRef,
@@ -46,6 +46,10 @@ impl<'a> BacktraceContainer<'a> for MobiusValue<'a> {
 
     fn allows_lossless_downgrade(&self) -> bool {
         true
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        self.0.subtract_label(subtract);
     }
 }
 

@@ -4,7 +4,7 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{
         BacktraceContainer, Mergeable, MobiusValue, PackageRefValue, SelfAwareBacktraceContainer,
@@ -48,6 +48,19 @@ impl<'a> Value<'a> {
             Self::Function(func) => &**func,
         }
     }
+
+    fn sub_container_mut(&mut self) -> &mut dyn BacktraceContainer<'a> {
+        match self {
+            Self::Simple(opt) => opt,
+            Self::Expandable(exp) => exp,
+            Self::Mobius(mobius) => mobius,
+            Self::PackageRef(pkg) => pkg,
+            Self::Array(composite) | Self::Slice(composite) => composite,
+            Self::Map(composite) => composite,
+            Self::Struct(composite) => composite,
+            Self::Function(func) => &mut **func,
+        }
+    }
 }
 
 impl<'a> BacktraceContainer<'a> for Value<'a> {
@@ -61,6 +74,10 @@ impl<'a> BacktraceContainer<'a> for Value<'a> {
 
     fn allows_lossless_downgrade(&self) -> bool {
         self.sub_container().allows_lossless_downgrade()
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        self.sub_container_mut().subtract_label(subtract);
     }
 }
 

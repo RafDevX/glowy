@@ -81,6 +81,17 @@ pub enum AnalysisErrorKind<'a> {
         /// The offending annotation's location.
         location: Location,
     },
+    /// Illegal Glowy declassification annotation with Bottom label.
+    ///
+    /// Glowy interprets declassification as subtraction, not absolute
+    /// overwriting, meaning that declassification of Bottom (i.e., { }) is
+    /// meaningless. This error probably indicates an incorrect usage of the
+    /// declassification feature, hence it being reported as an error for
+    /// enhanced clarity.
+    InvalidDeclassificationSemantics {
+        /// The offending annotation's location.
+        location: Location,
+    },
 
     /// Insecure value passed into security sink.
     ///
@@ -359,7 +370,9 @@ impl AnalysisErrorKind<'_> {
             Self::GotoNotSupported { .. } | Self::DeferNotDeferred { .. } => {
                 AnalysisErrorCategory::UnsupportedGo
             }
-            Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
+            Self::DuplicateVirtualFilePath | Self::InvalidDeclassificationSemantics { .. } => {
+                AnalysisErrorCategory::Misconfiguration
+            }
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation

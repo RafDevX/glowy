@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     Pinned,
     context::DeferredEnforcementCheck,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
@@ -206,6 +206,10 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
             && self.captures.is_empty()
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        self.backtrace.subtract_label(subtract);
     }
 }
 

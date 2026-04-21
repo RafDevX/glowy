@@ -111,6 +111,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
 
     for (name, rhs) in ids.iter().copied().zip(rhs_values) {
         let mut explicit_backtrace = None;
+        let mut subtract = Label::Bottom;
 
         if let Some(annotation) = annotation {
             match annotation.directive {
@@ -121,6 +122,15 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         Some(name.content()),
                         ctx.pin(location.clone()),
                     ));
+                }
+                "declassify" => {
+                    if annotation.tags.is_empty() {
+                        ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                            location: annotation.location.clone(),
+                        });
+                    } else {
+                        subtract = Label::from_tags(&annotation.tags);
+                    }
                 }
                 "sink" => {
                     let sink = SinkDescriptor::new(
@@ -200,6 +210,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             rhs,
             true,
             explicit_backtrace.as_ref(),
+            &subtract,
             location,
         );
 
@@ -267,6 +278,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
     }
 
     let mut explicit_backtrace = None;
+    let mut subtract = Label::Bottom;
     if let Some(annotation) = node.annotation.as_deref() {
         match annotation.directive {
             "label" => {
@@ -276,6 +288,15 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     None,
                     ctx.pin(node.location.clone()),
                 ));
+            }
+            "declassify" => {
+                if annotation.tags.is_empty() {
+                    ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                        location: annotation.location.clone(),
+                    });
+                } else {
+                    subtract = Label::from_tags(&annotation.tags);
+                }
             }
             "sink" => {
                 let sink = SinkDescriptor::new(
@@ -313,6 +334,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         node.lhs.iter(),
         rhs_values.into_iter(),
         explicit_backtrace.as_ref(),
+        &subtract,
         &node.location,
     );
 }
@@ -324,6 +346,7 @@ pub fn visit_raw_assignment<'a: 'b, 'b>(
     lhs_exprs: impl ExactSizeIterator<Item = &'b ExprNode<'a>>,
     rhs_values: impl ExactSizeIterator<Item = ValueRef<'a>>,
     explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
+    subtract: &Label<'a>,
     location: &Location,
 ) {
     if lhs_exprs.len() != rhs_values.len() {
@@ -343,6 +366,7 @@ pub fn visit_raw_assignment<'a: 'b, 'b>(
             rhs,
             kind == AssignmentKind::Simple,
             explicit_backtrace,
+            subtract,
             location,
         );
     }

@@ -8,7 +8,7 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade,
@@ -155,6 +155,20 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
         self.r#const
             .values()
             .all(|v| v.is_bottom() && v.allows_lossless_downgrade())
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        if subtract.is_bottom() {
+            // nothing to do; return early since otherwise this is expensive
+            return;
+        }
+
+        #[expect(clippy::iter_over_hash_type, reason = "Independent mutation")]
+        for value in self.r#const.values_mut() {
+            value.subtract_label(subtract);
+        }
+
+        self.r#dyn.subtract_label(subtract);
     }
 }
 

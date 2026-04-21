@@ -40,6 +40,19 @@ pub fn get_structured_error_info<'a>(
                 "another file with this virtual path had already been registered to the analyzer",
             ),
         },
+        AnalysisErrorKind::InvalidDeclassificationSemantics { location } => StructuredErrorInfo {
+            title: "illegal declassification annotation with Bottom label".into(),
+            code: "C002".into(),
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(
+                    "this is meaningless and likely indicates incorrect usage due to misconstrued \
+                     semantics",
+                ),
+            )],
+            help: Some(
+                "Glowy interprets declassification as subtraction, not absolute overwriting",
+            ),
+        },
 
         AnalysisErrorKind::UnknownAnnotationDirective {
             directive,

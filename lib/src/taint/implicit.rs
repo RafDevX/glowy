@@ -12,7 +12,7 @@ use parser::{
 use crate::{
     Pinned,
     context::{AnalysisContext, DeferTarget},
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::{explicit, exprs},
     values::ValueRef,
@@ -199,6 +199,7 @@ fn visit_for_range<'a>(
             lhs.iter(),
             rhs_values.into_iter(),
             None,
+            &Label::Bottom,
             header_location,
         );
     }

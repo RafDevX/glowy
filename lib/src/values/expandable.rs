@@ -4,7 +4,7 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, Upgrade, ValueRef,
@@ -60,6 +60,14 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
         self.secondary
             .iter()
             .all(|v| v.is_bottom() && v.allows_lossless_downgrade())
+    }
+
+    fn subtract_label(&mut self, subtract: &Label<'a>) {
+        self.primary.subtract_label(subtract);
+
+        for value in &mut self.secondary {
+            value.subtract_label(subtract);
+        }
     }
 }
 

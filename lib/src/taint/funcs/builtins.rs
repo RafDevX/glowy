@@ -18,7 +18,7 @@ use parser::ast::{CallNode, MakeNode, TypeNode};
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::{exprs, mutation::LeftValue},
     values::{
         BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
@@ -250,6 +250,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
         value,
         true,
         None,
+        &Label::Bottom,
         &node.location,
     );
 
@@ -325,6 +326,7 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         new,
         true,
         None,
+        &Label::Bottom,
         &node.location,
     );
 }
@@ -353,6 +355,7 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         ValueRef::new_bottom(location),
         false, // don't want to overwrite
         None,
+        &Label::Bottom,
         &node.location,
     );
 }
@@ -401,6 +404,7 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         value,
         true,
         None,
+        &Label::Bottom,
         &node.location,
     );
 }

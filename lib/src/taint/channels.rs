@@ -38,6 +38,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
     let base = exprs::visit_single_expr(ctx, &node.expr);
 
     let mut explicit_backtrace = None;
+    let mut subtract = Label::Bottom;
 
     if let Some(annotation) = &node.annotation {
         match annotation.directive {
@@ -48,6 +49,15 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                     None,
                     ctx.pin(node.location.clone()),
                 ));
+            }
+            "declassify" => {
+                if annotation.tags.is_empty() {
+                    ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                        location: annotation.location.clone(),
+                    });
+                } else {
+                    subtract = Label::from_tags(&annotation.tags);
+                }
             }
             "sink" => {
                 let sink = SinkDescriptor::new(
@@ -80,6 +90,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
         base,
         false, // don't overwrite ever
         explicit_backtrace.as_ref(),
+        &subtract,
         &node.location,
     );
 }

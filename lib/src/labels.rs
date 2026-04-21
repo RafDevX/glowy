@@ -724,6 +724,7 @@ impl<'a> LabelBacktrace<'a> {
 
     /// Returns a new instance whose label only contains tags in a given
     /// constraint, pruning children if they would have [`Label::Bottom`].
+    #[must_use]
     fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
         let new_label = self.label.intersect(constraint);
 
@@ -742,6 +743,34 @@ impl<'a> LabelBacktrace<'a> {
                 .filter_map(|child| child.restrict_to_label(constraint))
                 .collect(),
         })
+    }
+
+    /// Tries to mutate the present instance so that its label has certain tags
+    /// removed, pruning children if they would have [`Label::Bottom`].
+    ///
+    /// This method returns `true` if the mutation is successful and `false` if
+    /// the whole instance should be disregarded and should instead be replaced
+    /// in its entirety with `None` (i.e., if it would have [`Label::Bottom`]).
+    #[must_use]
+    pub(crate) fn subtract_label(&mut self, subtract: &Label<'a>) -> bool {
+        if subtract.is_bottom() {
+            // nothing to do
+            return true;
+        }
+
+        let constraint = self.label().difference(subtract);
+
+        if constraint.is_bottom() {
+            return false;
+        }
+
+        if let Some(new) = self.restrict_to_label(&constraint) {
+            *self = new;
+
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns the kind of operation that caused the label assignment.
