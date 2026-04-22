@@ -22,6 +22,8 @@ pub struct FunctionValue<'a> {
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
+    // Label to be subtracted from realized result at call (declassification)
+    sanitizer: Label<'a>,
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
     // symbols from outer lexical scopes captured by this closure, if applicable
@@ -45,12 +47,14 @@ impl<'a> FunctionValue<'a> {
         r#ref: FunctionRef<'a>,
         signature: Option<FunctionSignatureNode<'a>>,
         backtrace: Option<LabelBacktrace<'a>>,
+        sanitizer: Label<'a>,
     ) -> Self {
         Self {
             r#ref,
             signature,
             outcome: None,
             backtrace,
+            sanitizer,
             deferred_checks: vec![],
             captures: HashMap::new(),
             call_count: Rc::new(RefCell::new(0)),
@@ -95,13 +99,13 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(r#ref, Some(signature), None)
+        Self::new(r#ref, Some(signature), None, Label::Bottom)
     }
 
     fn new_unknown(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, backtrace)
+        Self::new(r#ref, None, backtrace, Label::Bottom)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -122,6 +126,10 @@ impl<'a> FunctionValue<'a> {
 
     pub fn backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.backtrace.as_ref()
+    }
+
+    pub fn sanitizer(&self) -> &Label<'a> {
+        &self.sanitizer
     }
 
     pub fn deferred_checks(&self) -> &[DeferredEnforcementCheck<'a>] {
@@ -203,6 +211,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
     fn allows_lossless_downgrade(&self) -> bool {
         self.signature.is_none()
             && self.outcome.is_none()
+            && self.sanitizer.is_bottom()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
             && self.captures.is_empty()
@@ -253,6 +262,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             signature: self.signature.clone(),
             outcome,
             backtrace,
+            sanitizer: self.sanitizer.clone(),
             deferred_checks,
             captures,
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
@@ -278,6 +288,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             signature: self.signature.clone(),
             outcome: self.outcome.clone(),
             backtrace,
+            sanitizer: self.sanitizer.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
@@ -300,6 +311,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.signature == other.signature
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
+            && self.sanitizer == other.sanitizer
             && self
                 .deferred_checks
                 .snapshot_aware_eq(&other.deferred_checks)

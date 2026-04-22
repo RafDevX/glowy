@@ -88,7 +88,13 @@ pub enum AnalysisErrorKind<'a> {
     /// meaningless. This error probably indicates an incorrect usage of the
     /// declassification feature, hence it being reported as an error for
     /// enhanced clarity.
+    ///
+    /// This error is reported not only for invalid direct declassification
+    /// annotations, but also for invalid deferred declassification as declared
+    /// by an analogously illegal sanitizer annotation with Bottom label.
     InvalidDeclassificationSemantics {
+        /// Whether the error stems from direct (vs. deferred) declassification.
+        direct: bool,
         /// The offending annotation's location.
         location: Location,
     },

@@ -53,6 +53,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
             "declassify" => {
                 if annotation.tags.is_empty() {
                     ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                        direct: true,
                         location: annotation.location.clone(),
                     });
                 } else {

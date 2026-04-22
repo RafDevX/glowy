@@ -126,6 +126,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
                 "declassify" => {
                     if annotation.tags.is_empty() {
                         ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                            direct: true,
                             location: annotation.location.clone(),
                         });
                     } else {
@@ -292,6 +293,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             "declassify" => {
                 if annotation.tags.is_empty() {
                     ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                        direct: true,
                         location: annotation.location.clone(),
                     });
                 } else {

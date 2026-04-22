@@ -27,7 +27,8 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
             signature,
             body,
             location,
-        } => funcs::visit_function_literal(ctx, signature, body, location),
+            annotation,
+        } => funcs::visit_function_literal(ctx, signature, body, location, annotation.as_deref()),
         LiteralNode::Array {
             values, location, ..
         } => {

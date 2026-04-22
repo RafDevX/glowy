@@ -1,7 +1,7 @@
 use std::{borrow::Cow, iter, path::Path};
 
 use parser::{
-    Location, Span,
+    Annotation, Location, Span,
     ast::{
         BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode,
         FunctionSignatureNode,
@@ -31,13 +31,8 @@ fn visit_function_def<'a>(
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
     body: &BlockNode<'a>,
+    annotation: Option<&Annotation<'a>>,
 ) -> ValueRef<'a> {
-    let mut func_val = FunctionValue::new(
-        r#ref.clone(),
-        Some(signature.clone()),
-        None, // TODO: support annotations
-    );
-
     let value_location = match r#ref {
         FunctionRef::Named(name) => name.pinned_location(),
         FunctionRef::Anonymous(location) => location.clone(),
@@ -49,6 +44,43 @@ fn visit_function_def<'a>(
             )
         }
     };
+
+    let mut explicit_backtrace = None;
+    let mut sanitizer = Label::Bottom;
+
+    if let Some(annotation) = annotation {
+        match annotation.directive {
+            "label" => {
+                explicit_backtrace = Some(LabelBacktrace::new_root(
+                    LabelBacktraceKind::ExplicitAnnotation,
+                    Label::from_tags(&annotation.tags),
+                    None,
+                    value_location.clone(),
+                ));
+            }
+            "sanitizer" => {
+                if annotation.tags.is_empty() {
+                    ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+                        direct: false,
+                        location: annotation.location.clone(),
+                    });
+                } else {
+                    sanitizer = Label::from_tags(&annotation.tags);
+                }
+            }
+            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
+                directive: annotation.directive,
+                location: annotation.location.clone(),
+            }),
+        }
+    }
+
+    let mut func_val = FunctionValue::new(
+        r#ref.clone(),
+        Some(signature.clone()),
+        explicit_backtrace,
+        sanitizer,
+    );
 
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
     // the vec! macro would clone the ValueRef (and so they'd all point to the
@@ -154,6 +186,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         &node.signature,
         node.receiver.as_ref(),
         &node.body,
+        node.annotation.as_deref(),
     );
 }
 
@@ -162,10 +195,11 @@ pub fn visit_function_literal<'a>(
     signature: &FunctionSignatureNode<'a>,
     body: &BlockNode<'a>,
     location: &Location,
+    annotation: Option<&Annotation<'a>>,
 ) -> ValueRef<'a> {
     let r#ref = FunctionRef::Anonymous(ctx.pin(location.clone()));
 
-    visit_function_def(ctx, &r#ref, None, signature, None, body)
+    visit_function_def(ctx, &r#ref, None, signature, None, body, annotation)
 }
 
 pub fn visit_return<'a>(
@@ -651,6 +685,13 @@ fn calculate_call_result<'a>(
         }
 
         result.push(realized);
+    }
+
+    // if this is a sanitizer, now declassify
+    if !func.sanitizer().is_bottom() {
+        for realized in &mut result {
+            realized.subtract_label(func.sanitizer());
+        }
     }
 
     result
