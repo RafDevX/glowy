@@ -157,6 +157,8 @@ pub fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSigna
 
 // for the purposes of this parser, methods are special functions (w/ receiver)
 pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionDeclNode<'a>> {
+    let annotation = s.take_last_annotation();
+
     let beginning = expect(s, TokenKind::Func, Some("function declaration"))?;
 
     let receiver = if let Some(Ok(of_kind!(TokenKind::ParenL))) = s.peek() {
@@ -193,5 +195,6 @@ pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionD
         signature,
         body,
         location,
+        annotation,
     })
 }

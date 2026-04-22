@@ -131,6 +131,7 @@ pub struct FunctionDeclNode<'a> {
     ///  in a row, namely signature result and body)
     pub body: BlockNode<'a>,
     pub location: Location,
+    pub annotation: Option<Box<Annotation<'a>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -361,6 +362,7 @@ pub enum LiteralNode<'a> {
         signature: FunctionSignatureNode<'a>,
         body: BlockNode<'a>,
         location: Location,
+        annotation: Option<Box<Annotation<'a>>>,
     },
     // all below should in theory be one Composite { r#type, value }, but this
     // is simpler and works for now; nevertheless, it does not support arbitrary

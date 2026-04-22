@@ -14,6 +14,8 @@ mod ops;
 mod postfix;
 
 fn parse_function_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let annotation = s.take_last_annotation();
+
     let beginning = expect(s, TokenKind::Func, Some("function literal"))?;
 
     // func literals don't support type parameters, per spec
@@ -28,6 +30,7 @@ fn parse_function_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNod
         signature,
         body,
         location,
+        annotation,
     })
 }
 
