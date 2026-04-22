@@ -82,7 +82,9 @@ pub fn get_structured_error_info<'a>(
             let (context, operand) = match sink.kind {
                 glowy::SinkKind::Declaration => ("declaration", "the initialization value"),
                 glowy::SinkKind::Assignment => ("assignment expression", "provided right-value"),
-                glowy::SinkKind::Call => ("function call", "an argument"),
+                glowy::SinkKind::Call | glowy::SinkKind::Function => {
+                    ("function call", "an argument")
+                }
                 glowy::SinkKind::Send => ("send statement", "the value being sent"),
             };
 

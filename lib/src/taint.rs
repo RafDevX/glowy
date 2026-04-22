@@ -64,6 +64,8 @@ pub enum SinkKind {
     Assignment,
     /// A function call.
     Call,
+    /// A deferred sink via a declared function or defined function literal.
+    Function,
     /// A send statement.
     Send,
 }

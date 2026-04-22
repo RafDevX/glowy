@@ -47,6 +47,7 @@ fn visit_function_def<'a>(
 
     let mut explicit_backtrace = None;
     let mut sanitizer = Label::Bottom;
+    let mut sink = None;
 
     if let Some(annotation) = annotation {
         match annotation.directive {
@@ -68,6 +69,13 @@ fn visit_function_def<'a>(
                     sanitizer = Label::from_tags(&annotation.tags);
                 }
             }
+            "sink" => {
+                sink = Some(SinkDescriptor::new(
+                    SinkKind::Function,
+                    &annotation.tags,
+                    value_location.inner().clone(),
+                ));
+            }
             _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
                 directive: annotation.directive,
                 location: annotation.location.clone(),
@@ -80,6 +88,7 @@ fn visit_function_def<'a>(
         Some(signature.clone()),
         explicit_backtrace,
         sanitizer,
+        sink,
     );
 
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
@@ -453,6 +462,12 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                 directive: annotation.directive,
                 location: annotation.location.clone(),
             }),
+        }
+    }
+
+    if let Some(blanket_sink) = func.sink() {
+        for (_, arg_bt) in &with_backtraces {
+            enforcement::trigger_sink(ctx, Cow::Borrowed(blanket_sink), arg_bt.clone());
         }
     }
 

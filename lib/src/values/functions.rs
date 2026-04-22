@@ -7,7 +7,7 @@ use parser::{
 use uuid::Uuid;
 
 use crate::{
-    Pinned,
+    Pinned, SinkDescriptor,
     context::DeferredEnforcementCheck,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
@@ -24,6 +24,8 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // Label to be subtracted from realized result at call (declassification)
     sanitizer: Label<'a>,
+    // blanket deferred sink that all calls to this func implicitly represent
+    sink: Option<SinkDescriptor<'a>>, // None if not a sink
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
     // symbols from outer lexical scopes captured by this closure, if applicable
@@ -48,6 +50,7 @@ impl<'a> FunctionValue<'a> {
         signature: Option<FunctionSignatureNode<'a>>,
         backtrace: Option<LabelBacktrace<'a>>,
         sanitizer: Label<'a>,
+        sink: Option<SinkDescriptor<'a>>,
     ) -> Self {
         Self {
             r#ref,
@@ -55,6 +58,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             sanitizer,
+            sink,
             deferred_checks: vec![],
             captures: HashMap::new(),
             call_count: Rc::new(RefCell::new(0)),
@@ -99,13 +103,13 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(r#ref, Some(signature), None, Label::Bottom)
+        Self::new(r#ref, Some(signature), None, Label::Bottom, None)
     }
 
     fn new_unknown(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, backtrace, Label::Bottom)
+        Self::new(r#ref, None, backtrace, Label::Bottom, None)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -130,6 +134,10 @@ impl<'a> FunctionValue<'a> {
 
     pub fn sanitizer(&self) -> &Label<'a> {
         &self.sanitizer
+    }
+
+    pub fn sink(&self) -> Option<&SinkDescriptor<'a>> {
+        self.sink.as_ref()
     }
 
     pub fn deferred_checks(&self) -> &[DeferredEnforcementCheck<'a>] {
@@ -212,6 +220,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
         self.signature.is_none()
             && self.outcome.is_none()
             && self.sanitizer.is_bottom()
+            && self.sink.is_none()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
             && self.captures.is_empty()
@@ -263,6 +272,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
+            sink: self.sink.clone(),
             deferred_checks,
             captures,
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
@@ -289,6 +299,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
+            sink: self.sink.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
