@@ -45,58 +45,7 @@ fn visit_function_def<'a>(
         }
     };
 
-    let mut explicit_backtrace = None;
-    let mut sanitizer = Label::Bottom;
-    let mut sink = None;
-
-    if let Some(annotation) = annotation
-        && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
-    {
-        match directive {
-            annotations::FunctionDirective::Label => {
-                explicit_backtrace = Some(LabelBacktrace::new_root(
-                    LabelBacktraceKind::ExplicitAnnotation,
-                    Label::from_tags(&annotation.tags),
-                    None,
-                    value_location.clone(),
-                ));
-            }
-            annotations::FunctionDirective::Sanitizer => {
-                let label = annotations::resolve_declassification_label(ctx, annotation, false);
-
-                if let Some(label) = label {
-                    sanitizer = label;
-                }
-            }
-            annotations::FunctionDirective::Sink => {
-                sink = Some(SinkDescriptor::new(
-                    SinkKind::Function,
-                    &annotation.tags,
-                    value_location.inner().clone(),
-                ));
-            }
-        }
-    }
-
-    let mut func_val = FunctionValue::new(
-        r#ref.clone(),
-        Some(signature.clone()),
-        explicit_backtrace,
-        sanitizer,
-        sink,
-    );
-
-    // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
-    // the vec! macro would clone the ValueRef (and so they'd all point to the
-    // same value, which is not what we want; they should be independent)
-    let bottom_outcome = iter::repeat_with(|| ValueRef::new_bottom(value_location.clone()))
-        .take(signature.result.len())
-        .collect();
-
-    // since we know that this function has an implementation, we set a bottom
-    // value as outcome (with the right cardinality), to distinguish from a
-    // blackbox function without implementation (which would have unset outcome)
-    func_val.set_outcome(bottom_outcome);
+    let func_val = build_function_value(ctx, r#ref, signature, annotation, &value_location);
 
     let mut value = ValueRef::new(Value::Function(Box::new(func_val)), value_location);
 
@@ -178,6 +127,70 @@ fn visit_function_def<'a>(
     ctx.symtab_mut().select_parent_scope(); // pop
 
     value
+}
+
+fn build_function_value<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    r#ref: &FunctionRef<'a>,
+    signature: &FunctionSignatureNode<'a>,
+    annotation: Option<&Annotation<'a>>,
+    value_location: &Pinned<'a, Location>,
+) -> FunctionValue<'a> {
+    let mut explicit_backtrace = None;
+    let mut sanitizer = Label::Bottom;
+    let mut sink = None;
+
+    if let Some(annotation) = annotation
+        && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
+    {
+        match directive {
+            annotations::FunctionDirective::Label => {
+                explicit_backtrace = Some(LabelBacktrace::new_root(
+                    LabelBacktraceKind::ExplicitAnnotation,
+                    Label::from_tags(&annotation.tags),
+                    None,
+                    value_location.clone(),
+                ));
+            }
+            annotations::FunctionDirective::Sanitizer => {
+                let label = annotations::resolve_declassification_label(ctx, annotation, false);
+
+                if let Some(label) = label {
+                    sanitizer = label;
+                }
+            }
+            annotations::FunctionDirective::Sink => {
+                sink = Some(SinkDescriptor::new(
+                    SinkKind::Function,
+                    &annotation.tags,
+                    value_location.inner().clone(),
+                ));
+            }
+        }
+    }
+
+    let mut func_val = FunctionValue::new(
+        r#ref.clone(),
+        Some(signature.clone()),
+        explicit_backtrace,
+        sanitizer,
+        sink,
+    );
+
+    // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
+    // the vec! macro would clone the ValueRef (and so they'd all point to the
+    // same value, which is not what we want; they should be independent)
+    let bottom_outcome = iter::repeat_with(|| ValueRef::new_bottom(value_location.clone()))
+        .take(signature.result.len())
+        .collect();
+
+    // since we know that this function has an implementation, we set a bottom
+    // value as outcome (with the right cardinality), to distinguish from a
+    // blackbox function without implementation (which would have unset outcome)
+    func_val.set_outcome(bottom_outcome);
+
+    // function value is now fully constructed, so just return it
+    func_val
 }
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
