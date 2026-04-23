@@ -13,7 +13,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    taint::{SinkDescriptor, SinkKind, enforcement, mutation::LeftValue},
+    taint::{SinkDescriptor, SinkKind, annotations, enforcement, mutation::LeftValue},
     values::{SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -40,9 +40,11 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
     let mut explicit_backtrace = None;
     let mut subtract = Label::Bottom;
 
-    if let Some(annotation) = &node.annotation {
-        match annotation.directive {
-            "label" => {
+    if let Some(annotation) = &node.annotation
+        && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
+    {
+        match directive {
+            annotations::SendDirective::Label => {
                 explicit_backtrace = Some(LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
                     Label::from_tags(&annotation.tags),
@@ -50,17 +52,14 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                     ctx.pin(node.location.clone()),
                 ));
             }
-            "declassify" => {
-                if annotation.tags.is_empty() {
-                    ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
-                        direct: true,
-                        location: annotation.location.clone(),
-                    });
-                } else {
-                    subtract = Label::from_tags(&annotation.tags);
+            annotations::SendDirective::Declassify => {
+                let label = annotations::resolve_declassification_label(ctx, annotation, true);
+
+                if let Some(label) = label {
+                    subtract = label;
                 }
             }
-            "sink" => {
+            annotations::SendDirective::Sink => {
                 let sink = SinkDescriptor::new(
                     SinkKind::Send,
                     &annotation.tags,
@@ -71,16 +70,12 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
 
                 enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
             }
-            "assert" => {
+            annotations::SendDirective::Assert => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
                 let backtrace = base.backtrace();
 
                 enforcement::trigger_assertion(ctx, &sequence, backtrace, node.location.clone());
             }
-            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                directive: annotation.directive,
-                location: annotation.location.clone(),
-            }),
         }
     }
 

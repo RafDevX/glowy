@@ -8,7 +8,7 @@ use parser::{
     },
 };
 
-use super::exprs;
+use super::{annotations, exprs};
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
@@ -106,6 +106,8 @@ pub fn visit_raw_binding_decl_spec<'a>(
         return;
     }
 
+    let pinned = ctx.pin(location.clone());
+
     let mut redeclarations = vec![];
     let mut any_new = false;
 
@@ -113,27 +115,26 @@ pub fn visit_raw_binding_decl_spec<'a>(
         let mut explicit_backtrace = None;
         let mut subtract = Label::Bottom;
 
-        if let Some(annotation) = annotation {
-            match annotation.directive {
-                "label" => {
+        if let Some(annotation) = annotation
+            && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
+        {
+            match directive {
+                annotations::DeclDirective::Label => {
                     explicit_backtrace = Some(LabelBacktrace::new_root(
                         LabelBacktraceKind::ExplicitAnnotation,
                         Label::from_tags(&annotation.tags),
                         Some(name.content()),
-                        ctx.pin(location.clone()),
+                        pinned.clone(),
                     ));
                 }
-                "declassify" => {
-                    if annotation.tags.is_empty() {
-                        ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
-                            direct: true,
-                            location: annotation.location.clone(),
-                        });
-                    } else {
-                        subtract = Label::from_tags(&annotation.tags);
+                annotations::DeclDirective::Declassify => {
+                    let label = annotations::resolve_declassification_label(ctx, annotation, true);
+
+                    if let Some(label) = label {
+                        subtract = label;
                     }
                 }
-                "sink" => {
+                annotations::DeclDirective::Sink => {
                     let sink = SinkDescriptor::new(
                         SinkKind::Declaration,
                         &annotation.tags,
@@ -142,7 +143,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
 
                     enforcement::trigger_sink(ctx, Cow::Owned(sink), rhs.backtrace());
                 }
-                "assert" => {
+                annotations::DeclDirective::Assert => {
                     enforcement::trigger_assertion(
                         ctx,
                         &Label::sequence_from_tags(&annotation.tags),
@@ -150,10 +151,6 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         location.clone(),
                     );
                 }
-                _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                    directive: annotation.directive,
-                    location: annotation.location.clone(),
-                }),
             }
         }
 
@@ -173,7 +170,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
         let symbol = Symbol::new_ref(
             ctx.pin(name),
             true, // we initially always set the symbol as mutable
-            ValueRef::new_bottom(ctx.pin(location.clone())),
+            ValueRef::new_bottom(pinned.clone()),
         );
         let symbol2 = Rc::clone(&symbol); // for later use if needed
 
@@ -280,9 +277,11 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
     let mut explicit_backtrace = None;
     let mut subtract = Label::Bottom;
-    if let Some(annotation) = node.annotation.as_deref() {
-        match annotation.directive {
-            "label" => {
+    if let Some(annotation) = node.annotation.as_deref()
+        && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
+    {
+        match directive {
+            annotations::AssignmentDirective::Label => {
                 explicit_backtrace = Some(LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
                     Label::from_tags(&annotation.tags),
@@ -290,17 +289,14 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     ctx.pin(node.location.clone()),
                 ));
             }
-            "declassify" => {
-                if annotation.tags.is_empty() {
-                    ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
-                        direct: true,
-                        location: annotation.location.clone(),
-                    });
-                } else {
-                    subtract = Label::from_tags(&annotation.tags);
+            annotations::AssignmentDirective::Declassify => {
+                let label = annotations::resolve_declassification_label(ctx, annotation, true);
+
+                if let Some(label) = label {
+                    subtract = label;
                 }
             }
-            "sink" => {
+            annotations::AssignmentDirective::Sink => {
                 let sink = SinkDescriptor::new(
                     SinkKind::Assignment,
                     &annotation.tags,
@@ -311,7 +307,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), rhs.backtrace());
                 }
             }
-            "assert" => {
+            annotations::AssignmentDirective::Assert => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
 
                 for rhs in &rhs_values {
@@ -323,10 +319,6 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     );
                 }
             }
-            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                directive: annotation.directive,
-                location: annotation.location.clone(),
-            }),
         }
     }
 

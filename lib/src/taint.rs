@@ -12,6 +12,7 @@ use crate::{
     values::BacktraceContainer,
 };
 
+mod annotations;
 mod channels;
 mod enforcement;
 mod explicit;
@@ -194,34 +195,27 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Expr { expr, annotation } => {
             let values = exprs::visit_expr(ctx, expr);
 
-            if let Some(annotation) = annotation {
-                match annotation.directive {
-                    "assert" => {
-                        let location = expr.location().into_owned();
+            if let Some(annotation) = annotation
+                && annotations::parse_supported_directive(ctx, annotation)
+                    == Some(annotations::ExprDirective::Assert)
+            {
+                let location = expr.location().into_owned();
 
-                        if values.is_empty() {
-                            ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression {
-                                location,
-                            });
-                            return;
-                        }
+                if values.is_empty() {
+                    ctx.report_error(AnalysisErrorKind::UnexpectedVoidExpression { location });
+                    return;
+                }
 
-                        let sequence = Label::sequence_from_tags(&annotation.tags);
-                        let location = ctx.pin(location);
+                let sequence = Label::sequence_from_tags(&annotation.tags);
+                let location = ctx.pin(location);
 
-                        for value in values {
-                            enforcement::trigger_assertion(
-                                ctx,
-                                &sequence,
-                                value.backtrace_at_location(location.clone()),
-                                location.inner().clone(),
-                            );
-                        }
-                    }
-                    _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                        directive: annotation.directive,
-                        location: annotation.location.clone(),
-                    }),
+                for value in values {
+                    enforcement::trigger_assertion(
+                        ctx,
+                        &sequence,
+                        value.backtrace_at_location(location.clone()),
+                        location.inner().clone(),
+                    );
                 }
             }
         }

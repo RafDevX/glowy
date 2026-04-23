@@ -47,6 +47,7 @@ pkgs.mkShellNoCC {
         "rsplit",
         "rustc",
         "scrutinee",
+        "subenum",
         "symtab",
         "unseparated"
       ]

@@ -14,7 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
     symbols::Symbol,
-    taint::{SinkDescriptor, SinkKind, enforcement, exprs},
+    taint::{SinkDescriptor, SinkKind, annotations, enforcement, exprs},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
@@ -49,9 +49,11 @@ fn visit_function_def<'a>(
     let mut sanitizer = Label::Bottom;
     let mut sink = None;
 
-    if let Some(annotation) = annotation {
-        match annotation.directive {
-            "label" => {
+    if let Some(annotation) = annotation
+        && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
+    {
+        match directive {
+            annotations::FunctionDirective::Label => {
                 explicit_backtrace = Some(LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
                     Label::from_tags(&annotation.tags),
@@ -59,27 +61,20 @@ fn visit_function_def<'a>(
                     value_location.clone(),
                 ));
             }
-            "sanitizer" => {
-                if annotation.tags.is_empty() {
-                    ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
-                        direct: false,
-                        location: annotation.location.clone(),
-                    });
-                } else {
-                    sanitizer = Label::from_tags(&annotation.tags);
+            annotations::FunctionDirective::Sanitizer => {
+                let label = annotations::resolve_declassification_label(ctx, annotation, false);
+
+                if let Some(label) = label {
+                    sanitizer = label;
                 }
             }
-            "sink" => {
+            annotations::FunctionDirective::Sink => {
                 sink = Some(SinkDescriptor::new(
                     SinkKind::Function,
                     &annotation.tags,
                     value_location.inner().clone(),
                 ));
             }
-            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                directive: annotation.directive,
-                location: annotation.location.clone(),
-            }),
         }
     }
 
@@ -433,9 +428,11 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     let with_backtraces: Vec<_> = arg_values.iter().map(|v| (v, v.backtrace())).collect();
 
-    if let Some(annotation) = &node.annotation {
-        match annotation.directive {
-            "sink" => {
+    if let Some(annotation) = &node.annotation
+        && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
+    {
+        match directive {
+            annotations::CallDirective::Sink => {
                 let sink = SinkDescriptor::new(
                     SinkKind::Call,
                     &annotation.tags,
@@ -446,7 +443,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                     enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg_bt.clone());
                 }
             }
-            "assert" => {
+            annotations::CallDirective::Assert => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
 
                 for (_, arg_bt) in &with_backtraces {
@@ -458,10 +455,6 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
                     );
                 }
             }
-            _ => ctx.report_error(AnalysisErrorKind::UnknownAnnotationDirective {
-                directive: annotation.directive,
-                location: annotation.location.clone(),
-            }),
         }
     }
 
