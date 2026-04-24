@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     num::{ParseFloatError, ParseIntError},
     str::{Chars, FromStr},
+    sync::LazyLock,
 };
 
 use finl_unicode::categories::CharacterCategories;
@@ -13,7 +14,15 @@ use crate::{
     token::{Annotation, Token, TokenKind},
 };
 
-const ANNOTATION_REGEX: &str = r"glowy::(?P<directive>\w+)::\{(?P<tags>[^}]*)\}";
+static ANNOTATION_REGEX: LazyLock<Regex> = {
+    LazyLock::new(|| {
+        Regex::new(
+            // glowy::directive::{tags}
+            r"glowy::(?P<directive>\w+)::\{(?P<tags>[^}]*)\}",
+        )
+        .unwrap()
+    })
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LexingError<'a> {
@@ -113,7 +122,6 @@ pub struct Lexer<'a> {
     last_token_kind: Option<TokenKind>,
     queue: VecDeque<Token<'a>>,
 
-    annotation_regex: Regex, // prevent constant recompilation (slow)
     last_annotation: Option<Annotation<'a>>, // prevent clearing by whitespace
 
     enable_implicit_semicolon: bool, // whether to enable implicit semicolon insertion
@@ -132,7 +140,6 @@ impl<'a> Lexer<'a> {
             last_token_kind: None,
             queue: VecDeque::new(),
 
-            annotation_regex: Regex::new(ANNOTATION_REGEX).unwrap(),
             last_annotation: None,
 
             enable_implicit_semicolon: true,
@@ -246,7 +253,7 @@ impl<'a> Lexer<'a> {
 
                     let text = self.read_while(|ch| ch != '\n').content;
 
-                    if let Some(captures) = self.annotation_regex.captures(text) {
+                    if let Some(captures) = ANNOTATION_REGEX.captures(text) {
                         let directive = captures.name("directive").unwrap().as_str();
 
                         let tags = captures
