@@ -85,10 +85,12 @@ fn analyze_multi(mut modules: Vec<PathBuf>, time_analysis: bool) -> (usize, usiz
     let start = Instant::now();
 
     for (i, module) in modules.into_iter().enumerate() {
-        let title = presentation::ColoredGroup::new()
-            .push(format!("#{:0>width$} - ", i + 1).cyan())
-            .push("Module @ ".blue())
-            .push(module.to_string_lossy().purple());
+        let title = format!(
+            "{} {} {}",
+            format!("#{:0>width$} -", i + 1).cyan(),
+            "Module @".blue(),
+            module.to_string_lossy().purple()
+        );
         println!("{}", presentation::build_header(title));
 
         results.push((

@@ -1,84 +1,38 @@
-use std::fmt;
+use colored::Colorize;
 
-use colored::{ColoredString, Colorize};
+pub fn build_header(title: impl ToString) -> String {
+    let title = title.to_string();
 
-pub struct ColoredGroup {
-    items: Vec<ColoredString>,
+    let width = ansi_ignoring_len(&title) + 2 * 6;
+
+    format!(
+        "{}\n{} {} {}\n{}\n",
+        "#".repeat(width).yellow(),
+        "#".repeat(5).yellow(),
+        title.bold(),
+        "#".repeat(5).yellow(),
+        "#".repeat(width).yellow()
+    )
 }
 
-impl ColoredGroup {
-    pub fn new() -> Self {
-        Self { items: vec![] }
-    }
+fn ansi_ignoring_len(s: &str) -> usize {
+    let mut inside = false;
+    let mut code_bytes = 0;
 
-    pub fn push<S: Into<ColoredString>>(mut self, item: S) -> Self {
-        self.items.push(item.into());
+    for byte in s.bytes() {
+        if inside {
+            if byte == b'm' {
+                inside = false;
+            }
 
-        self
-    }
-
-    pub fn space(self) -> Self {
-        self.push(" ")
-    }
-
-    pub fn newline(self) -> Self {
-        self.push("\n")
-    }
-
-    pub fn absorb<F: Fn(ColoredString) -> ColoredString>(
-        mut self,
-        other: Self,
-        transformation: Option<F>,
-    ) -> Self {
-        for item in other.items {
-            let transformed = if let Some(f) = &transformation {
-                f(item)
-            } else {
-                item
-            };
-
-            self.items.push(transformed)
-        }
-
-        self
-    }
-
-    pub fn len(&self) -> usize {
-        self.items.iter().map(|s| s.len()).sum()
-    }
-}
-
-impl fmt::Display for ColoredGroup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for item in &self.items {
-            item.fmt(f)?
-        }
-
-        Ok(())
-    }
-}
-
-impl<T: Into<ColoredString>> From<T> for ColoredGroup {
-    fn from(s: T) -> Self {
-        Self {
-            items: vec![s.into()],
+            code_bytes += 1;
+        } else if byte == 0x1b {
+            inside = true;
+            code_bytes += 1;
+        } else {
+            // normal character, not part of a control code
         }
     }
-}
 
-pub fn build_header<T: Into<ColoredGroup>>(title: T) -> ColoredGroup {
-    let title = title.into();
-    let width = title.len() + 2 * 6;
-
-    ColoredGroup::new()
-        .push("#".repeat(width).yellow())
-        .newline()
-        .push("#".repeat(5).yellow())
-        .space()
-        .absorb(title, Some(ColoredString::bold))
-        .space()
-        .push("#".repeat(5).yellow())
-        .newline()
-        .push("#".repeat(width).yellow())
-        .newline()
+    s.len().saturating_sub(code_bytes)
 }
