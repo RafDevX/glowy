@@ -129,7 +129,15 @@ fn analyze_multi(mut modules: Vec<PathBuf>, time_analysis: bool) -> (usize, usiz
         } else if *warnings > 0 {
             n_warned += 1;
 
-            ("⚠️", "WARN".yellow())
+            // cannot use ⚠️ emoji as its width is calculated inconsistently
+            // across different terminals - it should render as just one
+            // character width, but since ⚠️ = U+26A0 (⚠) + U+FE0F (◌️), this
+            // last code point (Variation Selector-16) that selects the
+            // emoji-variant-style warning can sometimes cause the following
+            // space to be ignored, meaning here that [ is placed one column too
+            // early and breaks the summary lines' alignment -- e.g., it might
+            // render as "- ⚠️[WARN] ..." instead of "- ⚠️ [WARN] ..."
+            ("🟡", "WARN".yellow())
         } else {
             n_passed += 1;
 
