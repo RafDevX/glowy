@@ -376,10 +376,9 @@ impl AnalysisErrorKind<'_> {
             Self::GotoNotSupported { .. } | Self::DeferNotDeferred { .. } => {
                 AnalysisErrorCategory::UnsupportedGo
             }
-            Self::DuplicateVirtualFilePath | Self::InvalidDeclassificationSemantics { .. } => {
-                AnalysisErrorCategory::Misconfiguration
-            }
+            Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
+            Self::InvalidDeclassificationSemantics { .. } => AnalysisErrorCategory::Suspicious,
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation
             }
@@ -406,6 +405,8 @@ pub enum AnalysisErrorCategory {
     Misconfiguration,
     /// Attempt to use a Glowy feature not known to this analyzer version.
     UnrecognizedFeature,
+    /// Unexpected behavior likely indicative of underlying analyzer misuse.
+    Suspicious,
     /// Incorrect or malformed Go construct.
     InvalidGo,
     /// Go construct recognized but not supported by this analyzer version.

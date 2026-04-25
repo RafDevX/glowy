@@ -40,29 +40,6 @@ pub fn get_structured_error_info<'a>(
                 "another file with this virtual path had already been registered to the analyzer",
             ),
         },
-        AnalysisErrorKind::InvalidDeclassificationSemantics { direct, location } => {
-            StructuredErrorInfo {
-                title: format!(
-                    "illegal {} annotation with Bottom label",
-                    if *direct {
-                        "declassification"
-                    } else {
-                        "sanitizer"
-                    }
-                )
-                .into(),
-                code: "C002".into(),
-                snippets: vec![builder.snippet().annotate(
-                    StructuredAnnotation::primary(location.clone()).label(
-                        "this is meaningless and likely indicates incorrect usage due to \
-                         misconstrued semantics",
-                    ),
-                )],
-                help: Some(
-                    "Glowy interprets declassification as subtraction, not absolute overwriting",
-                ),
-            }
-        }
 
         AnalysisErrorKind::UnknownAnnotationDirective {
             directive,
@@ -77,6 +54,30 @@ pub fn get_structured_error_info<'a>(
             ],
             help: Some("this directive may be unsupported by this version of the analyzer"),
         },
+
+        AnalysisErrorKind::InvalidDeclassificationSemantics { direct, location } => {
+            StructuredErrorInfo {
+                title: format!(
+                    "illegal {} annotation with Bottom label",
+                    if *direct {
+                        "declassification"
+                    } else {
+                        "sanitizer"
+                    }
+                )
+                .into(),
+                code: "S001".into(),
+                snippets: vec![builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone()).label(
+                        "this is meaningless and likely indicates incorrect usage due to \
+                         misconstrued semantics",
+                    ),
+                )],
+                help: Some(
+                    "Glowy interprets declassification as subtraction, not absolute overwriting",
+                ),
+            }
+        }
 
         AnalysisErrorKind::InsecureFlow { sink, backtrace } => {
             let (context, operand) = match sink.kind {
@@ -499,6 +500,7 @@ pub fn error_category_to_level(
         AnalysisErrorCategory::Misconfiguration
         | AnalysisErrorCategory::SecurityPolicyViolation => annotate_snippets::Level::ERROR,
         AnalysisErrorCategory::UnrecognizedFeature
+        | AnalysisErrorCategory::Suspicious
         | AnalysisErrorCategory::InvalidGo
         | AnalysisErrorCategory::UnsupportedGo => annotate_snippets::Level::WARNING,
     }
