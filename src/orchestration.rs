@@ -81,7 +81,8 @@ fn analyze_multi(mut modules: Vec<PathBuf>, time_analysis: bool) -> (usize, usiz
 
     let mut results = vec![];
 
-    let width = 1 + modules.len() / 10;
+    // ilog10 cannot panic here since we already checked that len > 0 (is_empty)
+    let width = 1 + modules.len().ilog10() as usize;
     let start = Instant::now();
 
     for (i, module) in modules.into_iter().enumerate() {
