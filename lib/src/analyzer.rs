@@ -290,6 +290,13 @@ impl Analyzer {
         reason = "Main entrypoint method"
     )]
     pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
+        if self.files.is_empty() {
+            return Err(vec![AnalysisError {
+                file: path::Path::new("/main.go"), // should never be used
+                kind: AnalysisErrorKind::NoRegisteredFiles,
+            }]);
+        }
+
         let mut parsed = BTreeMap::new();
         let mut parse_errors = vec![];
 

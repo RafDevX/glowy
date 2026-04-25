@@ -70,6 +70,18 @@ pub enum AnalysisErrorKind<'a> {
     /// The file in question was registered multiple times with the Glowy
     /// analyzer, potentially with distinct content.
     DuplicateVirtualFilePath,
+    /// Attempt to conduct analysis without specifying any Go source code files.
+    ///
+    /// Analysis without input trivially resolves to [`Ok`], so there is no need
+    /// to invoke the analyzer and thus this likely represents a bug in the
+    /// consumer code. This error is reported instead to explicitly bring
+    /// attention to this problem so that it may be assessed and fixed (for
+    /// example, by adding file registration calls via
+    /// [`Analyzer::add_file`](crate::Analyzer::add_file) or equivalent).
+    ///
+    /// The file path associated with this error is irrelevant and should be
+    /// ignored.
+    NoRegisteredFiles,
 
     /// Unrecognized directive specified for Glowy annotation.
     ///
@@ -378,7 +390,9 @@ impl AnalysisErrorKind<'_> {
             }
             Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
-            Self::InvalidDeclassificationSemantics { .. } => AnalysisErrorCategory::Suspicious,
+            Self::NoRegisteredFiles | Self::InvalidDeclassificationSemantics { .. } => {
+                AnalysisErrorCategory::Suspicious
+            }
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation
             }

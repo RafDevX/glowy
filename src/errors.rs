@@ -55,6 +55,12 @@ pub fn get_structured_error_info<'a>(
             help: Some("this directive may be unsupported by this version of the analyzer"),
         },
 
+        AnalysisErrorKind::NoRegisteredFiles => StructuredErrorInfo {
+            title: "no registered Go source code files".into(),
+            code: "S001".into(),
+            snippets: vec![],
+            help: Some("did you forget to add files to be analyzed?"),
+        },
         AnalysisErrorKind::InvalidDeclassificationSemantics { direct, location } => {
             StructuredErrorInfo {
                 title: format!(
@@ -66,7 +72,7 @@ pub fn get_structured_error_info<'a>(
                     }
                 )
                 .into(),
-                code: "S001".into(),
+                code: "S002".into(),
                 snippets: vec![builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone()).label(
                         "this is meaningless and likely indicates incorrect usage due to \
