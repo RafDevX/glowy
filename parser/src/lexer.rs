@@ -909,7 +909,7 @@ impl<'a> Iterator for Lexer<'a> {
 
         self.last_token_kind = Some(token.kind.clone());
 
-        if token.kind == TokenKind::SemiColon {
+        if matches!(token.kind, TokenKind::SemiColon | TokenKind::CurlyR) {
             self.last_annotation.take(); // clear
         }
 
