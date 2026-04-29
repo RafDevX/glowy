@@ -2,7 +2,8 @@ use crate::{
     ParsingError, TokenStream,
     ast::{
         ElseNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode,
-        ForRangeNode, IfNode, StatementNode, SwitchNode, TypeSwitchCaseClause, TypeSwitchNode,
+        ForRangeNode, IfNode, StatementNode, SwitchNode, TypeNode, TypeSwitchCaseClause,
+        TypeSwitchNode,
     },
     parser::{
         BacktrackingContext, PResult, expect,
@@ -427,6 +428,29 @@ fn parse_type_switch_case_clause<'a>(
         expect(s, TokenKind::Case, Some("switch case clause"))?;
 
         parse_types_until(s, |token| token.kind == TokenKind::Colon)?
+            .into_iter()
+            .map(|r#type| {
+                if let TypeNode::Name {
+                    package: None,
+                    id,
+                    args,
+                } = &r#type
+                    && id.content() == "nil"
+                    && args.is_empty()
+                {
+                    // Go spec: "Instead of a type, a case may use the
+                    // predeclared identifier nil; that case is selected when
+                    // the expression in the TypeSwitchGuard is a nil interface
+                    // value. There may be at most one nil case."
+                    // (here we don't check how many nil cases there are;
+                    // consuming code can do that)
+
+                    None
+                } else {
+                    Some(r#type)
+                }
+            })
+            .collect()
     };
 
     expect(s, TokenKind::Colon, Some("switch case clause"))?;
@@ -917,25 +941,21 @@ mod tests {
                     expr: ExprNode::Name(Span::new("x", 59, 3)),
                     clauses: vec![
                         TypeSwitchCaseClause {
-                            types: vec![TypeNode::Name {
-                                package: None,
-                                id: Span::new("nil", 103, 4),
-                                args: vec![]
-                            }],
+                            types: vec![None],
                             body: vec![]
                         },
                         TypeSwitchCaseClause {
                             types: vec![
-                                TypeNode::Name {
+                                Some(TypeNode::Name {
                                     package: None,
                                     id: Span::new("int", 141, 5),
                                     args: vec![]
-                                },
-                                TypeNode::Name {
+                                }),
+                                Some(TypeNode::Name {
                                     package: None,
                                     id: Span::new("float64", 146, 5),
                                     args: vec![]
-                                }
+                                })
                             ],
                             body: vec![StatementNode::Assignment(AssignmentNode {
                                 kind: AssignmentKind::Simple,
@@ -1010,11 +1030,11 @@ mod tests {
                         annotation: None
                     }),
                     clauses: vec![TypeSwitchCaseClause {
-                        types: vec![TypeNode::Name {
+                        types: vec![Some(TypeNode::Name {
                             package: None,
                             id: Span::new("float64", 405, 12),
                             args: vec![]
-                        }],
+                        })],
                         body: vec![StatementNode::Expr {
                             expr: ExprNode::Call(CallNode {
                                 func: Box::new(ExprNode::Name(Span::new("g", 414, 12))),

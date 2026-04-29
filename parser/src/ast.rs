@@ -816,6 +816,6 @@ pub struct TypeSwitchNode<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeSwitchCaseClause<'a> {
-    pub types: Vec<TypeNode<'a>>, // empty means "default"
+    pub types: Vec<Option<TypeNode<'a>>>, // empty means "default"; None = "nil"
     pub body: Vec<StatementNode<'a>>,
 }
