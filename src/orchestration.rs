@@ -151,7 +151,12 @@ fn analyze_multi(mut modules: Vec<PathBuf>, time_analysis: bool) -> (usize, usiz
             label,
             i + 1,
             module.bold(),
-            format!("({errors} errors, {warnings} warnings)").italic()
+            format!(
+                "({}, {})",
+                presentation::format_count(*errors, "error", |s| s.bright_red()),
+                presentation::format_count(*warnings, "warning", |s| s.yellow())
+            )
+            .italic()
         );
     }
 

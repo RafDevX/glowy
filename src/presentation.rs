@@ -1,4 +1,4 @@
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 
 pub fn build_header(title: impl ToString) -> String {
     let title = title.to_string();
@@ -35,4 +35,22 @@ fn ansi_ignoring_len(s: &str) -> usize {
     }
 
     s.len().saturating_sub(code_bytes)
+}
+
+pub fn format_count(
+    n: usize,
+    singular: &str,
+    f: impl FnOnce(&str) -> ColoredString,
+) -> ColoredString {
+    if n == 0 {
+        format!("0 {singular}s").into()
+    } else {
+        let mut plain = format!("{n} {singular}");
+
+        if n > 1 {
+            plain.push('s');
+        }
+
+        f(&plain)
+    }
 }
