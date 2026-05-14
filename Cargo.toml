@@ -33,6 +33,15 @@ categories = [
 license = "MIT"
 rust-version = "1.91"
 
+# make the binary leaner and more optimized
+# (at the cost of a slower compile time, though only for release mode)
+# this applies for all packages in this workspace
+[profile.release]
+lto = true # fat link-time optimizations across all crates
+strip = true # full symbol stripping from generated binary
+codegen-units = 1 # no parallelism processing a crate, max optimization
+panic = "abort" # smaller binary since no unwinding mechanism
+
 [dependencies]
 annotate-snippets = "0.12.10"
 anstream = "1.0.0"
