@@ -31,7 +31,7 @@ categories = [
     "parser-implementations",
 ]
 license = "MIT"
-rust-version = "1.88"
+rust-version = "1.91"
 
 [dependencies]
 annotate-snippets = "0.12.10"
