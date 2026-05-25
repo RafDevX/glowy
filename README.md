@@ -59,8 +59,8 @@ _Note: Glowy's behavior is undefined for invalid Go programs, but a best-effort
 attempt is made to report useful information for simple mistakes such as tokens
 failing parsing expectations._
 
-This repository includes a directory [`go-tests/`](/go-tests) which contains
+This repository includes a directory [`ifc-tests/`](/ifc-tests) which contains
 several Go modules illustrating how to provide annotations and what kinds of
 features are supported by the analyzer. These examples may be fed directly as
 input to the tool, and in fact double as tests to the analyzer which may be run
-by means of the command `cargo run -- --multi-suites ./go-tests`.
+by means of the command `cargo run -- --multi-suites ./ifc-tests`.
