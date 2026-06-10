@@ -333,7 +333,7 @@ fn merge_outcomes<'a>(
     let mut merged = Vec::with_capacity(new.len());
 
     #[expect(clippy::shadow_unrelated, reason = "False positive")]
-    for (existing, new) in existing.iter().zip(new.into_iter()) {
+    for (existing, new) in existing.iter().zip(new) {
         merged.push(new.merge_with(existing, LabelBacktraceKind::Return, Cow::Borrowed(&pinned)));
     }
 

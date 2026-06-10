@@ -148,7 +148,7 @@ pub fn apply_capture_mutations<'a>(ctx: &mut AnalysisContext<'a>, func: &Functio
                 LabelBacktraceKind::Assignment,
                 Some(outer_decl.content()),
                 outer_value.location().clone(),
-                outer_value.backtrace().into_iter(),
+                outer_value.backtrace(),
             ));
         }
 
