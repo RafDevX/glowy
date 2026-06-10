@@ -177,7 +177,7 @@ impl Analyzer {
             } else if file_type.is_file() {
                 let file_real_path = entry.path();
 
-                if file_real_path.extension().filter(|e| *e == "go").is_none() {
+                if file_real_path.extension().is_none_or(|e| e != "go") {
                     continue;
                 }
 
