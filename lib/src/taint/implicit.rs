@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, iter};
 
 use parser::{
     Location, Span,
@@ -149,16 +149,16 @@ fn visit_for_range<'a>(
 
     let rhs_location = ctx.pin(range_expr.location().into_owned());
     let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
-    rhs_values.truncate(lhs_len);
 
     let children: Vec<_> = rhs_values.iter().filter_map(ValueRef::backtrace).collect();
-
     let rhs_backtrace = LabelBacktrace::fold(
-        children.iter(),
+        &children,
         LabelBacktraceKind::Expression,
         None,
         rhs_location,
     );
+
+    rhs_values.truncate(lhs_len);
 
     // branch backtrace must come before assignment since it'll only take place
     // if the for loop actually iterates (i.e., range expr is non-empty); e.g.
@@ -251,6 +251,8 @@ fn get_for_range_values<'a>(
             }) = &signature.result
             && yield_result.content() == "bool"
         {
+            let downgraded = value.downgrade(|| location.clone());
+
             let n_values: usize = signature.count_inputs();
 
             if n_values == 0 {
@@ -258,11 +260,41 @@ fn get_for_range_values<'a>(
                 // but that would lead to an incorrect branch backtrace
                 // being set, which is worse -- branch must depend on
                 // the label of `value`, since a function might have
-                // side effects
-                return vec![value.downgrade(|| location.clone())];
-            } else if n_values == 1 || n_values == 2 {
-                // FIXME: don't know how to propagate this as a sink
+                // side effects, and anyway the for body executes only when iter
+                // yields -- which may be conditional on whatever taints
+                // the iter value (e.g., closure captures, branch labels
+                // recorded via `record_yield_call`)
+                return vec![downgraded];
             }
+
+            // map each yield argument position to the labels accumulated
+            // from `yield(args)` calls inside the iter function body
+            // (see `FunctionValue::record_yield_call`); fall back to the
+            // function value's overall taint when nothing was recorded
+            // (e.g., on the first stabilization iteration, or when the
+            // iter wasn't recognized as such)
+            let yield_acc = func.yield_acc();
+
+            #[expect(clippy::if_not_else, reason = "Easier to understand")]
+            return if !yield_acc.is_empty() {
+                yield_acc
+                    .iter()
+                    .map(|slot| match slot {
+                        Some(bt) => ValueRef::from(bt.clone()).with_location(location.clone()),
+                        None => downgraded.clone_inner(),
+                    })
+                    .collect()
+            } else {
+                // function was never detected as being iter-shaped, but this is
+                // likely because it has never been visited yet, or because it
+                // has no known implementation for some other reason, so we
+                // still want to match the correct lhs cardinality so that the
+                // binding is accepted without reporting an error
+
+                iter::repeat_with(|| downgraded.clone_inner())
+                    .take(n_values)
+                    .collect()
+            };
         }
 
         vec![]

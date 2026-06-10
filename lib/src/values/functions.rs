@@ -36,6 +36,17 @@ pub struct FunctionValue<'a> {
     // even for closure capture resolution whenever the function literal is
     // actually invoked) -- map is empty if this is not a function literal
     captures: HashMap<Pinned<'a, Span<'a>>, CaptureBinding<'a>>,
+    // declaration site of the first parameter's identifier when this function
+    // is shaped as a range-over-func iterator (i.e., first param has type
+    // `func(...) bool`); None otherwise. used to recognize calls to that
+    // parameter as yield calls while visiting the function body
+    yield_param: Option<Pinned<'a, Span<'a>>>,
+    // labels accumulated from yield(args) calls inside the function body, one
+    // entry per yield argument position (per the yield param's signature).
+    // each entry includes the corresponding arg's backtrace unioned with the
+    // branch backtrace active at the call site. empty if not iter-shaped or
+    // if the yield function takes no arguments
+    yield_acc: Vec<Option<LabelBacktrace<'a>>>,
     // how many times this function has been called
     // (must be a shared ref, rather than a raw usize, since otherwise mutation
     // would not work as we'd only modify derived operand-name-access tainted
@@ -61,6 +72,8 @@ impl<'a> FunctionValue<'a> {
             sink,
             deferred_checks: vec![],
             captures: HashMap::new(),
+            yield_param: None,
+            yield_acc: vec![],
             call_count: Rc::new(RefCell::new(0)),
         }
     }
@@ -194,6 +207,59 @@ impl<'a> FunctionValue<'a> {
         *self.call_count.borrow()
     }
 
+    pub fn yield_param(&self) -> Option<&Pinned<'a, Span<'a>>> {
+        self.yield_param.as_ref()
+    }
+
+    pub fn yield_acc(&self) -> &[Option<LabelBacktrace<'a>>] {
+        &self.yield_acc
+    }
+
+    pub fn mark_range_iter_shaped(
+        &mut self,
+        yield_param: Pinned<'a, Span<'a>>,
+        yield_n_values: usize,
+    ) {
+        self.yield_param = Some(yield_param);
+        self.yield_acc = vec![None; yield_n_values];
+    }
+
+    pub fn record_yield_call(
+        &mut self,
+        arg_backtraces: &[Option<&LabelBacktrace<'a>>],
+        branch_backtrace: Option<&LabelBacktrace<'a>>,
+        at_location: &Pinned<'a, Location>,
+    ) {
+        // taint the function value itself with the branch context: a call to
+        // this function may behave conditionally on whatever the branch
+        // depends on (relevant when iter has 0 yield values, since outcome
+        // is empty and `downgrade` is the only signal available)
+        if let Some(branch) = branch_backtrace {
+            self.backtrace = LabelBacktrace::combine_options(
+                self.backtrace.take(),
+                Some(branch.clone()),
+                LabelBacktraceKind::Branch,
+                Cow::Borrowed(at_location),
+            );
+        }
+
+        for (slot, arg) in self.yield_acc.iter_mut().zip(arg_backtraces) {
+            let contribution = LabelBacktrace::combine_options(
+                arg.cloned(),
+                branch_backtrace.cloned(),
+                LabelBacktraceKind::Branch,
+                Cow::Borrowed(at_location),
+            );
+
+            *slot = LabelBacktrace::combine_options(
+                slot.take(),
+                contribution,
+                LabelBacktraceKind::Expression,
+                Cow::Borrowed(at_location),
+            );
+        }
+    }
+
     pub fn record_call(&mut self) {
         *self.call_count.borrow_mut() += 1;
     }
@@ -219,10 +285,16 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
             && self.captures.is_empty()
+            && self.yield_param.is_none()
+            && self.yield_acc.iter().all(Option::is_none)
     }
 
     fn subtract_label(&mut self, subtract: &Label<'a>) {
         self.backtrace.subtract_label(subtract);
+
+        for slot in &mut self.yield_acc {
+            slot.subtract_label(subtract);
+        }
     }
 }
 
@@ -261,6 +333,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             })
             .collect();
 
+        let yield_acc = self
+            .yield_acc
+            .iter()
+            .map(|slot| slot.realize(from_func, from_index, concrete))
+            .collect();
+
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
@@ -270,6 +348,8 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             sink: self.sink.clone(),
             deferred_checks,
             captures,
+            yield_param: self.yield_param,
+            yield_acc,
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
@@ -297,6 +377,8 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             sink: self.sink.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
+            yield_param: self.yield_param,
+            yield_acc: self.yield_acc.clone(),
             call_count: Rc::clone(&self.call_count), // preserve link to shared val
         }
     }
@@ -328,6 +410,8 @@ impl SnapshotAware for FunctionValue<'_> {
                     .get(decl)
                     .is_some_and(|other_binding| binding.snapshot_aware_eq(other_binding))
             })
+            && self.yield_param == other.yield_param
+            && self.yield_acc.snapshot_aware_eq(&other.yield_acc)
         // intentionally ignoring call count
     }
 }

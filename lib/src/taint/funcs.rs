@@ -4,7 +4,7 @@ use parser::{
     Annotation, Location, Span,
     ast::{
         BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode,
-        FunctionSignatureNode,
+        FunctionSignatureNode, TypeNode,
     },
 };
 
@@ -188,6 +188,24 @@ fn build_function_value<'a>(
     // value as outcome (with the right cardinality), to distinguish from a
     // blackbox function without implementation (which would have unset outcome)
     func_val.set_outcome(bottom_outcome);
+
+    // detect Go's range-over-func iterator shape: first param is typed as a
+    // function returning a bool. recognizing it lets us track yield(args)
+    // calls in the body and propagate their labels to `for ... := range <fn>`
+    if let Some(first_param) = signature.params.first()
+        && let [yield_id] = first_param.ids.as_slice()
+        && let TypeNode::Function {
+            signature: yield_sig,
+        } = &first_param.r#type
+        && let FunctionResultNode::Single(TypeNode::Name {
+            package: None,
+            id: yield_result,
+            ..
+        }) = &yield_sig.result
+        && yield_result.content() == "bool"
+    {
+        func_val.mark_range_iter_shaped(ctx.pin(*yield_id), yield_sig.count_inputs());
+    }
 
     // function value is now fully constructed, so just return it
     func_val
@@ -446,6 +464,39 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         .iter()
         .map(|(v, bt)| ((*v).clone(), bt.as_ref()))
         .collect();
+
+    // detect calls to the current function's yield parameter (Go's
+    // range-over-func: an iterator function `func(yield func(...) bool)`
+    // produces values by invoking yield, and we propagate those values'
+    // labels back to `for x := range <fn>` via the outer FunctionValue)
+    let yield_target = if let ExprNode::Name(id) = &*node.func {
+        ctx.current_function()
+            .as_ref()
+            .and_then(ValueRef::as_function)
+            .as_deref()
+            .and_then(FunctionValue::yield_param)
+            .copied()
+            .filter(|decl| {
+                ctx.symtab()
+                    .get_symbol(id.content())
+                    .is_some_and(|sym| sym.borrow().declared_name() == *decl)
+            })
+    } else {
+        None
+    };
+
+    if yield_target.is_some()
+        && let Some(mut current) = ctx.current_function()
+        && let Some(mut current_mut) = current.as_function_mut()
+    {
+        let arg_bts: Vec<_> = with_backtraces.iter().map(|(_, bt)| bt.as_ref()).collect();
+
+        current_mut.record_yield_call(
+            &arg_bts,
+            ctx.branch_backtrace(),
+            &ctx.pin(node.location.clone()),
+        );
+    }
 
     if let Some(annotation) = &node.annotation
         && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
