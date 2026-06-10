@@ -149,12 +149,7 @@ impl<'a> FunctionValue<'a> {
     }
 
     pub fn parameter_count(&self) -> Option<usize> {
-        let count = self
-            .signature()?
-            .params
-            .iter()
-            .map(|param| cmp::max(1, param.ids.len()))
-            .sum();
+        let count = self.signature()?.count_inputs();
 
         Some(count)
     }

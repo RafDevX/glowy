@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp};
+use std::borrow::Cow;
 
 use parser::{
     Location, Span,
@@ -251,11 +251,7 @@ fn get_for_range_values<'a>(
             }) = &signature.result
             && yield_result.content() == "bool"
         {
-            let n_values: usize = signature
-                .params
-                .iter()
-                .map(|p| cmp::max(1, p.ids.len()))
-                .sum();
+            let n_values: usize = signature.count_inputs();
 
             if n_values == 0 {
                 // note: this is wrong, we should return an empty Vec,

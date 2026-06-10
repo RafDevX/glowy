@@ -140,6 +140,17 @@ pub struct FunctionSignatureNode<'a> {
     pub result: FunctionResultNode<'a>,
 }
 
+impl FunctionSignatureNode<'_> {
+    #[must_use]
+    #[inline]
+    pub fn count_inputs(&self) -> usize {
+        self.params
+            .iter()
+            .map(|param| cmp::max(1, param.ids.len()))
+            .sum()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FunctionResultNode<'a> {
     None,
