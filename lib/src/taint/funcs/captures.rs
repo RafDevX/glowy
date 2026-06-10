@@ -101,8 +101,41 @@ pub fn record_closure_capture_fallbacks<'a>(ctx: &AnalysisContext<'a>, value: &m
     }
 }
 
-pub fn apply_capture_mutations<'a>(ctx: &mut AnalysisContext<'a>, func: &FunctionValue<'a>) {
+pub fn apply_capture_mutations<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
+    location: &Location,
+) {
     let capture_backtraces = derive_best_backtraces_for_captures(ctx, func);
+
+    // calculate the concrete call-site backtrace for each real parameter, which
+    // is later needed to realize capture labels after a function call with the
+    // actual argument values; this is necessary because a capture may
+    // indirectly depend on any argument, so we must resolve each capture
+    // against each parameter position
+    let arg_concretes = if let Some(signature) = func.signature() {
+        signature
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| {
+                (
+                    index,
+                    super::calculate_concrete_backtrace(
+                        ctx,
+                        index,
+                        param.ids.first(),
+                        param.variadic,
+                        args,
+                        location,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![]
+    };
 
     for (outer_decl, binding) in func.captures() {
         let local_symbol = ctx
@@ -131,6 +164,10 @@ pub fn apply_capture_mutations<'a>(ctx: &mut AnalysisContext<'a>, func: &Functio
         }
 
         let mut realized = Cow::Borrowed(&local_value);
+
+        for (index, concrete) in &arg_concretes {
+            realized = Cow::Owned(realized.realize(func.r#ref(), Some(*index), concrete.as_ref()));
+        }
 
         for (index, backtrace) in &capture_backtraces {
             realized = Cow::Owned(realized.realize(func.r#ref(), Some(*index), backtrace.as_ref()));
@@ -239,43 +276,6 @@ fn derive_concrete_backtrace_or_fallback<'a>(
     }
 
     hybrid
-}
-
-// returned backtrace is stripped of param/receiver synthetics (i.e., what would
-// only be available for realization at each call site), but preserves concrete
-// tags as well as possibly some capture-related fake param synthetics
-pub fn derive_hybrid_complex_aware_backtrace<'a>(
-    ctx: &AnalysisContext<'a>,
-    value: &ValueRef<'a>,
-) -> Option<LabelBacktrace<'a>> {
-    let Some(func) = value.as_function() else {
-        // not a function, just a normal value, so this is all we can do
-        // (there are no other treatment options available to us)
-        return value.backtrace();
-    };
-
-    #[rustfmt::skip]
-    let mut hybrid = derive_hybrid_function_outcome_backtrace(
-        &func,
-        None,
-        value.location().clone(),
-    );
-
-    for (index, concrete) in derive_best_backtraces_for_captures(ctx, &func) {
-        let Some(backtrace) = hybrid else {
-            // no point in continuing to realize if hybrid is already Bottom
-            break;
-        };
-
-        hybrid = backtrace.realize(func.r#ref(), Some(index), concrete.as_ref());
-    }
-
-    LabelBacktrace::combine_options(
-        hybrid,
-        value.backtrace(),
-        LabelBacktraceKind::Expression,
-        Cow::Borrowed(value.location()),
-    )
 }
 
 // as much as possible is made concrete, but some synthetics might persist

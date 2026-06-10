@@ -441,6 +441,12 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     let with_backtraces: Vec<_> = arg_values.iter().map(|v| (v, v.backtrace())).collect();
 
+    // reshape this as a ref more friendly for calling downstream functions
+    let with_backtraces_ref: Vec<_> = with_backtraces
+        .iter()
+        .map(|(v, bt)| ((*v).clone(), bt.as_ref()))
+        .collect();
+
     if let Some(annotation) = &node.annotation
         && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
     {
@@ -484,7 +490,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // treat it as a blackbox and assume the label of all its outputs is the
         // union of the label of all its inputs; we can't do anything fancy
 
-        captures::apply_capture_mutations(ctx, &func);
+        captures::apply_capture_mutations(ctx, &func, &with_backtraces_ref, &node.location);
 
         // note that this case is still possible even if func is a closure,
         // since e.g. closures can be assigned to previously declared (but not
@@ -551,15 +557,9 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         None
     };
 
-    // reshape this as a ref more friendly for calling downstream functions
-    let with_backtraces: Vec<_> = with_backtraces
-        .iter()
-        .map(|(v, bt)| ((*v).clone(), bt.as_ref()))
-        .collect();
+    captures::apply_capture_mutations(ctx, &func, &with_backtraces_ref, &node.location);
 
-    captures::apply_capture_mutations(ctx, &func);
-
-    handle_deferred_checks(ctx, &func, &ids, &with_backtraces, &node.location);
+    handle_deferred_checks(ctx, &func, &ids, &with_backtraces_ref, &node.location);
 
     let receiver_ref = receiver.as_ref().map(Option::as_ref);
 
@@ -569,7 +569,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         receiver_ref,
         &ids,
         outcome,
-        &with_backtraces,
+        &with_backtraces_ref,
         &node.location,
     );
 
@@ -734,8 +734,6 @@ fn calculate_concrete_backtrace<'a>(
             ctx.pin(location.clone()),
         )
     } else {
-        let value = &args[index].0;
-
-        captures::derive_hybrid_complex_aware_backtrace(ctx, value)
+        args[index].0.backtrace()
     }
 }
