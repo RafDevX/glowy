@@ -127,6 +127,7 @@ pub fn apply_capture_mutations<'a>(
                         index,
                         param.ids.first(),
                         param.variadic,
+                        &param.r#type,
                         args,
                         location,
                     ),
@@ -288,17 +289,36 @@ fn derive_hybrid_symbol_backtrace<'a>(
     let value = borrowed.value().get();
     drop(borrowed);
 
+    derive_hybrid_value_backtrace(
+        ctx,
+        &value,
+        None,
+        Some(declared_name.content()),
+        declared_name.pinned_location(),
+    )
+}
+
+// as much as possible is made concrete, but some synthetics might persist
+#[expect(
+    clippy::option_option,
+    reason = "Conveniently represent a backtrace's presence/absence"
+)]
+pub(super) fn derive_hybrid_value_backtrace<'a>(
+    ctx: &AnalysisContext<'a>,
+    value: &ValueRef<'a>,
+    cached_backtrace: Option<Option<LabelBacktrace<'a>>>,
+    symbol: Option<&'a str>,
+    location: Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    let cached_backtrace = cached_backtrace.unwrap_or_else(|| value.backtrace());
+
     let Some(func) = value.as_function() else {
         // not a function, just a normal value, so this is all we can do
         // (there are no other treatment options available to us)
-        return value.backtrace();
+        return cached_backtrace;
     };
 
-    let mut hybrid = derive_hybrid_function_outcome_backtrace(
-        &func,
-        Some(declared_name.content()),
-        declared_name.pinned_location(),
-    );
+    let mut hybrid = derive_hybrid_function_outcome_backtrace(&func, symbol, location);
 
     for (outer_decl, binding) in func.captures() {
         let Some(backtrace) = hybrid else {
@@ -337,7 +357,7 @@ fn derive_hybrid_symbol_backtrace<'a>(
 
     LabelBacktrace::combine_options(
         hybrid,
-        value.backtrace(),
+        cached_backtrace,
         LabelBacktraceKind::Expression,
         Cow::Borrowed(value.location()),
     )

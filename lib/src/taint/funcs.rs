@@ -422,9 +422,14 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
         for param in &signature.params {
             if param.ids.is_empty() {
-                ids.push((None, param.variadic));
+                ids.push((None, param.variadic, &param.r#type));
             } else {
-                ids.extend(param.ids.iter().map(|id| (Some(id), param.variadic)));
+                let iter = param
+                    .ids
+                    .iter()
+                    .map(|id| (Some(id), param.variadic, &param.r#type));
+
+                ids.extend(iter);
             }
         }
 
@@ -438,7 +443,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     if let Some(ids) = &ids
         && node.args.len() != ids.len()
     {
-        let variadic = ids.last().is_some_and(|(_, variadic)| *variadic);
+        let variadic = ids.last().is_some_and(|(_, variadic, _)| *variadic);
 
         if !(variadic && node.args.len() > ids.len()) {
             ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
@@ -656,15 +661,24 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 fn handle_deferred_checks<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
-    ids: &[(Option<&Span<'a>>, bool)],
+    ids: &[(Option<&Span<'a>>, bool, &TypeNode<'a>)],
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
 ) {
     let mut deferred_checks = Vec::from(func.deferred_checks());
     let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
 
-    for (index, (id, variadic)) in ids.iter().copied().enumerate() {
-        let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
+    for (index, (id, variadic, r#type)) in ids.iter().copied().enumerate() {
+        #[rustfmt::skip]
+        let concrete = calculate_concrete_backtrace(
+            ctx,
+            index,
+            id,
+            variadic,
+            r#type,
+            args,
+            location
+        );
 
         deferred_checks = deferred_checks
             .iter()
@@ -701,7 +715,7 @@ fn calculate_call_result<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     receiver: Option<Option<&LabelBacktrace<'a>>>,
-    ids: &[(Option<&Span<'a>>, bool)],
+    ids: &[(Option<&Span<'a>>, bool, &TypeNode<'a>)],
     outcome: &Vec<ValueRef<'a>>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
@@ -730,7 +744,7 @@ fn calculate_call_result<'a>(
         //     })
         //     .enumerate();
 
-        for (index, (id, variadic)) in ids.iter().copied().enumerate() {
+        for (index, (id, variadic, r#type)) in ids.iter().copied().enumerate() {
             if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 
@@ -739,7 +753,16 @@ fn calculate_call_result<'a>(
                 continue 'components;
             }
 
-            let concrete = calculate_concrete_backtrace(ctx, index, id, variadic, args, location);
+            #[rustfmt::skip]
+            let concrete = calculate_concrete_backtrace(
+                ctx,
+                index,
+                id,
+                variadic,
+                r#type,
+                args,
+                location
+            );
 
             realized = realized.realize(func.r#ref(), Some(index), concrete.as_ref());
         }
@@ -774,6 +797,7 @@ fn calculate_concrete_backtrace<'a>(
     index: usize,
     id: Option<&Span<'a>>,
     variadic: bool,
+    r#type: &TypeNode<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
 ) -> Option<LabelBacktrace<'a>> {
@@ -785,6 +809,26 @@ fn calculate_concrete_backtrace<'a>(
             ctx.pin(location.clone()),
         )
     } else {
-        args[index].0.backtrace()
+        let (value, cached_backtrace) = &args[index];
+
+        // for args bound to function-typed params, used the arg's hybrid
+        // backtrace, as it takes into account the function's outcome rather
+        // than just its intrinsic access backtrace (vs. cached_backtrace)
+
+        // this check is needed here even if derive_hybrid_value_backtrace
+        // implements similar branching, because it uses as_function and that
+        // could trigger an upgrade even when we know the param type is not a
+        // function, leading to incorrect behavior
+        if matches!(r#type, TypeNode::Function { .. }) {
+            captures::derive_hybrid_value_backtrace(
+                ctx,
+                value,
+                Some(cached_backtrace.cloned()),
+                id.map(Span::content),
+                value.location().clone(),
+            )
+        } else {
+            cached_backtrace.cloned()
+        }
     }
 }
