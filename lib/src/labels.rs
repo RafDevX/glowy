@@ -19,6 +19,53 @@ use parser::{Location, Span};
 
 use crate::{Pinned, values::FunctionRef};
 
+/// Represents a synthetic label tag's purpose and identity, for some function.
+///
+/// This enum models the possible reasons for why a specific
+/// [`LabelTag::Synthetic`] can be synthesized to artificially represent a
+/// [`Label`] whose value is not yet known and cannot be known until later
+/// during the analysis. It further provides sufficient context to identify a
+/// specific instance (within the context of a given function), such as the
+/// respective parameter index.
+///
+/// By definition, synthetic tags are transient auxiliary objects and are never
+/// returned to library consumers as part of the reported results for high-level
+/// program analysis, making this enum mostly an internal artifact.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+pub enum SyntheticSlot {
+    /// Conceptual placeholder for a function argument's label.
+    ///
+    /// The enclosed value is the index of the parameter in question within the
+    /// function's signature. It should be noted that this index is counted in
+    /// its most intuitive sense, not based on formal parameter definitions per
+    /// the Go spec: for example, in `func f(x, y int)`, `x` is counted as 0 and
+    /// `y` is counted as 1, rather than both being counted as 0.
+    Param(usize),
+    /// Conceptual placeholder for a function receiver's label.
+    Receiver,
+    /// Conceptual placeholder for a captured symbol's label.
+    ///
+    /// The enclosed value is the registered index of the symbol capture within
+    /// the [`FunctionValue`](crate::values::FunctionValue) in question.
+    ///
+    /// A synthetic representation is necessary because a closure function
+    /// sharing symbols with an outer scope still experiences mutations to them
+    /// happening after the closure's definition but before its invocation,
+    /// which means that the real label is unknown until invocation time.
+    Capture(usize),
+}
+
+impl fmt::Display for SyntheticSlot {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Param(index) => write!(f, "#{index}"),
+            Self::Receiver => write!(f, "$RECEIVER"),
+            Self::Capture(index) => write!(f, "$CAPTURE#{index}"),
+        }
+    }
+}
+
 /// Represents an individual tag within a label.
 ///
 /// This enum is used to model the different kinds of tags that may exist
@@ -33,15 +80,20 @@ use crate::{Pinned, values::FunctionRef};
 pub enum LabelTag<'a> {
     /// A concrete user-facing tag, like `blue` or `violet`.
     Concrete(&'a str),
-    /// An artificial tag conceptually representing a function argument's label.
+    /// An artificial tag conceptually representing an unknown label.
+    ///
+    /// This is used internally during the analysis of function bodies, such as
+    /// to represent each argument's label before knowing when the function is
+    /// actually invoked (and what values are passed as arguments).
     Synthetic {
         /// A reference to the associated function.
         func: FunctionRef<'a>,
-        /// The parameter's index within the function's signature.
+        /// The modality under which this tag is synthesized.
         ///
-        /// This value is [`None`] if and only if the synthetic tag refers to a
-        /// receiver parameter, rather than a normal function parameter.
-        index: Option<usize>,
+        /// This value uniquely identifies this tag within the context of a
+        /// given function, which means that it also universally represents it
+        /// when combined with a [`FunctionRef`].
+        slot: SyntheticSlot,
         /// The parameter's assigned identifier, if any.
         ///
         /// Note that this is redundant with [`LabelTag::Synthetic::index`], but
@@ -57,24 +109,13 @@ impl fmt::Display for LabelTag<'_> {
             Self::Concrete(tag) => write!(f, "{tag}"),
             Self::Synthetic {
                 func,
-                index: Some(index),
+                slot,
                 identifier,
             } => {
                 if let Some(id) = identifier {
-                    write!(f, "<{func}#{index}:{}>", id.content())
+                    write!(f, "<{func}{slot}:{}>", id.content())
                 } else {
-                    write!(f, "<{func}#{index}>")
-                }
-            }
-            Self::Synthetic {
-                func,
-                index: None,
-                identifier,
-            } => {
-                if let Some(id) = identifier {
-                    write!(f, "<{func}$RECEIVER:{}>", id.content())
-                } else {
-                    write!(f, "<{func}$RECEIVER>")
+                    write!(f, "<{func}{slot}>")
                 }
             }
         }
@@ -91,15 +132,15 @@ impl Ord for LabelTag<'_> {
             (
                 Self::Synthetic {
                     func: left_func,
-                    index: left_index,
+                    slot: left_slot,
                     ..
                 },
                 Self::Synthetic {
                     func: right_func,
-                    index: right_index,
+                    slot: right_slot,
                     ..
                 },
-            ) => left_func.cmp(right_func).then(left_index.cmp(right_index)),
+            ) => left_func.cmp(right_func).then(left_slot.cmp(right_slot)),
         }
     }
 }
@@ -119,15 +160,15 @@ impl PartialEq for LabelTag<'_> {
             (
                 Self::Synthetic {
                     func: left_func,
-                    index: left_index,
+                    slot: left_slot,
                     ..
                 },
                 Self::Synthetic {
                     func: right_func,
-                    index: right_index,
+                    slot: right_slot,
                     ..
                 },
-            ) => left_func == right_func && left_index == right_index,
+            ) => left_func == right_func && left_slot == right_slot,
             _ => false,
         }
     }
@@ -432,20 +473,25 @@ impl<'a> Label<'a> {
         tags.iter().any(|t| matches!(t, LabelTag::Synthetic { .. }))
     }
 
-    pub(crate) fn is_synthetic_func_param_decl(
+    pub(crate) fn is_synthetic_representation(
         &self,
-        param_func: &FunctionRef<'a>,
-        param_index: Option<usize>,
+        func: &FunctionRef<'a>,
+        slot: SyntheticSlot,
     ) -> bool {
         let Some(single) = self.as_single() else {
             return false;
         };
 
-        let LabelTag::Synthetic { func, index, .. } = single else {
+        let LabelTag::Synthetic {
+            func: label_func,
+            slot: label_slot,
+            ..
+        } = single
+        else {
             return false;
         };
 
-        func == param_func && *index == param_index
+        label_func == func && *label_slot == slot
     }
 }
 
@@ -680,7 +726,7 @@ impl<'a> LabelBacktrace<'a> {
     pub(crate) fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>, // None for receiver
+        from_slot: SyntheticSlot,
         concrete: Option<&Self>,
     ) -> Option<Self> {
         if matches!(
@@ -689,7 +735,7 @@ impl<'a> LabelBacktrace<'a> {
         ) {
             if self
                 .label()
-                .is_synthetic_func_param_decl(from_func, from_index)
+                .is_synthetic_representation(from_func, from_slot)
             {
                 Self::new(
                     LabelBacktraceKind::FunctionArgument,
@@ -710,7 +756,7 @@ impl<'a> LabelBacktrace<'a> {
             let children: Vec<_> = self
                 .children()
                 .iter()
-                .filter_map(|child| child.realize(from_func, from_index, concrete))
+                .filter_map(|child| child.realize(from_func, from_slot, concrete))
                 .collect();
 
             Self::fold(

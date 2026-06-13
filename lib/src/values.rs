@@ -21,7 +21,7 @@ pub use self::{
 };
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
 };
 
@@ -321,7 +321,7 @@ pub trait SelfAwareBacktraceContainer<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>, // None for receiver
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self;
 
@@ -340,12 +340,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>,
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         let borrowed = self.value.borrow();
 
-        let realized = borrowed.realize(from_func, from_index, concrete);
+        let realized = borrowed.realize(from_func, from_slot, concrete);
 
         Self {
             value: Rc::new(RefCell::new(realized)),
@@ -438,11 +438,11 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>,
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         if let Some(bt) = self {
-            bt.realize(from_func, from_index, concrete)
+            bt.realize(from_func, from_slot, concrete)
         } else {
             None
         }

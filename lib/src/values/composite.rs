@@ -8,7 +8,7 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade,
@@ -176,16 +176,16 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>,
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         let r#const = self
             .r#const
             .iter()
-            .map(|(k, v)| (k.clone(), v.realize(from_func, from_index, concrete)))
+            .map(|(k, v)| (k.clone(), v.realize(from_func, from_slot, concrete)))
             .collect();
 
-        let r#dyn = self.r#dyn.realize(from_func, from_index, concrete);
+        let r#dyn = self.r#dyn.realize(from_func, from_slot, concrete);
 
         Self { r#const, r#dyn }
     }

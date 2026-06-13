@@ -5,7 +5,7 @@ use parser::Location;
 use crate::{
     Pinned, SinkDescriptor,
     errors::{AnalysisError, AnalysisErrorKind},
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
@@ -382,13 +382,13 @@ impl<'a> DeferredEnforcementCheck<'a> {
     pub fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>, // None for receiver
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Option<Self> {
         let realized = match self {
             Self::Sink { sink, found, file } => Self::Sink {
                 sink: sink.clone(),
-                found: found.realize(from_func, from_index, concrete)?,
+                found: found.realize(from_func, from_slot, concrete)?,
                 file,
             },
             Self::Assertion {
@@ -398,7 +398,7 @@ impl<'a> DeferredEnforcementCheck<'a> {
                 location,
             } => Self::Assertion {
                 expected_sequence: expected_sequence.clone(),
-                found: found.realize(from_func, from_index, concrete),
+                found: found.realize(from_func, from_slot, concrete),
                 file,
                 location: location.clone(),
             },

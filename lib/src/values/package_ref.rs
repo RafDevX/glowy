@@ -2,7 +2,7 @@ use parser::{Location, Span};
 
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{BacktraceContainer, FunctionRef, SelfAwareBacktraceContainer},
 };
@@ -47,7 +47,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
     fn realize(
         &self,
         _from_func: &FunctionRef<'a>,
-        _from_index: Option<usize>,
+        _from_slot: SyntheticSlot,
         _concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         self.clone()

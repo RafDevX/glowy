@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{
     Pinned, SinkDescriptor,
     context::DeferredEnforcementCheck,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
@@ -31,10 +31,10 @@ pub struct FunctionValue<'a> {
     // symbols from outer lexical scopes captured by this closure, if applicable
     // (key is original symbol declaration, which must be pinned since this
     // closure might be called from another file, and value is meta-information
-    // including the fake unique param index we are using to refer to this
-    // capture so we can hook into the existing parameter realization system
-    // even for closure capture resolution whenever the function literal is
-    // actually invoked) -- map is empty if this is not a function literal
+    // including the unique index we are using to refer to this capture so we
+    // can hook into the existing realization system even for closure capture
+    // resolution whenever the function literal is actually invoked)
+    // [map is empty if this is not a function literal]
     captures: HashMap<Pinned<'a, Span<'a>>, CaptureBinding<'a>>,
     // declaration site of the first parameter's identifier when this function
     // is shaped as a range-over-func iterator (i.e., first param has type
@@ -187,19 +187,14 @@ impl<'a> FunctionValue<'a> {
         // calculations as the same time it'd be immutably borrowed for Entry
 
         if let Some(existing) = self.captures.get(&outer_decl) {
-            existing.fake_param_index()
+            existing.index()
         } else {
-            // we manufacture a unique parameter index to use within the
-            // realization pipeline which represents this ""parameter""
-            // (i.e., the captured symbol)
-            let fake_param_index = self.parameter_count().unwrap_or(0) + self.captures.len();
+            let capture_index = self.captures.len();
+            let binding = CaptureBinding::new(capture_index, local_decl);
 
-            self.captures.insert(
-                outer_decl,
-                CaptureBinding::new(fake_param_index, local_decl),
-            );
+            self.captures.insert(outer_decl, binding);
 
-            fake_param_index
+            capture_index
         }
     }
 
@@ -302,7 +297,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>,
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         // we need to recursively realize everything in the outcome, for example
@@ -310,33 +305,30 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         // (since then the inner function could depend on the outer's params)
         let outcome = self.outcome.as_ref().map(|vec| {
             vec.iter()
-                .map(|val| val.realize(from_func, from_index, concrete))
+                .map(|val| val.realize(from_func, from_slot, concrete))
                 .collect()
         });
 
-        let backtrace = self.backtrace.realize(from_func, from_index, concrete);
+        let backtrace = self.backtrace.realize(from_func, from_slot, concrete);
 
         let deferred_checks = self
             .deferred_checks
             .iter()
-            .filter_map(|check| check.realize(from_func, from_index, concrete))
+            .filter_map(|check| check.realize(from_func, from_slot, concrete))
             .collect();
 
         let captures = self
             .captures
             .iter()
             .map(|(outer_decl, binding)| {
-                (
-                    *outer_decl,
-                    binding.realize(from_func, from_index, concrete),
-                )
+                (*outer_decl, binding.realize(from_func, from_slot, concrete))
             })
             .collect();
 
         let yield_acc = self
             .yield_acc
             .iter()
-            .map(|slot| slot.realize(from_func, from_index, concrete))
+            .map(|slot| slot.realize(from_func, from_slot, concrete))
             .collect();
 
         Self {
@@ -523,10 +515,11 @@ impl SnapshotAware for FunctionRef<'_> {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CaptureBinding<'a> {
-    // fake function parameter that has been reserved for this capture so that
-    // we can later plug into the existing realization pipeline when the closure
-    // is actually invoked, allowing synthetic tags to become concrete labels
-    fake_param_index: usize,
+    // unique index that has been reserved for this capture to identify it
+    // within the context of the function in question, which can be used in
+    // synthetic tags by the realization pipeline when the closure is actually
+    // invoked to turn them into concrete labels
+    index: usize,
     // fake local symbol declaration created within the closure scope for this
     // capture (with a placeholder synthetic tag as its label)
     local_decl: Pinned<'a, Span<'a>>,
@@ -546,16 +539,16 @@ pub struct CaptureBinding<'a> {
 }
 
 impl<'a> CaptureBinding<'a> {
-    fn new(fake_param_index: usize, local_decl: Pinned<'a, Span<'a>>) -> Self {
+    fn new(index: usize, local_decl: Pinned<'a, Span<'a>>) -> Self {
         Self {
-            fake_param_index,
+            index,
             local_decl,
             hybrid_fallback: None,
         }
     }
 
-    pub fn fake_param_index(&self) -> usize {
-        self.fake_param_index
+    pub fn index(&self) -> usize {
+        self.index
     }
 
     pub fn local_decl(&self) -> Pinned<'a, Span<'a>> {
@@ -577,13 +570,13 @@ impl<'a> CaptureBinding<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
-        from_index: Option<usize>,
+        from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         let mut binding = self.clone();
 
         if let Some(Some(fallback)) = binding.hybrid_fallback() {
-            let realized = fallback.realize(from_func, from_index, concrete);
+            let realized = fallback.realize(from_func, from_slot, concrete);
 
             binding.set_hybrid_fallback(realized);
         }
@@ -594,7 +587,7 @@ impl<'a> CaptureBinding<'a> {
 
 impl SnapshotAware for CaptureBinding<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        self.fake_param_index == other.fake_param_index
+        self.index == other.index
             && self.local_decl == other.local_decl
             && self
                 .hybrid_fallback

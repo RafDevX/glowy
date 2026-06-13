@@ -12,7 +12,7 @@ use crate::{
     Pinned,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::Symbol,
     taint::{SinkDescriptor, SinkKind, annotations, enforcement, exprs},
     values::{
@@ -58,10 +58,10 @@ fn visit_function_def<'a>(
     ctx.symtab_mut().select_next_child_scope(); // push
 
     macro_rules! declare_param {
-        ($id:expr, $index:expr) => {
+        ($id:expr, $slot:expr) => {
             let synthetic = LabelTag::Synthetic {
                 func: r#ref.clone(),
-                index: $index,
+                slot: $slot,
                 identifier: Some($id),
             };
 
@@ -84,7 +84,7 @@ fn visit_function_def<'a>(
         && let [id] = receiver.ids.as_slice()
         && id.content() != "_"
     {
-        declare_param!(*id, None);
+        declare_param!(*id, SyntheticSlot::Receiver);
     }
 
     let mut param_index = 0;
@@ -93,7 +93,7 @@ fn visit_function_def<'a>(
         for &id in &param.ids {
             // only ignore if blank identifier
             if id.content() != "_" {
-                declare_param!(id, Some(param_index));
+                declare_param!(id, SyntheticSlot::Param(param_index));
             }
 
             param_index += 1;
@@ -682,14 +682,22 @@ fn handle_deferred_checks<'a>(
 
         deferred_checks = deferred_checks
             .iter()
-            .filter_map(|check| check.realize(func.r#ref(), Some(index), concrete.as_ref()))
+            .filter_map(|check| {
+                check.realize(func.r#ref(), SyntheticSlot::Param(index), concrete.as_ref())
+            })
             .collect();
     }
 
-    for (fake_index, concrete) in &capture_concretes {
+    for (index, concrete) in &capture_concretes {
         deferred_checks = deferred_checks
             .iter()
-            .filter_map(|check| check.realize(func.r#ref(), Some(*fake_index), concrete.as_ref()))
+            .filter_map(|check| {
+                check.realize(
+                    func.r#ref(),
+                    SyntheticSlot::Capture(*index),
+                    concrete.as_ref(),
+                )
+            })
             .collect();
     }
 
@@ -727,7 +735,7 @@ fn calculate_call_result<'a>(
         let mut realized = component.clone();
 
         if let Some(receiver) = receiver {
-            realized = realized.realize(func.r#ref(), None, receiver);
+            realized = realized.realize(func.r#ref(), SyntheticSlot::Receiver, receiver);
         }
 
         // vvv cannot actually do this because if/else would have diff types,
@@ -764,10 +772,17 @@ fn calculate_call_result<'a>(
                 location
             );
 
-            realized = realized.realize(func.r#ref(), Some(index), concrete.as_ref());
+            #[rustfmt::skip]
+            {
+                realized = realized.realize(
+                    func.r#ref(),
+                    SyntheticSlot::Param(index),
+                    concrete.as_ref()
+                );
+            };
         }
 
-        for (fake_index, concrete) in &capture_concretes {
+        for (index, concrete) in &capture_concretes {
             if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 
@@ -776,7 +791,11 @@ fn calculate_call_result<'a>(
                 continue 'components;
             }
 
-            realized = realized.realize(func.r#ref(), Some(*fake_index), concrete.as_ref());
+            realized = realized.realize(
+                func.r#ref(),
+                SyntheticSlot::Capture(*index),
+                concrete.as_ref(),
+            );
         }
 
         result.push(realized);

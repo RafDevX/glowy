@@ -8,7 +8,7 @@ use parser::{
 use crate::{
     Pinned,
     context::AnalysisContext,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::{Symbol, SymbolRef},
     values::{CaptureBinding, FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -67,7 +67,7 @@ pub fn register_closure_captures<'a>(
 
         let synthetic = LabelTag::Synthetic {
             func: r#ref.clone(),
-            index: Some(index),
+            slot: SyntheticSlot::Capture(index),
             identifier: Some(*local_decl.inner()),
         };
 
@@ -150,7 +150,7 @@ pub fn apply_capture_mutations<'a>(
             .backtrace()
             .as_ref()
             .map_or(&Label::Bottom, LabelBacktrace::label)
-            .is_synthetic_func_param_decl(func.r#ref(), Some(binding.fake_param_index()))
+            .is_synthetic_representation(func.r#ref(), SyntheticSlot::Capture(binding.index()))
         {
             // the fake local symbol still matches original fake declaration,
             // meaning no significant mutation occurred and so there is no need
@@ -167,11 +167,19 @@ pub fn apply_capture_mutations<'a>(
         let mut realized = Cow::Borrowed(&local_value);
 
         for (index, concrete) in &arg_concretes {
-            realized = Cow::Owned(realized.realize(func.r#ref(), Some(*index), concrete.as_ref()));
+            realized = Cow::Owned(realized.realize(
+                func.r#ref(),
+                SyntheticSlot::Param(*index),
+                concrete.as_ref(),
+            ));
         }
 
         for (index, backtrace) in &capture_backtraces {
-            realized = Cow::Owned(realized.realize(func.r#ref(), Some(*index), backtrace.as_ref()));
+            realized = Cow::Owned(realized.realize(
+                func.r#ref(),
+                SyntheticSlot::Capture(*index),
+                backtrace.as_ref(),
+            ));
         }
 
         if *realized == local_value {
@@ -202,7 +210,7 @@ pub fn derive_best_backtraces_for_captures<'a>(
         .captures()
         .map(|(outer_decl, binding)| {
             (
-                binding.fake_param_index(),
+                binding.index(),
                 derive_concrete_backtrace_or_fallback(ctx, outer_decl, binding),
             )
         })
@@ -231,10 +239,9 @@ pub fn derive_best_backtraces_for_captures<'a>(
             };
 
             for (prev_index, prev_concrete) in &previous {
-                #[rustfmt::skip]
                 let step = realized.realize(
                     func.r#ref(),
-                    Some(*prev_index),
+                    SyntheticSlot::Capture(*prev_index),
                     prev_concrete.as_ref(),
                 );
 
@@ -350,7 +357,7 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
 
         hybrid = backtrace.realize(
             func.r#ref(),
-            Some(binding.fake_param_index()),
+            SyntheticSlot::Capture(binding.index()),
             capture_concrete,
         );
     }
@@ -365,7 +372,7 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
 
 // returned backtrace is stripped of param/receiver synthetics (i.e., what would
 // only be available for realization at each call site), but preserves concrete
-// tags as well as capture-related fake param synthetics
+// tags as well as capture-related synthetics
 fn derive_hybrid_function_outcome_backtrace<'a>(
     func: &FunctionValue<'a>,
     symbol: Option<&'a str>,
@@ -392,15 +399,14 @@ fn realize_function_parameter_synthetics<'a>(
     func: &FunctionValue<'a>,
     mut concrete: LabelBacktrace<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    // note that this only realizes for real parameters and the receiver,
-    // not any fake ones reserved for captured variables
+    // note that this does not realize for captured variables
 
     for index in 0..func.parameter_count().unwrap_or(0) {
-        concrete = concrete.realize(func.r#ref(), Some(index), None)?;
+        concrete = concrete.realize(func.r#ref(), SyntheticSlot::Param(index), None)?;
     }
 
     // receiver
-    concrete = concrete.realize(func.r#ref(), None, None)?;
+    concrete = concrete.realize(func.r#ref(), SyntheticSlot::Receiver, None)?;
 
     Some(concrete)
 }
