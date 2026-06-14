@@ -12,10 +12,10 @@ use parser::{
 use crate::{
     Pinned,
     context::{AnalysisContext, DeferTarget},
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     symbols::Symbol,
     taint::{explicit, exprs},
-    values::ValueRef,
+    values::{SelfAwareBacktraceContainer, ValueRef},
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -251,7 +251,7 @@ fn get_for_range_values<'a>(
             }) = &signature.result
             && yield_result.content() == "bool"
         {
-            let downgraded = value.downgrade(|| location.clone());
+            let downgraded = func.downgrade_as_call(ctx, location.clone());
 
             let n_values: usize = signature.count_inputs();
 
@@ -277,11 +277,21 @@ fn get_for_range_values<'a>(
 
             #[expect(clippy::if_not_else, reason = "Easier to understand")]
             return if !yield_acc.is_empty() {
+                let call_branch = ctx.branch_backtrace();
+
                 yield_acc
                     .iter()
-                    .map(|slot| match slot {
-                        Some(bt) => ValueRef::from(bt.clone()).with_location(location.clone()),
-                        None => downgraded.clone_inner(),
+                    .map(|yielded| {
+                        let realized = yielded.realize(
+                            func.r#ref(),
+                            SyntheticSlot::CallSiteBranch,
+                            call_branch,
+                        );
+
+                        match realized {
+                            Some(bt) => ValueRef::from(bt).with_location(location.clone()),
+                            None => downgraded.clone_inner(), // fallback
+                        }
                     })
                     .collect()
             } else {

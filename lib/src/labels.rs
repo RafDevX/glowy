@@ -53,6 +53,17 @@ pub enum SyntheticSlot {
     /// happening after the closure's definition but before its invocation,
     /// which means that the real label is unknown until invocation time.
     Capture(usize),
+    /// Conceptual placeholder for the implicit branch label at invocation time.
+    ///
+    /// This is automatically injected into the branch label when analyzing the
+    /// body of any (non-`main`) function so that it later can be realized at
+    /// call-time into the branch label present then, if any so exists.
+    ///
+    /// Though a bit esoteric, this is crucial to detect implicit information
+    /// flows when functions are invoked only conditionally, especially for
+    /// functions that do not take arguments and so cannot propagate this
+    /// information any other way.
+    CallSiteBranch,
 }
 
 impl fmt::Display for SyntheticSlot {
@@ -62,6 +73,7 @@ impl fmt::Display for SyntheticSlot {
             Self::Param(index) => write!(f, "#{index}"),
             Self::Receiver => write!(f, "$RECEIVER"),
             Self::Capture(index) => write!(f, "$CAPTURE#{index}"),
+            Self::CallSiteBranch => write!(f, "$BRANCH"),
         }
     }
 }
@@ -747,6 +759,15 @@ impl<'a> LabelBacktrace<'a> {
             } else {
                 Some(self.clone())
             }
+        } else if matches!(self.kind, LabelBacktraceKind::Branch)
+            && self.children.is_empty() // root
+            && self
+                .label()
+                .is_synthetic_representation(from_func, from_slot)
+        {
+            // this is the function's synthetic implicit branch backtrace, which
+            // needs to be realized into the actual call-site branch backtrace
+            concrete.cloned()
         } else if self.children.is_empty() {
             // should only happen for e.g. ExplicitAnnotation with an unrelated
             // and concrete label, at least in theory

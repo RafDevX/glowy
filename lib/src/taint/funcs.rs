@@ -47,7 +47,7 @@ fn visit_function_def<'a>(
 
     let func_val = build_function_value(ctx, r#ref, signature, annotation, &value_location);
 
-    let mut value = ValueRef::new(Value::Function(Box::new(func_val)), value_location);
+    let mut value = ValueRef::new(Value::Function(Box::new(func_val)), value_location.clone());
 
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
@@ -113,6 +113,32 @@ fn visit_function_def<'a>(
 
     captures::register_closure_captures(ctx, r#ref, signature, receiver, body, &mut value);
 
+    // it is necessary for sinks and other enforcement mechanisms inside this
+    // function body to take into account the external branch backtrace at the
+    // time the function in invoked, as otherwise information could be leaked
+    // from whether the function is invoked at all (if done conditionally, e.g.
+    // only if secret > 0) --- however, call-site branch backtrace is obviously
+    // not known at this point of the analysis, so instead we inject a synthetic
+    // implicit branch backtrace that will later be realized into the actual,
+    // real, concrete branch backtrace each time that this function ins invoked
+    let inject_implicit_branch = !r#ref.is_main();
+    if inject_implicit_branch {
+        let synthetic = LabelTag::Synthetic {
+            func: r#ref.clone(),
+            slot: SyntheticSlot::CallSiteBranch,
+            identifier: None,
+        };
+
+        let bt = LabelBacktrace::new_root(
+            LabelBacktraceKind::Branch,
+            Label::from_single(synthetic),
+            None,
+            value_location,
+        );
+
+        ctx.push_branch_backtrace(bt);
+    }
+
     ctx.push_function(value.clone());
     ctx.increase_branch_scope_depth();
 
@@ -123,6 +149,10 @@ fn visit_function_def<'a>(
     ctx.decrease_branch_scope_depth();
     ctx.trigger_defer_target(DeferTarget::Function);
     ctx.pop_function();
+
+    if inject_implicit_branch {
+        ctx.pop_branch_backtrace();
+    }
 
     ctx.symtab_mut().select_parent_scope(); // pop
 
@@ -701,6 +731,13 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
+    let call_branch = ctx.branch_backtrace();
+
+    deferred_checks = deferred_checks
+        .iter()
+        .filter_map(|check| check.realize(func.r#ref(), SyntheticSlot::CallSiteBranch, call_branch))
+        .collect();
+
     // we don't need to -1 because this value is before the call count has been
     // incremented for the current call, so it already corresponds to a 0-index
     let call_index = func.call_count();
@@ -730,6 +767,10 @@ fn calculate_call_result<'a>(
 ) -> Vec<ValueRef<'a>> {
     let mut result = vec![];
     let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
+
+    // clone is necessary to not keep ctx borrowed, since later we need to
+    // re-borrow it as mutable and this would prevent that
+    let call_branch = ctx.branch_backtrace().cloned();
 
     'components: for component in outcome {
         let mut realized = component.clone();
@@ -797,6 +838,12 @@ fn calculate_call_result<'a>(
                 concrete.as_ref(),
             );
         }
+
+        realized = realized.realize(
+            func.r#ref(),
+            SyntheticSlot::CallSiteBranch,
+            call_branch.as_ref(),
+        );
 
         result.push(realized);
     }

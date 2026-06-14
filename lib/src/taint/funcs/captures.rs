@@ -138,6 +138,10 @@ pub fn apply_capture_mutations<'a>(
         vec![]
     };
 
+    // the injected synthetic implicit call-site branch backtrace must also be
+    // realized here so that it does not leak into the outer scope via mutations
+    let call_branch = ctx.branch_backtrace();
+
     for (outer_decl, binding) in func.captures() {
         let local_symbol = ctx
             .symtab()
@@ -181,6 +185,15 @@ pub fn apply_capture_mutations<'a>(
                 backtrace.as_ref(),
             ));
         }
+
+        // block to force correct formatting
+        {
+            realized = Cow::Owned(realized.realize(
+                func.r#ref(),
+                SyntheticSlot::CallSiteBranch,
+                call_branch,
+            ));
+        };
 
         if *realized == local_value {
             // no realization happened; ensure compliance with AssumedImmutable
@@ -370,9 +383,9 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
     )
 }
 
-// returned backtrace is stripped of param/receiver synthetics (i.e., what would
-// only be available for realization at each call site), but preserves concrete
-// tags as well as capture-related synthetics
+// returned backtrace is stripped of param/receiver/implicit-branch synthetics
+// (i.e., what would only be available for realization at each call site), but
+// preserves concrete tags as well as capture-related synthetics
 fn derive_hybrid_function_outcome_backtrace<'a>(
     func: &FunctionValue<'a>,
     symbol: Option<&'a str>,
@@ -405,8 +418,9 @@ fn realize_function_parameter_synthetics<'a>(
         concrete = concrete.realize(func.r#ref(), SyntheticSlot::Param(index), None)?;
     }
 
-    // receiver
     concrete = concrete.realize(func.r#ref(), SyntheticSlot::Receiver, None)?;
+
+    concrete = concrete.realize(func.r#ref(), SyntheticSlot::CallSiteBranch, None)?;
 
     Some(concrete)
 }

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     Pinned, SinkDescriptor,
-    context::DeferredEnforcementCheck,
+    context::{AnalysisContext, DeferredEnforcementCheck},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
@@ -257,6 +257,22 @@ impl<'a> FunctionValue<'a> {
 
     pub fn record_call(&mut self) {
         *self.call_count.borrow_mut() += 1;
+    }
+
+    // downgrade + realize the injected synthetic branch backtrace at call-site
+    pub fn downgrade_as_call(
+        &self,
+        ctx: &AnalysisContext<'a>,
+        location: Pinned<'a, Location>,
+    ) -> ValueRef<'a> {
+        let backtrace = self.backtrace_at_location(location.clone());
+        let downgraded = ValueRef::from_backtrace_or_bottom_at(backtrace, || location);
+
+        downgraded.realize(
+            self.r#ref(),
+            SyntheticSlot::CallSiteBranch,
+            ctx.branch_backtrace(),
+        )
     }
 }
 
