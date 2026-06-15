@@ -45,12 +45,12 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
     {
         match directive {
             annotations::SendDirective::Label => {
-                explicit_backtrace = Some(LabelBacktrace::new_root(
+                explicit_backtrace = LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
                     Label::from_tags(&annotation.tags),
                     None,
                     ctx.pin(node.location.clone()),
-                ));
+                );
             }
             annotations::SendDirective::Declassify => {
                 let label = annotations::resolve_declassification_label(ctx, annotation, true);

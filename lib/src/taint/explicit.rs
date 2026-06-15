@@ -120,12 +120,12 @@ pub fn visit_raw_binding_decl_spec<'a>(
         {
             match directive {
                 annotations::DeclDirective::Label => {
-                    explicit_backtrace = Some(LabelBacktrace::new_root(
+                    explicit_backtrace = LabelBacktrace::new_root(
                         LabelBacktraceKind::ExplicitAnnotation,
                         Label::from_tags(&annotation.tags),
                         Some(name.content()),
                         pinned.clone(),
-                    ));
+                    );
                 }
                 annotations::DeclDirective::Declassify => {
                     let label = annotations::resolve_declassification_label(ctx, annotation, true);
@@ -282,12 +282,12 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
     {
         match directive {
             annotations::AssignmentDirective::Label => {
-                explicit_backtrace = Some(LabelBacktrace::new_root(
+                explicit_backtrace = LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
                     Label::from_tags(&annotation.tags),
                     None,
                     ctx.pin(node.location.clone()),
-                ));
+                );
             }
             annotations::AssignmentDirective::Declassify => {
                 let label = annotations::resolve_declassification_label(ctx, annotation, true);

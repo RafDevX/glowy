@@ -76,7 +76,8 @@ pub fn register_closure_captures<'a>(
             Label::from_single(synthetic),
             Some(capture),
             value.location().clone(),
-        );
+        )
+        .unwrap(); // safe because we know label is not Bottom
 
         ctx.declare_new_symbol(Symbol::new_ref(
             local_decl,

@@ -77,7 +77,8 @@ fn visit_function_def<'a>(
                 Label::from_single(synthetic),
                 Some($id.content()),
                 ctx.pin($id.location()),
-            );
+            )
+            .unwrap(); // safe because we know label is not Bottom
 
             ctx.declare_new_symbol(Symbol::new_ref(
                 ctx.pin($id),
@@ -141,7 +142,8 @@ fn visit_function_def<'a>(
             Label::from_single(synthetic),
             None,
             value_location,
-        );
+        )
+        .unwrap(); // safe because we know label is not Bottom
 
         ctx.push_branch_backtrace(bt);
     }
@@ -183,12 +185,12 @@ fn build_function_value<'a>(
     {
         match directive {
             annotations::FunctionDirective::Label => {
-                explicit_backtrace = Some(LabelBacktrace::new_root(
+                explicit_backtrace = LabelBacktrace::new_root(
                     LabelBacktraceKind::ExplicitAnnotation,
                     Label::from_tags(&annotation.tags),
                     None,
                     value_location.clone(),
-                ));
+                );
             }
             annotations::FunctionDirective::Sanitizer => {
                 let label = annotations::resolve_declassification_label(ctx, annotation, false);

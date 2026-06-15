@@ -612,6 +612,8 @@ pub struct LabelBacktrace<'a> {
 impl<'a> LabelBacktrace<'a> {
     /// Base case; no children.
     ///
+    /// Returns [`None`] iff `label` is [`Label::Bottom`].
+    ///
     /// Useful, in particular, for [`LabelBacktraceKind::ExplicitAnnotation`]
     /// and [`LabelBacktraceKind::FunctionParameter`].
     pub(crate) fn new_root(
@@ -619,13 +621,17 @@ impl<'a> LabelBacktrace<'a> {
         label: Label<'a>,
         symbol: Option<&'a str>,
         location: Pinned<'a, Location>,
-    ) -> Self {
-        Self {
-            kind,
-            label,
-            symbol,
-            location,
-            children: vec![],
+    ) -> Option<Self> {
+        if label.is_bottom() {
+            None
+        } else {
+            Some(Self {
+                kind,
+                label,
+                symbol,
+                location,
+                children: vec![],
+            })
         }
     }
 
