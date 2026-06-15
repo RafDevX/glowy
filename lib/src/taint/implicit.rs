@@ -277,7 +277,11 @@ fn get_for_range_values<'a>(
 
             #[expect(clippy::if_not_else, reason = "Easier to understand")]
             return if !yield_acc.is_empty() {
-                let call_branch = ctx.branch_backtrace();
+                let call_branch = super::funcs::calculate_effective_call_site_branch_backtrace_for(
+                    ctx,
+                    &func,
+                    location.clone(),
+                );
 
                 yield_acc
                     .iter()
@@ -285,7 +289,7 @@ fn get_for_range_values<'a>(
                         let realized = yielded.realize(
                             func.r#ref(),
                             SyntheticSlot::CallSiteBranch,
-                            call_branch,
+                            call_branch.as_ref(),
                         );
 
                         match realized {

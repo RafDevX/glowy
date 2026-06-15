@@ -165,7 +165,9 @@ impl<'a> LeftValue<'a> for Span<'a> {
             reason = "Same context, just threaded through closures"
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
-            let mut mutated = if self.should_override(ctx, simple) {
+            let should_override = self.should_override(ctx, simple);
+
+            let mut mutated = if should_override {
                 rhs.nest_backtrace(
                     backtrace_kind,
                     Some(self.content()),
@@ -190,6 +192,34 @@ impl<'a> LeftValue<'a> for Span<'a> {
 
             // apply declassification
             mutated.subtract_label(subtract);
+
+            // when this assignment is a conservative merge and we cannot safely
+            // overwrite the target symbol entirely, the new value only inherits
+            // the rhs's label, but this is not sufficient for function values:
+            // any deferred enforcement checks would be silently discarded,
+            // which is unsound, so instead we explicitly absorb body-derived
+            // state here if both sides are functions. if the absorption is
+            // refused as unsafe (e.g., closure captures from one lambda
+            // cannot be coherently rebound onto another's), we cannot proceed
+            // soundly and must surface the limitation to the user instead of
+            // silently pretending the analysis is complete
+            if !should_override
+                && let Some(mut lhs_func) = mutated.as_function_mut()
+                && let Some(rhs_func) = rhs.as_function()
+            {
+                let absorbed = lhs_func.try_absorb_body_state_from(&rhs_func);
+
+                if !absorbed {
+                    // if the absorption is refused as unsafe (e.g., closure
+                    // captures from one lambda cannot be coherently rebound
+                    // onto another's), we cannot proceed soundly and must
+                    // surface the limitation instead of silently pretending
+                    // the analysis is complete
+                    ctx.report_error(AnalysisErrorKind::UnsoundFunctionMergingAssignment {
+                        location: location.clone(),
+                    });
+                }
+            }
 
             Some(mutated)
         });

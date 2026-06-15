@@ -45,7 +45,14 @@ fn visit_function_def<'a>(
         }
     };
 
-    let func_val = build_function_value(ctx, r#ref, signature, annotation, &value_location);
+    let func_val = build_function_value(
+        ctx,
+        r#ref,
+        signature,
+        receiver.is_some(),
+        annotation,
+        &value_location,
+    );
 
     let mut value = ValueRef::new(Value::Function(Box::new(func_val)), value_location.clone());
 
@@ -163,6 +170,7 @@ fn build_function_value<'a>(
     ctx: &mut AnalysisContext<'a>,
     r#ref: &FunctionRef<'a>,
     signature: &FunctionSignatureNode<'a>,
+    has_receiver: bool,
     annotation: Option<&Annotation<'a>>,
     value_location: &Pinned<'a, Location>,
 ) -> FunctionValue<'a> {
@@ -202,6 +210,7 @@ fn build_function_value<'a>(
     let mut func_val = FunctionValue::new(
         r#ref.clone(),
         Some(signature.clone()),
+        has_receiver,
         explicit_backtrace,
         sanitizer,
         sink,
@@ -731,11 +740,25 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
-    let call_branch = ctx.branch_backtrace();
+    let call_branch;
+    // block to force correct formatting
+    {
+        call_branch = calculate_effective_call_site_branch_backtrace_for(
+            ctx,
+            func,
+            ctx.pin(location.clone()),
+        );
+    };
 
     deferred_checks = deferred_checks
         .iter()
-        .filter_map(|check| check.realize(func.r#ref(), SyntheticSlot::CallSiteBranch, call_branch))
+        .filter_map(|check| {
+            check.realize(
+                func.r#ref(),
+                SyntheticSlot::CallSiteBranch,
+                call_branch.as_ref(),
+            )
+        })
         .collect();
 
     // we don't need to -1 because this value is before the call count has been
@@ -897,4 +920,26 @@ fn calculate_concrete_backtrace<'a>(
             cached_backtrace.cloned()
         }
     }
+}
+
+pub fn calculate_effective_call_site_branch_backtrace_for<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    at_location: Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    let call_branch = ctx.branch_backtrace().cloned();
+    let func_branch = func.backtrace().and_then(|bt| {
+        bt.realize(
+            func.r#ref(),
+            SyntheticSlot::CallSiteBranch,
+            call_branch.as_ref(),
+        )
+    });
+
+    LabelBacktrace::combine_options(
+        call_branch,
+        func_branch,
+        LabelBacktraceKind::Branch,
+        Cow::Owned(at_location),
+    )
 }

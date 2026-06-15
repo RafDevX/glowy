@@ -138,9 +138,11 @@ pub fn apply_capture_mutations<'a>(
         vec![]
     };
 
-    // the injected synthetic implicit call-site branch backtrace must also be
-    // realized here so that it does not leak into the outer scope via mutations
-    let call_branch = ctx.branch_backtrace();
+    let call_branch = super::calculate_effective_call_site_branch_backtrace_for(
+        ctx,
+        func,
+        ctx.pin(location.clone()),
+    );
 
     for (outer_decl, binding) in func.captures() {
         let local_symbol = ctx
@@ -191,7 +193,7 @@ pub fn apply_capture_mutations<'a>(
             realized = Cow::Owned(realized.realize(
                 func.r#ref(),
                 SyntheticSlot::CallSiteBranch,
-                call_branch,
+                call_branch.as_ref(),
             ));
         };
 

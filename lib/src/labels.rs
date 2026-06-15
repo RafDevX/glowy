@@ -505,6 +505,34 @@ impl<'a> Label<'a> {
 
         label_func == func && *label_slot == slot
     }
+
+    pub(crate) fn rebind_synthetic_func(
+        &self,
+        from_func: &FunctionRef<'a>,
+        to_func: &FunctionRef<'a>,
+    ) -> Self {
+        let Self::Tags(tags) = self else {
+            return Self::Bottom;
+        };
+
+        let rebound: BTreeSet<_> = tags
+            .iter()
+            .map(|t| match t {
+                LabelTag::Synthetic {
+                    func,
+                    slot,
+                    identifier,
+                } if func == from_func => LabelTag::Synthetic {
+                    func: to_func.clone(),
+                    slot: *slot,
+                    identifier: *identifier,
+                },
+                LabelTag::Synthetic { .. } | LabelTag::Concrete(_) => t.clone(),
+            })
+            .collect();
+
+        Self::Tags(rebound)
+    }
 }
 
 impl PartialOrd for Label<'_> {
@@ -672,12 +700,26 @@ impl<'a> LabelBacktrace<'a> {
 
     /// Constructs a new instance equal to this one but with one more child.
     pub(crate) fn with_child(&self, child: &Self) -> Self {
+        // if self is a root backtrace with synthetic tags, such as in the case
+        // of a function's synthetic implicit call-site branch backtrace that is
+        // presently being composed with an existing branch backtrace, we need
+        // to make sure that the former remains as-is without being merged with
+        // the latter, as otherwise it will become invisible to `realize` (which
+        // only takes action for root backtraces that have *only* synthetics)
+        let keep_self_as_child = self.children.is_empty() && self.label.has_any_synthetic();
+
+        let children: Vec<&Self> = if keep_self_as_child {
+            vec![self, child]
+        } else {
+            iter::once(child).chain(self.children.iter()).collect()
+        };
+
         Self::new(
             self.kind,
             self.label.union(child.label()),
             self.symbol,
             self.location.clone(),
-            iter::once(child).chain(self.children.iter()),
+            children.iter().copied(),
         )
         .unwrap() // safe because if self exists, label is not Bottom
     }
@@ -786,6 +828,41 @@ impl<'a> LabelBacktrace<'a> {
                 self.symbol(),
                 self.location().clone(),
             )
+        }
+    }
+
+    /// Rebinds all [`LabelTag::Synthetic`]s from one function to another.
+    ///
+    /// This applies recursively across the entire hierarchy, affecting only
+    /// synthetic tags associated with the specified initial function.
+    pub(crate) fn rebind_synthetic_func(
+        &self,
+        from_func: &FunctionRef<'a>,
+        to_func: &FunctionRef<'a>,
+    ) -> Self {
+        if self.children().is_empty() {
+            Self::new(
+                *self.kind(),
+                self.label.rebind_synthetic_func(from_func, to_func),
+                self.symbol,
+                self.location.clone(),
+                &self.children,
+            )
+            .unwrap() // safe because self exists
+        } else {
+            let children: Vec<_> = self
+                .children()
+                .iter()
+                .map(|child| child.rebind_synthetic_func(from_func, to_func))
+                .collect();
+
+            Self::fold(
+                &children,
+                *self.kind(),
+                self.symbol(),
+                self.location().clone(),
+            )
+            .unwrap() // safe because children is non-empty (we checked)
         }
     }
 

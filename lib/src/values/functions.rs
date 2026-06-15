@@ -19,6 +19,7 @@ pub struct FunctionValue<'a> {
     r#ref: FunctionRef<'a>,
     signature: Option<FunctionSignatureNode<'a>>, // None if no known decl
     // ^ this will generally only be None for blackbox-inferred functions
+    has_receiver: bool,
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
@@ -59,6 +60,7 @@ impl<'a> FunctionValue<'a> {
     pub fn new(
         r#ref: FunctionRef<'a>,
         signature: Option<FunctionSignatureNode<'a>>,
+        has_receiver: bool,
         backtrace: Option<LabelBacktrace<'a>>,
         sanitizer: Label<'a>,
         sink: Option<SinkDescriptor<'a>>,
@@ -66,6 +68,7 @@ impl<'a> FunctionValue<'a> {
         Self {
             r#ref,
             signature,
+            has_receiver,
             outcome: None,
             backtrace,
             sanitizer,
@@ -116,13 +119,13 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(r#ref, Some(signature), None, Label::Bottom, None)
+        Self::new(r#ref, Some(signature), false, None, Label::Bottom, None)
     }
 
     fn new_unknown(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, backtrace, Label::Bottom, None)
+        Self::new(r#ref, None, false, backtrace, Label::Bottom, None)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -159,6 +162,53 @@ impl<'a> FunctionValue<'a> {
 
     pub fn defer_check(&mut self, check: DeferredEnforcementCheck<'a>) {
         self.deferred_checks.push(check);
+    }
+
+    // try to absorb body-derived analysis state from another function, usually
+    // useful only when this value "shadows" or replaces in some way the other
+    #[must_use = "if false, caller should report a soundness limitation"]
+    pub(crate) fn try_absorb_body_state_from(&mut self, other: &Self) -> bool {
+        if other.deferred_checks.is_empty() {
+            // nothing to lose, so trivially sound (nothing to do)
+            return true;
+        }
+
+        if !self.captures.is_empty() || !other.captures.is_empty() {
+            // captured outer symbols from one function definition do not
+            // map onto another's: even if both happen to capture the same
+            // number of symbols, those symbols' Capture(i) slot indices are
+            // assigned independently per closure and so are not portable
+            return false;
+        }
+
+        if self.has_receiver != other.has_receiver {
+            // mismatching existence of receiver means a Receiver slot would
+            // have no counterpart in the other function and rebinding it
+            // would yield a placeholder that never gets realized
+            return false;
+        }
+
+        if self
+            .parameter_count()
+            .zip(other.parameter_count())
+            .is_none_or(|(a, b)| a != b)
+        {
+            // mismatching arity means Param(i) slots beyond the smaller
+            // arity have no counterpart, leaving placeholders unrealizable
+            return false;
+        }
+
+        let from_func = other.r#ref();
+        let to_func = self.r#ref().clone();
+
+        self.deferred_checks.extend(
+            other
+                .deferred_checks()
+                .iter()
+                .map(|check| check.rebind_synthetic_func(from_func, &to_func)),
+        );
+
+        true
     }
 
     pub fn parameter_count(&self) -> Option<usize> {
@@ -350,6 +400,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
+            has_receiver: self.has_receiver,
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -379,6 +430,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
+            has_receiver: self.has_receiver,
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
