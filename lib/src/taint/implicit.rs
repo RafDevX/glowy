@@ -13,6 +13,7 @@ use crate::{
     Pinned,
     context::{AnalysisContext, DeferTarget},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    snapshots::SnapshotAware,
     symbols::Symbol,
     taint::{explicit, exprs},
     values::{SelfAwareBacktraceContainer, ValueRef},
@@ -148,70 +149,124 @@ fn visit_for_range<'a>(
     };
 
     let rhs_location = ctx.pin(range_expr.location().into_owned());
-    let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
 
-    let children: Vec<_> = rhs_values.iter().filter_map(ValueRef::backtrace).collect();
-    let rhs_backtrace = LabelBacktrace::fold(
-        &children,
-        LabelBacktraceKind::Expression,
-        None,
-        rhs_location,
-    );
+    // the Go spec leaves map iteration order unspecified and explicitly
+    // allows entries created during iteration to be observed by subsequent
+    // iterations (see https://go.dev/ref/spec#For_range). for analysis
+    // soundness, the loop variables must therefore reflect any mutations
+    // the body performs on the ranged collection
+    //
+    // we model this by visiting the body more than once within a single
+    // analysis pass: the first visits are speculative and run with errors
+    // suppressed so they only contribute to label propagation; the final
+    // visit runs with errors enabled, and uses loop variable bindings that
+    // already account for everything the prior visits revealed
+    //
+    // loop termination relies on the lattice of labels being finite-height and
+    // growing monotonically across visits (assignments only ever union new
+    // tags into existing values); once a visit produces no new taint on the
+    // range expr, the next visit's bindings match the previous one and
+    // the loop exits. if this ever fails to converge, it is because of a
+    // soundness bug elsewhere in the analysis
 
-    rhs_values.truncate(lhs_len);
+    let mut last_rhs_backtrace: Option<Option<LabelBacktrace<'a>>> = None;
 
-    // branch backtrace must come before assignment since it'll only take place
-    // if the for loop actually iterates (i.e., range expr is non-empty); e.g.
-    // ```go
-    // secretArr := [0]int{}
-    // x := 7
-    // for x = range secretArr {}
-    // // if x still == 7, secretArr is empty
-    // ```
-    let pushed = if let Some(branch_backtrace) = LabelBacktrace::fold(
-        rhs_backtrace.as_ref(),
-        LabelBacktraceKind::Branch,
-        None,
-        ctx.pin(header_location.clone()),
-    ) {
-        // necessary because body only executes if range_expr is not empty
-        ctx.push_branch_backtrace(branch_backtrace);
+    // we need to remember deferred state before visiting the body, as all
+    // deferral effects of speculative body visits (such as from break/continue)
+    // must be rolled back before the next visit to prevent leakage
+    let pre_body_deferred = ctx.checkpoint_deferred_state();
 
-        true
-    } else {
-        false
-    };
+    loop {
+        // need to do this every iteration as it might have changed
+        let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
 
-    if let ForRangeNode::Decl { lhs, .. } = range {
-        explicit::visit_raw_binding_decl_spec(
-            ctx,
-            lhs,
-            rhs_values.into_iter(),
-            true,
-            true,
-            header_location,
+        let children: Vec<_> = rhs_values.iter().filter_map(ValueRef::backtrace).collect();
+        let rhs_backtrace = LabelBacktrace::fold(
+            &children,
+            LabelBacktraceKind::Expression,
             None,
+            rhs_location.clone(),
         );
-    } else if let ForRangeNode::Assignment { lhs, .. } = range {
-        explicit::visit_raw_assignment(
-            ctx,
-            AssignmentKind::Simple,
-            lhs.iter(),
-            rhs_values.into_iter(),
+
+        rhs_values.truncate(lhs_len);
+
+        let stable = last_rhs_backtrace
+            .as_ref()
+            .is_some_and(|prev| prev.snapshot_aware_eq(&rhs_backtrace));
+
+        // branch backtrace must come before assignment since it'll only take
+        // place if the for loop actually iterates (i.e., range expr is
+        // non-empty); e.g.
+        // ```go
+        // secretArr := [0]int{}
+        // x := 7
+        // for x = range secretArr {}
+        // // if x still == 7, secretArr is empty
+        // ```
+        let pushed = if let Some(branch_backtrace) = LabelBacktrace::fold(
+            rhs_backtrace.as_ref(),
+            LabelBacktraceKind::Branch,
             None,
-            &Label::Bottom,
-            header_location,
-        );
-    }
+            ctx.pin(header_location.clone()),
+        ) {
+            // necessary because body only executes if range_expr is not empty
+            ctx.push_branch_backtrace(branch_backtrace);
 
-    // TODO: `range ch` must update the channel's label wrt to the existing
-    // branch label, since it will be depleted only in that condition
+            true
+        } else {
+            false
+        };
 
-    // vvv this will create another scope for the for body, which is intended
-    super::visit_block(ctx, body);
+        if let ForRangeNode::Decl { lhs, .. } = range {
+            explicit::visit_raw_binding_decl_spec(
+                ctx,
+                lhs,
+                rhs_values.into_iter(),
+                true,
+                true,
+                header_location,
+                None,
+            );
+        } else if let ForRangeNode::Assignment { lhs, .. } = range {
+            explicit::visit_raw_assignment(
+                ctx,
+                AssignmentKind::Simple,
+                lhs.iter(),
+                rhs_values.into_iter(),
+                None,
+                &Label::Bottom,
+                header_location,
+            );
+        }
 
-    if pushed {
-        ctx.pop_branch_backtrace();
+        // TODO: `range ch` must update the channel's label wrt to the existing
+        // branch label, since it will be depleted only in that condition
+
+        if !stable {
+            ctx.push_error_suppression();
+        }
+
+        // vvv this will create another scope for the for body, which is intended
+        super::visit_block(ctx, body);
+
+        if !stable {
+            ctx.pop_error_suppression();
+        }
+
+        if pushed {
+            ctx.pop_branch_backtrace();
+        }
+
+        if stable {
+            break;
+        }
+
+        // the next iteration must re-enter the same body scope (and not a
+        // sibling), so undo the cursor advance that `visit_block` performed
+        ctx.symtab_mut().rewind_child_scope_cursor();
+
+        ctx.restore_deferred_state(pre_body_deferred.clone());
+        last_rhs_backtrace = Some(rhs_backtrace);
     }
 }
 

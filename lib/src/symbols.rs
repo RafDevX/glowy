@@ -167,6 +167,14 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
+    pub fn rewind_child_scope_cursor(&mut self) {
+        if let Some(cursor) = self.current_cursor.last_mut()
+            && *cursor > 0
+        {
+            *cursor -= 1;
+        }
+    }
+
     fn get_parent_scope(&self) -> Option<ScopeRef<'a>> {
         // None if already at the root (package scope)
         self.current_scope.borrow().parent.clone()

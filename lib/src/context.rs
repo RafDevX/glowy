@@ -61,6 +61,14 @@ pub struct AnalysisContext<'a> {
     /// }
     /// ```
     current_branch_scope_depth: u8,
+    /// How many levels deep analysis will currently suppress reporting errors.
+    ///
+    /// While this is non-zero, [`Self::report_error_at`] (and any caller that
+    /// goes through it, like [`Self::report_error`]) becomes a no-op. This is
+    /// used by passes that must speculatively (re-)visit some piece of code
+    /// for soundness reasons (e.g., the inner fix-point over a `for range`
+    /// body) without producing duplicate diagnostics for assertions/sinks.
+    error_suppression_depth: u8,
     /// Locations of currently active split control-flow regions.
     split_control_flow_regions: Vec<Pinned<'a, Location>>,
 }
@@ -77,6 +85,7 @@ impl<'a> AnalysisContext<'a> {
             deferred_branch_backtraces: Vec::new(),
             current_calculated_branch_backtrace: None,
             current_branch_scope_depth: 0,
+            error_suppression_depth: 0,
             split_control_flow_regions: Vec::new(),
         }
     }
@@ -175,6 +184,18 @@ impl<'a> AnalysisContext<'a> {
         self.calculate_composite_branch_backtrace();
     }
 
+    pub fn checkpoint_deferred_state(&self) -> DeferredBranchBacktraceCheckpoint<'a> {
+        DeferredBranchBacktraceCheckpoint {
+            deferred: self.deferred_branch_backtraces.clone(),
+            composite: self.current_calculated_branch_backtrace.clone(),
+        }
+    }
+
+    pub fn restore_deferred_state(&mut self, checkpoint: DeferredBranchBacktraceCheckpoint<'a>) {
+        self.deferred_branch_backtraces = checkpoint.deferred;
+        self.current_calculated_branch_backtrace = checkpoint.composite;
+    }
+
     fn calculate_composite_branch_backtrace(&mut self) {
         self.current_calculated_branch_backtrace = if self.deferred_branch_backtraces.is_empty() {
             // avoid cloning self.branch_backtraces.last():
@@ -204,6 +225,14 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn decrease_branch_scope_depth(&mut self) {
         self.current_branch_scope_depth -= 1;
+    }
+
+    pub fn push_error_suppression(&mut self) {
+        self.error_suppression_depth += 1;
+    }
+
+    pub fn pop_error_suppression(&mut self) {
+        self.error_suppression_depth -= 1;
     }
 
     pub fn push_split_control_flow(&mut self, location: Location) {
@@ -250,7 +279,7 @@ impl<'a> AnalysisContext<'a> {
     }
 
     pub fn report_error_at(&mut self, file: &'a Path, kind: AnalysisErrorKind<'a>) {
-        if self.stage.admits_errors() {
+        if self.stage.admits_errors() && self.error_suppression_depth == 0 {
             self.errors.push(AnalysisError { file, kind });
         }
     }
@@ -347,11 +376,18 @@ impl AnalysisStage {
     }
 }
 
+#[derive(Clone)]
 struct DeferredBranchBacktrace<'a> {
     backtrace: LabelBacktrace<'a>,
     until: DeferTarget<'a>,
     at_depth: u8,
     because: Pinned<'a, Location>,
+}
+
+#[derive(Clone)]
+pub struct DeferredBranchBacktraceCheckpoint<'a> {
+    deferred: Vec<DeferredBranchBacktrace<'a>>,
+    composite: Option<LabelBacktrace<'a>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
