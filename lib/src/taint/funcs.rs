@@ -14,7 +14,10 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::Symbol,
-    taint::{SinkDescriptor, SinkKind, annotations, enforcement, exprs},
+    taint::{
+        BlanketDirective, BlanketDirectiveKind, SinkDescriptor, SinkKind, annotations, enforcement,
+        exprs,
+    },
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
@@ -574,13 +577,43 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
-    if let Some(blanket_sink) = func.sink() {
+    if let Some(inherent_sink) = func.sink() {
         for (_, arg_bt) in &with_backtraces {
-            enforcement::trigger_sink(ctx, Cow::Borrowed(blanket_sink), arg_bt.clone());
+            enforcement::trigger_sink(ctx, Cow::Borrowed(inherent_sink), arg_bt.clone());
         }
     }
 
     let call_location = ctx.pin(node.location.clone());
+
+    let blanket_bt = {
+        let mut blanket_label = Label::Bottom;
+
+        for directive in resolve_blanket_directives(ctx, &node.func) {
+            match directive.kind() {
+                BlanketDirectiveKind::Sink => {
+                    let sink = SinkDescriptor {
+                        kind: SinkKind::Call,
+                        label: directive.label(),
+                        location: node.location.clone(),
+                    };
+
+                    for (_, arg_bt) in &with_backtraces {
+                        enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg_bt.clone());
+                    }
+                }
+                BlanketDirectiveKind::Source => {
+                    blanket_label = blanket_label.union(&directive.label());
+                }
+            }
+        }
+
+        LabelBacktrace::new_root(
+            LabelBacktraceKind::BlanketSource,
+            blanket_label,
+            None,
+            call_location.clone(),
+        )
+    };
 
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must
@@ -609,7 +642,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             // we have a signature, so we know exactly how many values it
             // returns and so can use that information
 
-            return iter::repeat_with(|| {
+            let mut result: Vec<_> = iter::repeat_with(|| {
                 ValueRef::from_backtrace_or_bottom_at(
                     bt.clone(), // clone makes borrow checker happy
                     || call_location.clone(),
@@ -617,6 +650,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             })
             .take(signature.result.len())
             .collect();
+
+            nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
+
+            return result;
         }
 
         // we have no way of knowing how many values this function returns, so
@@ -625,10 +662,14 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
         let inner = ValueRef::from_backtrace_or_bottom_at(bt, || call_location.clone());
 
-        return vec![ValueRef::new(
+        let mut result = vec![ValueRef::new(
             Value::Mobius(MobiusValue::new(inner)),
-            call_location,
+            call_location.clone(),
         )];
+
+        nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
+
+        return result;
     };
 
     // by this point, we know `func.outcome()` is `Some`, which means we have
@@ -687,6 +728,8 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         *realized = realized.with_location(call_location.clone());
     }
 
+    nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
+
     // re-borrow as mutable
     drop(func);
     if let Some(mut func_mut) = value.as_function_mut() {
@@ -697,6 +740,51 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
+}
+
+fn resolve_blanket_directives<'a, 'b>(
+    ctx: &'b AnalysisContext<'a>,
+    func_expr: &ExprNode<'a>,
+) -> &'a [BlanketDirective]
+where
+    'a: 'b,
+{
+    // TODO: extend this to more than just pkg.name
+
+    let ExprNode::Selection(selection) = func_expr else {
+        return &[];
+    };
+
+    let ExprNode::Name(qualifier) = &*selection.base else {
+        return &[];
+    };
+
+    let Some(pkg_path) = ctx.symtab().package_path_for_qualifier(qualifier.content()) else {
+        return &[];
+    };
+
+    let key = format!("{}.{}", pkg_path, selection.selector.content());
+
+    ctx.blanket_directives_for(&key)
+}
+
+fn nest_blanket_source<'a>(
+    result: &mut [ValueRef<'a>],
+    blanket_bt: Option<&LabelBacktrace<'a>>,
+    call_location: &Pinned<'a, Location>,
+) {
+    let Some(bt) = blanket_bt else {
+        return;
+    };
+
+    for value in result.iter_mut() {
+        *value = value.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            call_location.clone(),
+            [bt.clone()],
+        );
+    }
 }
 
 fn handle_deferred_checks<'a>(

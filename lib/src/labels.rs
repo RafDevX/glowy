@@ -580,6 +580,33 @@ impl fmt::Display for Label<'_> {
     }
 }
 
+pub(crate) struct OwnedLabel(Vec<String>);
+
+impl OwnedLabel {
+    pub(crate) fn as_label(&'_ self) -> Label<'_> {
+        let slices: Vec<_> = self.0.iter().map(String::as_str).collect();
+
+        Label::from_tags(&slices)
+    }
+}
+
+impl From<&Label<'_>> for OwnedLabel {
+    fn from(label: &Label<'_>) -> Self {
+        let tags = match label {
+            Label::Tags(tags) => tags
+                .iter()
+                .filter_map(|tag| match tag {
+                    LabelTag::Concrete(s) => Some((*s).to_owned()),
+                    LabelTag::Synthetic { .. } => None,
+                })
+                .collect(),
+            Label::Bottom => Vec::new(),
+        };
+
+        Self(tags)
+    }
+}
+
 /// Represents the propagation history leading up to a label attribution.
 ///
 /// This hierarchical structure keeps track of why a certain piece of data has
@@ -974,6 +1001,8 @@ impl<'a> From<LabelBacktrace<'a>> for Label<'a> {
 pub enum LabelBacktraceKind {
     /// Explicit source code annotation.
     ExplicitAnnotation,
+    /// Explicit blanket information source registered to the analyzer.
+    BlanketSource,
     /// Assignment of some tainted expression to a variable.
     Assignment,
     /// Bootstrapping label from initialization expression in declaration.

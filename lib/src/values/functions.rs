@@ -25,7 +25,7 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // Label to be subtracted from realized result at call (declassification)
     sanitizer: Label<'a>,
-    // blanket deferred sink that all calls to this func implicitly represent
+    // inherent deferred sink that all calls to this func implicitly represent
     sink: Option<SinkDescriptor<'a>>, // None if not a sink
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,

@@ -353,6 +353,10 @@ impl<'a> SymbolTable<'a> {
         self.current_file_named_imports.contains_key(qualifier)
     }
 
+    pub fn package_path_for_qualifier(&self, qualifier: &str) -> Option<&FullPackagePath> {
+        self.current_file_named_imports.get(qualifier)
+    }
+
     pub fn is_package_blackbox(&self, qualifier: &str) -> bool {
         if let Some(path) = self.current_file_named_imports.get(qualifier)
             && let Some(envelope) = self.package_scopes.get(path)

@@ -8,6 +8,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
+    taint::{BlanketDirective, BlanketDirectives},
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -71,10 +72,12 @@ pub struct AnalysisContext<'a> {
     error_suppression_depth: u8,
     /// Locations of currently active split control-flow regions.
     split_control_flow_regions: Vec<Pinned<'a, Location>>,
+    /// Universally-applicable directives registered for specific functions.
+    blanket_directives: &'a BlanketDirectives,
 }
 
 impl<'a> AnalysisContext<'a> {
-    pub fn new() -> Self {
+    pub fn new(blanket_directives: &'a BlanketDirectives) -> Self {
         AnalysisContext {
             stage: AnalysisStage::default(),
             symbol_table: SymbolTable::new(),
@@ -87,6 +90,7 @@ impl<'a> AnalysisContext<'a> {
             current_branch_scope_depth: 0,
             error_suppression_depth: 0,
             split_control_flow_regions: Vec::new(),
+            blanket_directives,
         }
     }
 
@@ -278,6 +282,12 @@ impl<'a> AnalysisContext<'a> {
         func.defer_check(check);
     }
 
+    pub fn blanket_directives_for(&self, func_path: &str) -> &'a [BlanketDirective] {
+        self.blanket_directives
+            .get(func_path)
+            .map_or(&[], Vec::as_slice)
+    }
+
     pub fn report_error_at(&mut self, file: &'a Path, kind: AnalysisErrorKind<'a>) {
         if self.stage.admits_errors() && self.error_suppression_depth == 0 {
             self.errors.push(AnalysisError { file, kind });
@@ -326,12 +336,6 @@ impl<'a> AnalysisContext<'a> {
                 found: *name.inner(),
             });
         }
-    }
-}
-
-impl Default for AnalysisContext<'_> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

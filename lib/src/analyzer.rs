@@ -1,5 +1,6 @@
 use std::{
-    collections::BTreeMap,
+    borrow::Cow,
+    collections::{BTreeMap, hash_map::Entry},
     fs,
     io::{self, BufRead},
     path,
@@ -10,7 +11,8 @@ use crate::{
     context::{AnalysisContext, AnalysisStage},
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
-    taint,
+    labels::Label,
+    taint::{self, BlanketDirective, BlanketDirectiveKind, BlanketDirectives},
 };
 
 /// Primary orchestrator and conductor of the analysis process.
@@ -37,6 +39,11 @@ pub struct Analyzer {
     ///
     /// (Ordering reduces the need for switching context between packages).
     files: Vec<SourceFile>,
+    /// Universal analysis configuration directives applying for all files.
+    ///
+    /// This is used instead of in-source function annotations, especially for
+    /// functions not defined in this module (such as standard library ones).
+    blanket_directives: BlanketDirectives,
 }
 
 impl Analyzer {
@@ -65,6 +72,7 @@ impl Analyzer {
         Self {
             module_base: module_base.to_owned(),
             files: Vec::new(),
+            blanket_directives: BlanketDirectives::new(),
         }
     }
 
@@ -254,6 +262,97 @@ impl Analyzer {
             .map(|index| self.files[index].contents())
     }
 
+    fn add_blanket_directive<'f>(
+        &mut self,
+        kind: BlanketDirectiveKind,
+        func_path: impl Into<Cow<'f, str>>,
+        label: &Label<'_>,
+    ) {
+        let func_path = func_path.into().into_owned();
+
+        let directive = BlanketDirective::new(kind, label);
+
+        match self.blanket_directives.entry(func_path) {
+            Entry::Occupied(mut occupied) => occupied.get_mut().push(directive),
+            Entry::Vacant(vacant) => {
+                vacant.insert(vec![directive]);
+            }
+        }
+    }
+
+    /// Universally registers a function as an information source.
+    ///
+    /// This instructs the analyzer to always consider all calls to the given
+    /// function as yielding the provided [`Label`], in addition to what is
+    /// already otherwise derived from the function.
+    ///
+    /// The function path (`func_path`) is expected to be well-formed with the
+    /// fully qualified Go package path of where the function is accessed,
+    /// followed by a `.` and then the function name.
+    ///
+    /// Each invocation to this function extends the blanket directives
+    /// associated with the function path, meaning that previous versions are
+    /// not overwritten. For sources, labels accumulate (union), so two source
+    /// registrations for `{a}` and `{b}` are effectively equivalent to one
+    /// registration for `{a, b}`.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    ///
+    /// analyzer.add_blanket_source(
+    ///     "example.com/company-name/proj/sub.SomeFunc",
+    ///     &Label::from_tags(&["secret"])
+    /// );
+    ///
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    #[inline]
+    pub fn add_blanket_source<'f>(
+        &mut self,
+        func_path: impl Into<Cow<'f, str>>,
+        label: &Label<'_>,
+    ) {
+        self.add_blanket_directive(BlanketDirectiveKind::Source, func_path, label);
+    }
+
+    /// Universally registers a function as an information sink.
+    ///
+    /// This instructs the analyzer to always consider all calls to the given
+    /// function as only accepting the provided [`Label`].
+    ///
+    /// The function path (`func_path`) is expected to be well-formed with the
+    /// fully qualified Go package path of where the function is accessed,
+    /// followed by a `.` and then the function name.
+    ///
+    /// Each invocation to this function extends the blanket directives
+    /// associated with the function path, meaning that previous versions are
+    /// not overwritten. For sinks, each invocation defines an independent
+    /// policy check, so two sink registrations for `{a}` and `{b}` are treated
+    /// separately, and call arguments must satisfy both of them.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    ///
+    /// analyzer.add_blanket_sink(
+    ///     "example.com/company-name/proj/sub.SomeFunc",
+    ///     &Label::from_tags(&["trusted"])
+    /// );
+    ///
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    #[inline]
+    pub fn add_blanket_sink<'f>(&mut self, func_path: impl Into<Cow<'f, str>>, label: &Label<'_>) {
+        self.add_blanket_directive(BlanketDirectiveKind::Sink, func_path, label);
+    }
+
     /// Inspects the registered files for security policy violations.
     ///
     /// This encapsulates all principal logic in Glowy. All Go source code files
@@ -321,7 +420,7 @@ impl Analyzer {
             return Err(parse_errors);
         }
 
-        let mut context = AnalysisContext::new();
+        let mut context = AnalysisContext::new(&self.blanket_directives);
 
         macro_rules! process_taint_analysis_iteration {
             ($visitor:path, false) => {

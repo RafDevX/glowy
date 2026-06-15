@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use parser::{
     Location, Span,
     ast::{BlockNode, DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
@@ -7,7 +9,7 @@ use crate::{
     FullPackagePath,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    labels::Label,
+    labels::{Label, OwnedLabel},
     snapshots::SnapshotAware,
     values::BacktraceContainer,
 };
@@ -69,6 +71,38 @@ pub enum SinkKind {
     Function,
     /// A send statement.
     Send,
+}
+
+/// The map's key is a function path (e.g., `os.Remove` or
+/// `example.com/company-name/proj/sub-package.funcName`).
+pub type BlanketDirectives = HashMap<String, Vec<BlanketDirective>>;
+
+pub struct BlanketDirective {
+    kind: BlanketDirectiveKind,
+    label: OwnedLabel,
+}
+
+impl BlanketDirective {
+    pub(crate) fn new(kind: BlanketDirectiveKind, label: &Label<'_>) -> Self {
+        Self {
+            kind,
+            label: OwnedLabel::from(label),
+        }
+    }
+
+    pub(crate) fn kind(&self) -> BlanketDirectiveKind {
+        self.kind
+    }
+
+    pub(crate) fn label(&self) -> Label<'_> {
+        self.label.as_label()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BlanketDirectiveKind {
+    Source,
+    Sink,
 }
 
 #[expect(

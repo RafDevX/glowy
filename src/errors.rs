@@ -556,6 +556,11 @@ fn label_backtrace_to_snippets<'a>(
                 symbol!(),
                 backtrace.label()
             ),
+            LabelBacktraceKind::BlanketSource => format!(
+                "{} is an explicitly registered blanket source with label {}",
+                symbol!("function"),
+                backtrace.label()
+            ),
             LabelBacktraceKind::Assignment => format!(
                 "{} has been assigned a tainted value, resulting in label {}",
                 symbol!(),
