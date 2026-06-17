@@ -124,6 +124,11 @@ impl<'a> ValueRef<'a> {
 
     /// Coerce a [`Value::Simple`] to take a complex shape when first used.
     fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
+        // a Möbius wrapping a Simple represents a single value of unknown
+        // cardinality; shape coercion implies single-value treatment, so
+        // collapse it first to expose the inner Simple to the upgrade below
+        self.try_singularize_simple_mobius();
+
         let borrow = self.value.borrow();
 
         if let Value::Simple(backtrace) = &*borrow {
@@ -135,7 +140,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub fn try_singularize_simple_mobius(&mut self) {
+    fn try_singularize_simple_mobius(&self) {
         let new = if let Value::Mobius(mobius) = &*self.value.borrow()
             && let value @ Value::Simple(_) = &*mobius.inner().value.borrow()
         {

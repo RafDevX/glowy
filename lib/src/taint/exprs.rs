@@ -69,9 +69,7 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
             location: node.location().into_owned(),
         });
     } else {
-        let mut value = result.pop().unwrap(); // already checked
-
-        value.try_singularize_simple_mobius();
+        let value = result.pop().unwrap(); // already checked
 
         return if let Some(expandable) = value.as_expandable() {
             // collapse into single value
