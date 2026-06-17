@@ -25,8 +25,22 @@ pub fn visit_binding_decl<'a>(
     location: &Location,
     annotation: Option<&Annotation<'a>>,
 ) {
+    let mut prev_with_exprs = None;
+
     for spec in specs {
-        visit_binding_decl_spec(ctx, spec, mutable, false, location, annotation);
+        visit_binding_decl_spec(
+            ctx,
+            spec,
+            mutable,
+            false,
+            location,
+            annotation,
+            prev_with_exprs,
+        );
+
+        if !spec.exprs.is_empty() {
+            prev_with_exprs = Some(spec);
+        }
     }
 }
 
@@ -37,6 +51,7 @@ fn visit_binding_decl_spec<'a>(
     short: bool, // allows redeclaration in some circumstances
     location: &Location,
     annotation: Option<&Annotation<'a>>,
+    prev_with_exprs: Option<&BindingDeclSpecNode<'a>>,
 ) {
     if node.exprs.is_empty() && node.r#type.is_some() && !short {
         // no initialization expression; zero-value is used;
@@ -55,7 +70,25 @@ fn visit_binding_decl_spec<'a>(
         return;
     }
 
-    let mut rhs_values = exprs::visit_multi_exprs(ctx, &node.exprs);
+    let spec_exprs = if node.exprs.is_empty()
+        && node.r#type.is_none()
+        && !short
+        && !mutable // const
+        && let Some(prev) = prev_with_exprs
+    {
+        // Go spec: "Within a parameterized const declaration list the
+        // expression list may be omitted from any but the first ConstSpec. Such
+        // an empty list is equivalent to the textual substitution of the first
+        // preceding non-empty expression list and its type if any. Omitting the
+        // list of expressions is therefore equivalent to repeating the previous
+        // list. The number of identifiers must be equal to the number of
+        // expressions in the previous list."
+        &prev.exprs
+    } else {
+        &node.exprs
+    };
+
+    let mut rhs_values = exprs::visit_multi_exprs(ctx, spec_exprs);
 
     let mut expanded = None;
     if node.ids.len() > 1
@@ -242,6 +275,7 @@ pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDe
         true,
         &node.location,
         node.annotation.as_deref(),
+        None,
     );
 }
 
