@@ -7,7 +7,7 @@ use crate::{
 
 // bindings is our term for constants and variables,
 // since their declarations look the same, allowing code reuse
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum BindingKind {
     Const,
     Var,
@@ -81,6 +81,14 @@ fn parse_spec<'a>(
             }
             Some(of_kind!(TokenKind::Assign)) => {
                 s.next(); // advance
+            }
+            Some(of_kind!(TokenKind::SemiColon | TokenKind::ParenR))
+                if kind == BindingKind::Const =>
+            {
+                // implicit repetition: identifier list only, with no type and
+                // no expressions, meaning that type and value are taken from
+                // the previous spec in this const block. nothing else to parse
+                break;
             }
             Some(_) => {
                 r#type = Some(parse_type(s)?);
