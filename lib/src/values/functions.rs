@@ -2,7 +2,9 @@ use std::{borrow::Cow, cell::RefCell, cmp, collections::HashMap, fmt, rc::Rc};
 
 use parser::{
     Location, Span,
-    ast::{FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNode},
+    ast::{
+        FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode, TypeNode,
+    },
 };
 use uuid::Uuid;
 
@@ -91,11 +93,11 @@ impl<'a> FunctionValue<'a> {
 
         let param_ids = params.iter().map(|id| Span::new(id, 0, 1)).collect();
 
-        let dummy_type = TypeNode::Name {
+        let dummy_type = TypeNode::Name(TypeNameNode {
             package: None,
             id: Span::new("unknown", 0, 1),
             args: vec![],
-        };
+        });
 
         let result = match n_returned {
             0 => FunctionResultNode::None,

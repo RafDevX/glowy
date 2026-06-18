@@ -2,8 +2,8 @@ use crate::{
     ParsingError, TokenStream,
     ast::{
         ElseNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode,
-        ForRangeNode, IfNode, StatementNode, SwitchNode, TypeNode, TypeSwitchCaseClause,
-        TypeSwitchNode,
+        ForRangeNode, IfNode, StatementNode, SwitchNode, TypeNameNode, TypeNode,
+        TypeSwitchCaseClause, TypeSwitchNode,
     },
     parser::{
         BacktrackingContext, PResult, expect,
@@ -433,11 +433,11 @@ fn parse_type_switch_case_clause<'a>(
         parse_types_until(s, |token| token.kind == TokenKind::Colon)?
             .into_iter()
             .map(|r#type| {
-                if let TypeNode::Name {
+                if let TypeNode::Name(TypeNameNode {
                     package: None,
                     id,
                     args,
-                } = &r#type
+                }) = &r#type
                     && id.content() == "nil"
                     && args.is_empty()
                 {
@@ -949,16 +949,16 @@ mod tests {
                         },
                         TypeSwitchCaseClause {
                             types: vec![
-                                Some(TypeNode::Name {
+                                Some(TypeNode::Name(TypeNameNode {
                                     package: None,
                                     id: Span::new("int", 141, 5),
                                     args: vec![]
-                                }),
-                                Some(TypeNode::Name {
+                                })),
+                                Some(TypeNode::Name(TypeNameNode {
                                     package: None,
                                     id: Span::new("float64", 146, 5),
                                     args: vec![]
-                                })
+                                }))
                             ],
                             body: vec![StatementNode::Assignment(AssignmentNode {
                                 kind: AssignmentKind::Simple,
@@ -1033,11 +1033,11 @@ mod tests {
                         annotation: None
                     }),
                     clauses: vec![TypeSwitchCaseClause {
-                        types: vec![Some(TypeNode::Name {
+                        types: vec![Some(TypeNode::Name(TypeNameNode {
                             package: None,
                             id: Span::new("float64", 405, 12),
                             args: vec![]
-                        })],
+                        }))],
                         body: vec![StatementNode::Expr {
                             expr: ExprNode::Call(CallNode {
                                 func: Box::new(ExprNode::Name(Span::new("g", 414, 12))),

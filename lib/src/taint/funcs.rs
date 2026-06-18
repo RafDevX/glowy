@@ -4,7 +4,7 @@ use parser::{
     Annotation, Location, Span,
     ast::{
         BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode,
-        FunctionSignatureNode, TypeNode,
+        FunctionSignatureNode, TypeNameNode, TypeNode,
     },
 };
 
@@ -246,11 +246,11 @@ fn build_function_value<'a>(
         && let TypeNode::Function {
             signature: yield_sig,
         } = &first_param.r#type
-        && let FunctionResultNode::Single(TypeNode::Name {
+        && let FunctionResultNode::Single(TypeNode::Name(TypeNameNode {
             package: None,
             id: yield_result,
             ..
-        }) = &yield_sig.result
+        })) = &yield_sig.result
         && yield_result.content() == "bool"
     {
         func_val.mark_range_iter_shaped(ctx.pin(*yield_id), yield_sig.count_inputs());

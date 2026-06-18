@@ -2,8 +2,8 @@ use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        ChannelDirection, FieldDeclNode, InterfaceElementNode, InterfaceTypeTermNode, TypeNode,
-        TypeParam,
+        ChannelDirection, FieldDeclNode, InterfaceElementNode, InterfaceTypeTermNode,
+        TypeNameNode, TypeNode, TypeParam,
     },
     parser::{BacktrackingContext, decls},
     token::{Token, TokenKind},
@@ -42,24 +42,26 @@ fn parse_type_args<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeNode<'a>>
     Ok(args)
 }
 
-fn parse_type_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
+fn parse_type_name<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNameNode<'a>> {
     let token = expect(s, TokenKind::Ident, Some("type name"))?;
 
-    if let Some(Ok(of_kind!(TokenKind::Period))) = s.peek() {
+    let node = if let Some(Ok(of_kind!(TokenKind::Period))) = s.peek() {
         s.next(); // advance
 
-        Ok(TypeNode::Name {
+        TypeNameNode {
             package: Some(token.span),
             id: expect(s, TokenKind::Ident, Some("type name"))?.span,
             args: parse_type_args(s)?,
-        })
+        }
     } else {
-        Ok(TypeNode::Name {
+        TypeNameNode {
             package: None,
             id: token.span,
             args: parse_type_args(s)?,
-        })
-    }
+        }
+    };
+
+    Ok(node)
 }
 
 pub fn parse_channel_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
@@ -281,7 +283,7 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
         Some(of_kind!(TokenKind::Struct)) => parse_struct_type(s),
         Some(of_kind!(TokenKind::Interface)) => parse_interface_type(s),
         Some(of_kind!(TokenKind::Chan | TokenKind::LtMinus)) => parse_channel_type(s),
-        Some(of_kind!(TokenKind::Ident)) => parse_type_name(s),
+        Some(of_kind!(TokenKind::Ident)) => parse_type_name(s).map(Into::into),
         found => Err(ParsingError::UnexpectedConstruct {
             expected: "a type",
             found,
@@ -382,25 +384,25 @@ mod tests {
             TypeNode::Channel {
                 r#type: Box::new(TypeNode::Channel {
                     r#type: Box::new(TypeNode::Channel {
-                        r#type: Box::new(TypeNode::Name {
+                        r#type: Box::new(TypeNode::Name(TypeNameNode {
                             package: Some(Span::new("pkg", 21, 1)),
                             id: Span::new("member", 25, 1),
                             args: vec![
                                 TypeNode::Channel {
-                                    r#type: Box::new(TypeNode::Name {
+                                    r#type: Box::new(TypeNode::Name(TypeNameNode {
                                         package: None,
                                         id: Span::new("T", 37, 1),
                                         args: vec![]
-                                    }),
+                                    })),
                                     direction: None
                                 },
-                                TypeNode::Name {
+                                TypeNode::Name(TypeNameNode {
                                     package: None,
                                     id: Span::new("K", 40, 1),
                                     args: vec![]
-                                }
+                                })
                             ]
-                        }),
+                        })),
                         direction: Some(ChannelDirection::Send)
                     }),
                     direction: Some(ChannelDirection::Receive)
@@ -442,15 +444,15 @@ mod tests {
                             })),
                             location: 7..16
                         }),
-                        element: Box::new(TypeNode::Name {
+                        element: Box::new(TypeNode::Name(TypeNameNode {
                             package: Some(Span::new("pkg", 17, 1)),
                             id: Span::new("member", 21, 1),
-                            args: vec![TypeNode::Name {
+                            args: vec![TypeNode::Name(TypeNameNode {
                                 package: None,
                                 id: Span::new("T", 28, 1),
                                 args: vec![]
-                            }]
-                        })
+                            })]
+                        }))
                     })
                 })
             },
@@ -467,11 +469,11 @@ mod tests {
                         FunctionParamDeclNode {
                             ids: vec![Span::new("a", 5, 1)],
                             variadic: false,
-                            r#type: TypeNode::Name {
+                            r#type: TypeNode::Name(TypeNameNode {
                                 package: None,
                                 id: Span::new("int", 7, 1),
                                 args: vec![]
-                            }
+                            })
                         },
                         FunctionParamDeclNode {
                             ids: vec![Span::new("f", 12, 1), Span::new("g", 15, 1)],
@@ -483,24 +485,24 @@ mod tests {
                                         FunctionParamDeclNode {
                                             ids: vec![Span::new("x", 25, 1)],
                                             variadic: false,
-                                            r#type: TypeNode::Name {
+                                            r#type: TypeNode::Name(TypeNameNode {
                                                 package: None,
                                                 id: Span::new("int", 27, 1),
                                                 args: vec![]
-                                            }
+                                            })
                                         },
                                         FunctionParamDeclNode {
                                             ids: vec![Span::new("y", 32, 1)],
                                             variadic: false,
-                                            r#type: TypeNode::Name {
+                                            r#type: TypeNode::Name(TypeNameNode {
                                                 package: Some(Span::new("p", 34, 1)),
                                                 id: Span::new("A", 36, 1),
-                                                args: vec![TypeNode::Name {
+                                                args: vec![TypeNode::Name(TypeNameNode {
                                                     package: None,
                                                     id: Span::new("T", 38, 1),
                                                     args: vec![]
-                                                }]
-                                            }
+                                                })]
+                                            })
                                         },
                                     ])
                                 })
@@ -514,17 +516,19 @@ mod tests {
                                     params: vec![FunctionParamDeclNode {
                                         ids: vec![Span::new("x", 51, 1)],
                                         variadic: false,
-                                        r#type: TypeNode::Name {
+                                        r#type: TypeNode::Name(TypeNameNode {
                                             package: None,
                                             id: Span::new("float32", 53, 1),
                                             args: vec![]
-                                        }
+                                        })
                                     }],
-                                    result: FunctionResultNode::Single(TypeNode::Name {
-                                        package: None,
-                                        id: Span::new("bool", 62, 1),
-                                        args: vec![]
-                                    })
+                                    result: FunctionResultNode::Single(TypeNode::Name(
+                                        TypeNameNode {
+                                            package: None,
+                                            id: Span::new("bool", 62, 1),
+                                            args: vec![]
+                                        }
+                                    ))
                                 })
                             }
                         }
@@ -534,11 +538,11 @@ mod tests {
                             params: vec![FunctionParamDeclNode {
                                 ids: vec![Span::new("result", 73, 1)],
                                 variadic: false,
-                                r#type: TypeNode::Name {
+                                r#type: TypeNode::Name(TypeNameNode {
                                     package: None,
                                     id: Span::new("int", 80, 1),
                                     args: vec![]
-                                }
+                                })
                             }],
                             result: FunctionResultNode::None,
                         })

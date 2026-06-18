@@ -5,7 +5,7 @@ use parser::{
     ast::{
         AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,
         ForHeaderNode, ForNode, ForRangeNode, FunctionResultNode, IfNode, LiteralNode,
-        StatementNode, SwitchNode, TypeNode, TypeSwitchNode,
+        StatementNode, SwitchNode, TypeNameNode, TypeNode, TypeSwitchNode,
     },
 };
 
@@ -299,11 +299,11 @@ fn get_for_range_values<'a>(
             .map(|param| &param.r#type);
 
         if let Some(TypeNode::Function { signature }) = yield_type
-            && let FunctionResultNode::Single(TypeNode::Name {
+            && let FunctionResultNode::Single(TypeNode::Name(TypeNameNode {
                 package: None,
                 id: yield_result,
                 ..
-            }) = &signature.result
+            })) = &signature.result
             && yield_result.content() == "bool"
         {
             let downgraded = func.downgrade_as_call(ctx, location.clone());

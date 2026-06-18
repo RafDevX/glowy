@@ -76,11 +76,7 @@ pub struct TypeParam<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeNode<'a> {
-    Name {
-        package: Option<Span<'a>>, // for qualified type names
-        id: Span<'a>,
-        args: Vec<TypeNode<'a>>,
-    },
+    Name(TypeNameNode<'a>),
     Channel {
         r#type: Box<TypeNode<'a>>, // what values can be sent/received
         direction: Option<ChannelDirection>,
@@ -108,6 +104,22 @@ pub enum TypeNode<'a> {
     Pointer {
         base: Box<TypeNode<'a>>,
     },
+}
+
+impl<'a> From<TypeNameNode<'a>> for TypeNode<'a> {
+    #[inline]
+    fn from(node: TypeNameNode<'a>) -> Self {
+        Self::Name(node)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeNameNode<'a> {
+    pub package: Option<Span<'a>>, // for qualified type names
+    pub id: Span<'a>,
+    // technically, args are not part of a TypeName per the spec, but they
+    // always follow one, so it's easier to keep everything together
+    pub args: Vec<TypeNode<'a>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

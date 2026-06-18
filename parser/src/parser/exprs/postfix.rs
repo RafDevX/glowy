@@ -280,7 +280,7 @@ mod tests {
     use super::*;
     use crate::{
         Span,
-        ast::{BinaryOpKind, ChannelDirection, LiteralNode, TypeNode, UnaryOpKind},
+        ast::{BinaryOpKind, ChannelDirection, LiteralNode, TypeNameNode, TypeNode, UnaryOpKind},
         lexer::Lexer,
         parser::exprs::parse_expression,
     };
@@ -403,11 +403,11 @@ mod tests {
                     location: 0..3
                 })),
                 type_arg: Some(TypeNode::Channel {
-                    r#type: Box::new(TypeNode::Name {
+                    r#type: Box::new(TypeNode::Name(TypeNameNode {
                         package: None,
                         id: Span::new("int", 9, 1),
                         args: vec![]
-                    }),
+                    })),
                     direction: None,
                 }),
                 args: vec![
@@ -418,32 +418,32 @@ mod tests {
                     ExprNode::Call(CallNode {
                         func: Box::new(ExprNode::Name(Span::new("g", 20, 1))),
                         type_arg: Some(TypeNode::Channel {
-                            r#type: Box::new(TypeNode::Name {
+                            r#type: Box::new(TypeNode::Name(TypeNameNode {
                                 package: None,
                                 id: Span::new("u32", 29, 1),
                                 args: vec![]
-                            }),
+                            })),
                             direction: Some(ChannelDirection::Send),
                         }),
                         args: vec![ExprNode::Call(CallNode {
                             func: Box::new(ExprNode::Name(Span::new("h", 34, 1))),
                             type_arg: Some(TypeNode::Channel {
-                                r#type: Box::new(TypeNode::Name {
+                                r#type: Box::new(TypeNode::Name(TypeNameNode {
                                     package: Some(Span::new("pkg", 43, 1)),
                                     id: Span::new("T", 47, 1),
                                     args: vec![
-                                        TypeNode::Name {
+                                        TypeNode::Name(TypeNameNode {
                                             package: None,
                                             id: Span::new("E", 49, 1),
                                             args: vec![]
-                                        },
-                                        TypeNode::Name {
+                                        }),
+                                        TypeNode::Name(TypeNameNode {
                                             package: Some(Span::new("x", 52, 1)),
                                             id: Span::new("F", 54, 1),
                                             args: vec![]
-                                        }
+                                        })
                                     ]
-                                }),
+                                })),
                                 direction: Some(ChannelDirection::Send),
                             }),
                             args: vec![],
