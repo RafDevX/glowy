@@ -128,11 +128,37 @@ pub enum ChannelDirection {
     Receive,
 }
 
-// TODO: support embedded fields (which are not this shape)
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FieldDeclNode<'a> {
+pub enum FieldDeclNode<'a> {
+    Explicit(ExplicitFieldDeclNode<'a>),
+    Embedded(EmbeddedFieldDeclNode<'a>),
+}
+
+impl<'a> From<ExplicitFieldDeclNode<'a>> for FieldDeclNode<'a> {
+    #[inline]
+    fn from(node: ExplicitFieldDeclNode<'a>) -> Self {
+        Self::Explicit(node)
+    }
+}
+
+impl<'a> From<EmbeddedFieldDeclNode<'a>> for FieldDeclNode<'a> {
+    #[inline]
+    fn from(node: EmbeddedFieldDeclNode<'a>) -> Self {
+        Self::Embedded(node)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplicitFieldDeclNode<'a> {
     pub ids: Vec<Option<Span<'a>>>, // None if just padding ("_" blank field)
     pub r#type: TypeNode<'a>,
+    pub tag: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedFieldDeclNode<'a> {
+    pub pointer: bool, // whether prefixed by `*`
+    pub r#type: TypeNameNode<'a>,
     pub tag: Option<String>,
 }
 

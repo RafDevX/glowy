@@ -2,8 +2,8 @@ use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        ChannelDirection, FieldDeclNode, InterfaceElementNode, InterfaceTypeTermNode,
-        TypeNameNode, TypeNode, TypeParam,
+        ChannelDirection, EmbeddedFieldDeclNode, ExplicitFieldDeclNode, FieldDeclNode,
+        InterfaceElementNode, InterfaceTypeTermNode, TypeNameNode, TypeNode, TypeParam,
     },
     parser::{BacktrackingContext, decls},
     token::{Token, TokenKind},
@@ -126,36 +126,81 @@ fn parse_map_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
 }
 
 fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDeclNode<'a>> {
+    // there is no easy way to know if a field is explicit or embedded at this
+    // point, so we try to parse an explicit field and fallback to embedded if
+    // the explicit field parsing fails
+
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
+
+    let field = match parse_explicit_struct_field(b) {
+        Ok(field) => {
+            context.commit()?;
+
+            field.into()
+        }
+        Err(_) => parse_embedded_struct_field(s)?.into(),
+    };
+
+    Ok(field)
+}
+
+fn parse_explicit_struct_field<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, ExplicitFieldDeclNode<'a>> {
     let mut ids = vec![];
 
     loop {
         let ident = expect(s, TokenKind::Ident, Some("struct type field"))?;
 
-        if ident.span.content() == "_" {
-            ids.push(None);
+        ids.push(if ident.span.content() == "_" {
+            None
         } else {
-            ids.push(Some(ident.span));
+            Some(ident.span)
+        });
+
+        if !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::Comma)))) {
+            break; // no more identifiers; what follows must be the field type
         }
 
-        if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
-            s.next(); // advance
-        } else {
-            break; // since there's no comma, next must be type
-        }
+        s.next(); // consume the `,` separator
     }
 
     let r#type = parse_type(s)?;
+    let tag = parse_optional_field_tag(s);
 
-    let tag = if let Some(Ok(of_kind!(TokenKind::String(tag)))) = s.peek() {
-        let tag = tag.clone(); // clone before mutating s (tag is a ref)
+    Ok(ExplicitFieldDeclNode { ids, r#type, tag })
+}
+
+fn parse_embedded_struct_field<'a>(
+    s: &mut TokenStream<'a>,
+) -> PResult<'a, EmbeddedFieldDeclNode<'a>> {
+    let pointer = matches!(s.peek(), Some(Ok(of_kind!(TokenKind::Star))));
+
+    if pointer {
         s.next(); // advance
+    }
 
-        Some(tag)
-    } else {
-        None
+    let r#type = parse_type_name(s)?;
+
+    let tag = parse_optional_field_tag(s);
+
+    Ok(EmbeddedFieldDeclNode {
+        pointer,
+        r#type,
+        tag,
+    })
+}
+
+fn parse_optional_field_tag(s: &mut TokenStream<'_>) -> Option<String> {
+    let Some(Ok(of_kind!(TokenKind::String(tag)))) = s.peek() else {
+        return None;
     };
 
-    Ok(FieldDeclNode { ids, r#type, tag })
+    let tag = tag.clone(); // clone before mutating s
+    s.next(); // advance
+
+    Some(tag)
 }
 
 fn parse_struct_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
