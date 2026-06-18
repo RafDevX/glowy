@@ -290,16 +290,30 @@ fn derive_concrete_backtrace_or_fallback<'a>(
 
     let hybrid = derive_hybrid_symbol_backtrace(ctx, &symbol);
 
+    // we should prefer the hybrid even when not fully concrete when its
+    // synthetics refer to functions still in the call stack (meaning that they
+    // will be realized later), as the fallback would be less useful here, so we
+    // only need to check whether there are *inactive* synthetics
     if hybrid
         .as_ref()
         .map(LabelBacktrace::label)
-        .is_some_and(Label::has_any_synthetic)
+        .is_some_and(|label| has_inactive_synthetics(ctx, label))
         && let Some(fallback) = binding.hybrid_fallback()
     {
         return fallback.cloned();
     }
 
     hybrid
+}
+
+fn has_inactive_synthetics<'a>(ctx: &AnalysisContext<'a>, label: &Label<'a>) -> bool {
+    label.tags().any(|tag| {
+        if let LabelTag::Synthetic { func, .. } = tag {
+            !ctx.is_function_in_call_stack(func)
+        } else {
+            false
+        }
+    })
 }
 
 // as much as possible is made concrete, but some synthetics might persist

@@ -136,6 +136,15 @@ impl<'a> AnalysisContext<'a> {
         self.funcs.pop();
     }
 
+    pub fn is_function_in_call_stack(&self, r#ref: &FunctionRef<'a>) -> bool {
+        self.funcs.iter().any(|value| {
+            value
+                .as_function()
+                .as_deref()
+                .is_some_and(|func| func.r#ref() == r#ref)
+        })
+    }
+
     pub fn branch_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.current_calculated_branch_backtrace
             .as_ref()

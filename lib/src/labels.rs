@@ -467,6 +467,41 @@ impl<'a> Label<'a> {
         matches!(self, Self::Bottom)
     }
 
+    /// Returns an iterator over the [`LabelTag`]s in this label.
+    ///
+    /// For [`Label::Bottom`], this iterator is empty. For [`Label::Tags`], it
+    /// yields each tag according to their natural ordering (see
+    /// [`LabelTag::cmp`]).
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// #
+    /// let x = Label::Bottom;
+    /// let y = Label::from_tags(&["alice"]);
+    /// let z = Label::from_tags(&["bob", "charlie"]);
+    ///
+    /// assert_eq!(x.tags().count(), 0);
+    /// assert_eq!(
+    ///     y.tags().map(ToString::to_string).collect::<Vec<_>>(),
+    ///     vec!["alice"]
+    /// );
+    /// assert_eq!(
+    ///     z.tags().map(ToString::to_string).collect::<Vec<_>>(),
+    ///     vec!["bob", "charlie"]
+    /// );
+    /// ```
+    #[inline]
+    pub fn tags(&self) -> impl Iterator<Item = &LabelTag<'a>> + Clone {
+        let tags = match self {
+            Self::Bottom => None,
+            Self::Tags(tags) => Some(tags),
+        };
+
+        tags.into_iter().flatten()
+    }
+
     pub(crate) fn as_single(&self) -> Option<&LabelTag<'a>> {
         if let Self::Tags(tags) = self
             && tags.len() == 1
@@ -478,11 +513,7 @@ impl<'a> Label<'a> {
     }
 
     pub(crate) fn has_any_synthetic(&self) -> bool {
-        let Self::Tags(tags) = self else {
-            return false;
-        };
-
-        tags.iter().any(|t| matches!(t, LabelTag::Synthetic { .. }))
+        self.tags().any(|t| matches!(t, LabelTag::Synthetic { .. }))
     }
 
     pub(crate) fn is_synthetic_representation(
@@ -592,16 +623,13 @@ impl OwnedLabel {
 
 impl From<&Label<'_>> for OwnedLabel {
     fn from(label: &Label<'_>) -> Self {
-        let tags = match label {
-            Label::Tags(tags) => tags
-                .iter()
-                .filter_map(|tag| match tag {
-                    LabelTag::Concrete(s) => Some((*s).to_owned()),
-                    LabelTag::Synthetic { .. } => None,
-                })
-                .collect(),
-            Label::Bottom => Vec::new(),
-        };
+        let tags = label
+            .tags()
+            .filter_map(|tag| match tag {
+                LabelTag::Concrete(s) => Some((*s).to_owned()),
+                LabelTag::Synthetic { .. } => None,
+            })
+            .collect();
 
         Self(tags)
     }
