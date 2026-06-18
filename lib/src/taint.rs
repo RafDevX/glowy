@@ -9,7 +9,7 @@ use crate::{
     FullPackagePath,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    labels::{Label, OwnedLabel},
+    labels::{Label, OwnedLabel, OwnedLabelCow},
     snapshots::SnapshotAware,
     values::BacktraceContainer,
 };
@@ -77,16 +77,20 @@ pub enum SinkKind {
 /// `example.com/company-name/proj/sub-package.funcName`).
 pub type BlanketDirectives = HashMap<String, Vec<BlanketDirective>>;
 
+#[derive(Clone, Debug)]
 pub struct BlanketDirective {
     kind: BlanketDirectiveKind,
     label: OwnedLabel,
 }
 
 impl BlanketDirective {
-    pub(crate) fn new(kind: BlanketDirectiveKind, label: &Label<'_>) -> Self {
+    pub(crate) fn new<'c1: 'c2, 'c2>(
+        kind: BlanketDirectiveKind,
+        label: impl Into<OwnedLabelCow<'c1, 'c2>>,
+    ) -> Self {
         Self {
             kind,
-            label: OwnedLabel::from(label),
+            label: label.into().into_owned(),
         }
     }
 
@@ -99,7 +103,7 @@ impl BlanketDirective {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlanketDirectiveKind {
     Source,
     Sink,

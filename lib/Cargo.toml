@@ -11,7 +11,14 @@ categories.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["toml-config"]
+toml-config = ["dep:indexmap", "dep:serde", "dep:toml"]
+
 [dependencies]
+indexmap = { version = "2.14.0", features = ["serde"], optional = true }
 parser = { path = "../parser" }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
 subenum = "1.1.3"
+toml = { version = "1.1.2", optional = true }
 uuid = { version = "1.19.0", features = ["v4"] }

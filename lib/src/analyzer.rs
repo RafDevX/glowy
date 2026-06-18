@@ -7,11 +7,11 @@ use std::{
 };
 
 use crate::{
-    FullPackagePath, SourceFile,
+    AnalysisConfig, FullPackagePath, SourceFile,
     context::{AnalysisContext, AnalysisStage},
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
-    labels::Label,
+    labels::{Label, OwnedLabel, OwnedLabelCow},
     taint::{self, BlanketDirective, BlanketDirectiveKind, BlanketDirectives},
 };
 
@@ -63,7 +63,7 @@ impl Analyzer {
     ///
     /// # See Also
     ///
-    /// It's often more convenient to instead use the
+    /// It may often be more convenient to instead use the
     /// [`Analyzer::from_directory`] utility or [`Analyzer::from_go_mod`], which
     /// are helpful wrappers around this method.
     #[must_use]
@@ -88,6 +88,12 @@ impl Analyzer {
     /// In particular, this method returns `Ok(None)` if no valid `module`
     /// directive was found in the `go.mod` file.
     ///
+    /// Using this method to construct [`Analyzer`] brings the added advantage
+    /// of [`Analyzer::ingest_config_file`] being automatically invoked if a
+    /// `glowy.toml` configuration file is found in the project root. However,
+    /// this is only possible if that method is available, i.e., if Cargo
+    /// feature `toml-config` is enabled.
+    ///
     /// # Errors
     ///
     /// An [`std::io::Error`] is returned if any filesystem operation fails,
@@ -110,6 +116,19 @@ impl Analyzer {
         let Some(mut analyzer) = Self::from_go_mod(path.as_ref().join("go.mod"))? else {
             return Ok(None);
         };
+
+        #[cfg(feature = "toml-config")]
+        {
+            // checking if the file exists ourselves could lead to strange race
+            // conditions, so we just try it and see if it fails
+            match analyzer.ingest_config_file(path.as_ref().join("glowy.toml")) {
+                Ok(_) => {} // great
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                    // no such file, so we just ignore this (don't report error)
+                }
+                Err(err) => return Err(err), // something else; report
+            }
+        }
 
         analyzer.add_directory_recurs(path::Component::RootDir, path)?;
 
@@ -262,11 +281,110 @@ impl Analyzer {
             .map(|index| self.files[index].contents())
     }
 
-    fn add_blanket_directive<'f>(
+    /// Consumes and applies configuration options from a TOML file on disk.
+    ///
+    /// This utility method reads and parses a given TOML-formatted file into
+    /// a structured [`AnalysisConfig`] object, subsequently passing it to
+    /// [`Analyzer::ingest_structured_config`] so that its defined options may
+    /// be applied.
+    ///
+    /// If ingestion is successful, `Ok(Ok(()))` is returned.
+    ///
+    /// Note that this method is only available if the Cargo feature
+    /// `toml-config` is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Any [`std::io::Error`] encountered while opening and reading the
+    /// specified file is returned as-is, enclosed in a top-level [`Err`]
+    /// variant. If no such error occurs, [`Ok`] is returned, containing a
+    /// second-level [`Result`], which may encapsulate a TOML deserialization
+    /// error as `Ok(Err)`.
+    ///
+    /// # See Also
+    ///
+    /// It may not be necessary to use this method directly, as if it is
+    /// available, it is automatically invoked by [`Analyzer::from_directory`]
+    /// if a `glowy.toml` file is found in the project root.
+    #[cfg(feature = "toml-config")]
+    #[inline]
+    pub fn ingest_config_file<P: AsRef<path::Path>>(
+        &mut self,
+        path: P,
+    ) -> io::Result<Result<(), toml::de::Error>> {
+        let contents = fs::read_to_string(path)?;
+
+        let config = match toml::from_str(&contents) {
+            Ok(config) => config,
+            Err(err) => return Ok(Err(err)),
+        };
+
+        self.ingest_structured_config(config);
+
+        Ok(Ok(()))
+    }
+
+    /// Consumes and applies a unified structured analysis configuration object.
+    ///
+    /// This utility method allows invokers to easily configure the analysis by
+    /// providing a standardized collection of configuration options and other
+    /// customizable values. Each method invocation either merges with or fully
+    /// overwrites previously set values, depending on the option, so a single
+    /// invocation is recommended. See [`AnalysisConfig`] for which options are
+    /// accepted.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    ///
+    /// let config = glowy::AnalysisConfig {
+    ///     // change some fields here
+    ///     // field1: value1,
+    ///     // field2: value2,
+    ///     ..Default::default()
+    /// };
+    ///
+    /// analyzer.ingest_structured_config(config);
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// It is often more convenient to specify per-project configuration by
+    /// means of a TOML file. If Cargo feature `toml-config` is enabled, this
+    /// library makes available the method [`Analyzer::ingest_config_file`],
+    /// which automatically reads and parses such a file before invoking this
+    /// present function under the hood.
+    ///
+    /// Note that if [`Analyzer::ingest_config_file`] is available, it is
+    /// automatically invoked by [`Analyzer::from_directory`] if a `glowy.toml`
+    /// file is found in the project root.
+    #[inline]
+    pub fn ingest_structured_config(&mut self, config: AnalysisConfig) {
+        let blanket_directives = config
+            .sources
+            .into_iter()
+            .map(|(func_path, tags)| (BlanketDirectiveKind::Source, func_path, tags))
+            .chain(
+                config
+                    .sinks
+                    .into_iter()
+                    .map(|(func_path, tags)| (BlanketDirectiveKind::Sink, func_path, tags)),
+            );
+
+        for (kind, func_path, tags) in blanket_directives {
+            // we use add_blanket_directive directly to avoid conversion to
+            // Label and then back to OwnedLabel (preventing unnecessary
+            // allocations that would happen with add_blanket_source/sink)
+            self.add_blanket_directive(kind, func_path, OwnedLabel::from(tags));
+        }
+    }
+
+    fn add_blanket_directive<'f, 'c1: 'c2, 'c2>(
         &mut self,
         kind: BlanketDirectiveKind,
         func_path: impl Into<Cow<'f, str>>,
-        label: &Label<'_>,
+        label: impl Into<OwnedLabelCow<'c1, 'c2>>,
     ) {
         let func_path = func_path.into().into_owned();
 

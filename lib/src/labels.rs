@@ -615,6 +615,8 @@ impl fmt::Display for Label<'_> {
     }
 }
 
+// useful for when it would be too bothersome to keep &'a str lifetimes around
+#[derive(Clone, Debug)]
 pub(crate) struct OwnedLabel(Vec<String>);
 
 impl OwnedLabel {
@@ -622,6 +624,12 @@ impl OwnedLabel {
         let slices: Vec<_> = self.0.iter().map(String::as_str).collect();
 
         Label::from_tags(&slices)
+    }
+}
+
+impl From<Vec<String>> for OwnedLabel {
+    fn from(vec: Vec<String>) -> Self {
+        Self(vec)
     }
 }
 
@@ -636,6 +644,32 @@ impl From<&Label<'_>> for OwnedLabel {
             .collect();
 
         Self(tags)
+    }
+}
+
+pub(crate) enum OwnedLabelCow<'a, 'b> {
+    Owned(OwnedLabel),
+    Borrowed(&'b Label<'a>),
+}
+
+impl OwnedLabelCow<'_, '_> {
+    pub(crate) fn into_owned(self) -> OwnedLabel {
+        match self {
+            Self::Owned(owned) => owned,
+            Self::Borrowed(borrowed) => borrowed.into(),
+        }
+    }
+}
+
+impl From<OwnedLabel> for OwnedLabelCow<'_, '_> {
+    fn from(owned: OwnedLabel) -> Self {
+        Self::Owned(owned)
+    }
+}
+
+impl<'a, 'b> From<&'b Label<'a>> for OwnedLabelCow<'a, 'b> {
+    fn from(borrowed: &'b Label<'a>) -> Self {
+        Self::Borrowed(borrowed)
     }
 }
 

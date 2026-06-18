@@ -147,6 +147,9 @@
 
 use std::{cmp, fmt, path::Path};
 
+#[cfg(feature = "toml-config")]
+use indexmap::IndexMap;
+
 pub use analyzer::Analyzer;
 pub use files::SourceFile;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
@@ -166,6 +169,47 @@ mod values;
 type FullPackagePath = String; // e.g. example.com/org/something/auth
 // ^ note that auth is not necessarily the package name!
 // must check package clause for files in auth/
+
+/// Represents a structured collection of analysis configuration options.
+///
+/// This aggregates various customizable values and is primarily used as an
+/// input to [`Analyzer::ingest_structured_config`]. It may be created manually,
+/// or it may be automatically derived from a TOML configuration file using the
+/// [`Analyzer::ingest_config_file`] method if Cargo feature `toml-config` is
+/// enabled.
+///
+/// Note that the [`Default`] trait is implemented, meaning that it can be used
+/// to automatically populate default configuration values when manually
+/// constructing an instance and the invoker only wishes to partially specify
+/// configuration preferences.
+#[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
+#[derive(Default)]
+pub struct AnalysisConfig {
+    /// Functions universally recognized as blanket information sources.
+    ///
+    /// These functions will always be considered to yield the associated label,
+    /// in addition to what is already otherwise derived from the function body.
+    ///
+    /// An [`IndexMap`] is used preserve insertion order, with each [`String`]
+    /// key corresponding to a fully qualified Go package path of where the
+    /// function is accessed, followed by a `.` and then the name of the
+    /// function in question. Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    pub sources: IndexMap<String, Vec<String>>,
+    /// Functions universally recognized as blanket information sinks.
+    ///
+    /// These functions will always be considered to accept only values up to
+    /// the associated label.
+    ///
+    /// An [`IndexMap`] is used preserve insertion order, with each [`String`]
+    /// key corresponding to a fully qualified Go package path of where the
+    /// function is accessed, followed by a `.` and then the name of the
+    /// function in question. Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    pub sinks: IndexMap<String, Vec<String>>,
+}
 
 /// Object, component, or metadata bound to a specific file.
 ///
