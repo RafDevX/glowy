@@ -7,7 +7,10 @@ use self::{
 };
 use super::{
     PResult,
-    decls::bindings::{parse_const_decl, parse_var_decl},
+    decls::{
+        bindings::{parse_const_decl, parse_var_decl},
+        types::parse_type_decl,
+    },
     expect,
     exprs::{parse_expression, parse_expressions_list, parse_expressions_list_while},
 };
@@ -249,6 +252,7 @@ fn parse_statement<'a>(
         // declarations (sadly cannot be abstracted, indistinguishable if not for keywords)
         Some(of_kind!(TokenKind::Const)) => parse_const_decl(s)?.into(),
         Some(of_kind!(TokenKind::Var)) => parse_var_decl(s)?.into(),
+        Some(of_kind!(TokenKind::Type)) => parse_type_decl(s)?.into(),
 
         Some(of_kind!(TokenKind::Ident)) => parse_identifier_first_stmt(s)?,
         _ => parse_expression_first_stmt(s)?,
