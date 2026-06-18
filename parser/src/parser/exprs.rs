@@ -247,6 +247,17 @@ fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'
     })
 }
 
+fn parse_parenthesized_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+    expect(s, TokenKind::ParenL, Some("parenthesized expression"))?;
+
+    // inside a parenthesized expression, composite literals are always allowed
+    let inner = parse_expression(s, true)?;
+
+    expect(s, TokenKind::ParenR, Some("parenthesized expression"))?;
+
+    Ok(inner)
+}
+
 fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
     macro_rules! with_conversion_fallback {
         ($main:path) => {{
@@ -314,11 +325,23 @@ fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Ex
         Some(of_kind!(TokenKind::Map)) => with_conversion_fallback!(parse_map_literal),
         Some(of_kind!(TokenKind::Struct)) => with_conversion_fallback!(parse_struct_literal),
         Some(of_kind!(TokenKind::ParenL)) => {
-            s.next(); // advance
-            let inner = parse_expression(s, true)?;
-            expect(s, TokenKind::ParenR, Some("parenthesized expression"))?;
+            // `(...)` is normally a parenthesized expression, but it can also
+            // be a parenthesized type used as the source of a conversion --
+            // e.g., `(<-chan int)(c)`, where the inner `<-chan int` is a type,
+            // not a valid expression. as such, we need to try the expression
+            // interpretation first and fallback to a conversion if it fails
 
-            inner
+            let mut context = BacktrackingContext::new(s);
+            let b = context.stream();
+
+            match parse_parenthesized_expression(b) {
+                Ok(inner) => {
+                    context.commit()?;
+
+                    inner
+                }
+                Err(_) => parse_conversion(s)?.into(),
+            }
         }
         found => {
             if let Ok(conversion) = parse_conversion(s) {
