@@ -32,7 +32,10 @@ fn infix_binding_power(op: BinaryOpKind) -> (u8, u8) {
     }
 }
 
-fn parse_unary<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+fn parse_unary<'a>(
+    s: &mut TokenStream<'a>,
+    allow_composite_after_name: bool,
+) -> PResult<'a, ExprNode<'a>> {
     if let Some(Ok(operator)) = s.peek().cloned()
         && let Ok(op) = operator.kind.clone().try_into()
     {
@@ -40,16 +43,20 @@ fn parse_unary<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
 
         return Ok(ExprNode::UnaryOp {
             kind: op,
-            operand: Box::new(parse_unary(s)?),
+            operand: Box::new(parse_unary(s, allow_composite_after_name)?),
             location: s.location_since(&operator),
         });
     }
 
-    super::parse_primary_expression(s)
+    super::parse_primary_expression(s, allow_composite_after_name)
 }
 
-pub fn parse_expression_bp<'a>(s: &mut TokenStream<'a>, min_bp: u8) -> PResult<'a, ExprNode<'a>> {
-    let mut lhs = parse_unary(s)?;
+pub fn parse_expression_bp<'a>(
+    s: &mut TokenStream<'a>,
+    min_bp: u8,
+    allow_composite_after_name: bool,
+) -> PResult<'a, ExprNode<'a>> {
+    let mut lhs = parse_unary(s, allow_composite_after_name)?;
 
     while let Some(token) = s.peek().cloned().transpose()? {
         let Ok(op) = token.kind.try_into() else {
@@ -64,7 +71,8 @@ pub fn parse_expression_bp<'a>(s: &mut TokenStream<'a>, min_bp: u8) -> PResult<'
         }
 
         s.next(); // step past operator token
-        let rhs = parse_expression_bp(s, r_bp)?;
+
+        let rhs = parse_expression_bp(s, r_bp, allow_composite_after_name)?;
 
         let location = s.location_starting_at(lhs.location().start);
 
@@ -145,7 +153,7 @@ mod tests {
     fn parse(input: &str) -> PResult<'_, ExprNode<'_>> {
         let mut stream = TokenStream::new(Lexer::new(input));
 
-        parse_expression_bp(&mut stream, 0)
+        parse_expression_bp(&mut stream, 0, true)
     }
 
     #[test]

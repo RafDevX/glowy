@@ -31,7 +31,7 @@ fn resume_parsing_assignment_rhs<'a>(
     kind: AssignmentKind,
     annotation: Option<Box<Annotation<'a>>>,
 ) -> PResult<'a, StatementNode<'a>> {
-    if let Some(rhs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind))? {
+    if let Some(rhs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind), true)? {
         let location = s.location_starting_at(lhs.first().unwrap().location().start);
 
         Ok(StatementNode::Assignment(AssignmentNode {
@@ -55,7 +55,9 @@ fn resume_parsing_assignment_lhs<'a>(
     mut lhs: Vec<ExprNode<'a>>,
 ) -> PResult<'a, StatementNode<'a>> {
     // collect the rest of the expressions, if any
-    if let Some((rest, kind)) = parse_expressions_list(s, |t| AssignmentKind::try_from(t.kind))? {
+    if let Some((rest, kind)) =
+        parse_expressions_list(s, |t| AssignmentKind::try_from(t.kind), true)?
+    {
         s.next(); // step over operator
 
         lhs.extend(rest);
@@ -74,7 +76,7 @@ fn resume_parsing_assignment_lhs<'a>(
 
 // statements that start with an expression and then diverge wrt operator
 fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let lhs = parse_expression(s)?;
+    let lhs = parse_expression(s, true)?;
 
     // this needs to be separate so we don't consume the semicolon, as well as
     // to avoid using peek on the match (would require .next in every branch)
@@ -110,7 +112,7 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     let node = match s.next().transpose()? {
         Some(of_kind!(TokenKind::LtMinus)) => StatementNode::Send(SendNode {
             channel: lhs,
-            expr: parse_expression(s)?,
+            expr: parse_expression(s, true)?,
             location: s.location_starting_at(lhs_location.start),
             annotation: s.take_last_annotation(),
         }),
@@ -200,7 +202,7 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     context.commit()?; // we're sure it's a short var decl so we can go back to the main stream now
     let annotation = s.take_last_annotation();
 
-    if let Some(exprs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind))? {
+    if let Some(exprs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind), true)? {
         Ok(StatementNode::ShortVarDecl(ShortVarDeclNode {
             ids,
             exprs,

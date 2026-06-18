@@ -34,7 +34,7 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
         None
     };
 
-    let cond = parse_expression(s)?;
+    let cond = parse_expression(s, false)?;
     let then = parse_block(s)?;
 
     let otherwise = if let Some(Ok(of_kind!(TokenKind::Else))) = s.peek() {
@@ -84,7 +84,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
             let cond = if let Some(Ok(of_kind!(TokenKind::SemiColon))) = s.peek() {
                 None
             } else {
-                Some(parse_expression(s)?)
+                Some(parse_expression(s, false)?)
             };
 
             expect(s, TokenKind::SemiColon, Some("for clause"))?;
@@ -106,7 +106,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
 
             s.next(); // advance
 
-            let range_expr = parse_expression(s)?;
+            let range_expr = parse_expression(s, false)?;
 
             ForHeaderNode::Range(ForRangeNode::None { range_expr })
         }
@@ -161,7 +161,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
 
             match kind {
                 ForKind::SingleCondition => {
-                    let cond = parse_expression(s)?;
+                    let cond = parse_expression(s, false)?;
 
                     ForHeaderNode::Clause(ForClauseNode {
                         init: None,
@@ -177,7 +177,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
                     let cond = if let Some(Ok(of_kind!(TokenKind::SemiColon))) = s.peek() {
                         None
                     } else {
-                        Some(parse_expression(s)?)
+                        Some(parse_expression(s, false)?)
                     };
 
                     expect(s, TokenKind::SemiColon, Some("for clause"))?;
@@ -222,14 +222,17 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
 
                     expect(s, TokenKind::Range, Some("for range clause"))?;
 
-                    let range_expr = parse_expression(s)?;
+                    let range_expr = parse_expression(s, false)?;
 
                     ForHeaderNode::Range(ForRangeNode::Decl { lhs, range_expr })
                 }
                 ForKind::RangeAssignment => {
-                    let lhs =
-                        parse_expressions_list_while(s, |token| token.kind != TokenKind::Assign)?
-                            .unwrap_or_else(Vec::new); // got end-of-file but that's equivalent to empty expressions list
+                    let lhs = parse_expressions_list_while(
+                        s,
+                        |token| token.kind != TokenKind::Assign,
+                        false,
+                    )?
+                    .unwrap_or_else(Vec::new); // got end-of-file but that's equivalent to empty expressions list
 
                     if lhs.is_empty() {
                         return Err(ParsingError::UnexpectedConstruct {
@@ -241,7 +244,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
                     expect(s, TokenKind::Assign, Some("for range clause"))?;
                     expect(s, TokenKind::Range, Some("for range clause"))?;
 
-                    let range_expr = parse_expression(s)?;
+                    let range_expr = parse_expression(s, false)?;
 
                     ForHeaderNode::Range(ForRangeNode::Assignment { lhs, range_expr })
                 }
@@ -305,7 +308,7 @@ fn parse_expr_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprS
         // no switch expression (equivalent to true)
         None
     } else {
-        Some(parse_expression(s)?)
+        Some(parse_expression(s, false)?)
     };
 
     expect(s, TokenKind::CurlyL, Some("switch statement"))?;
@@ -335,7 +338,7 @@ fn parse_expr_switch_case_clause<'a>(
     } else {
         expect(s, TokenKind::Case, Some("switch case clause"))?;
 
-        parse_expressions_list_while(s, |token| token.kind != TokenKind::Colon)?
+        parse_expressions_list_while(s, |token| token.kind != TokenKind::Colon, true)?
             .unwrap_or_else(Vec::new) // no colon found; ok, we'll error after
     };
 
@@ -392,7 +395,7 @@ fn parse_type_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeS
         }
     }
 
-    let expr = parse_primary_expression(s)?;
+    let expr = parse_primary_expression(s, false)?;
 
     expect(s, TokenKind::Period, Some("type switch"))?;
     expect(s, TokenKind::ParenL, Some("type switch"))?;
@@ -508,7 +511,7 @@ pub fn parse_break_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stateme
 pub fn parse_return_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
     let beginning = expect(s, TokenKind::Return, Some("return statement"))?;
 
-    let exprs = parse_expressions_list_while(s, |token| !terminal_token(&token.kind))?
+    let exprs = parse_expressions_list_while(s, |token| !terminal_token(&token.kind), true)?
         .unwrap_or_else(Vec::new); // a potentially better error will be thrown higher up the chain
 
     Ok(StatementNode::Return {

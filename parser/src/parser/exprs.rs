@@ -1,10 +1,10 @@
 use self::postfix::parse_postfix_if_exists;
 use super::{PResult, expect};
 use crate::{
-    ParsingError, Span, TokenStream,
+    ParsingError, TokenStream,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode, ExprNode,
-        LiteralNode, OrderedF64, StructLiteralFieldsNode,
+        IndexingNode, LiteralNode, OrderedF64, SelectionNode, StructLiteralFieldsNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -44,7 +44,7 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
             (false, None)
         }
         Some(of_kind!(TokenKind::SquareR)) => (true, None),
-        _ => (false, Some(Box::new(parse_expression(s)?))),
+        _ => (false, Some(Box::new(parse_expression(s, true)?))),
     };
 
     expect(s, TokenKind::SquareR, Some("array/slice literal"))?;
@@ -185,7 +185,7 @@ fn parse_composite_literal_element_list<'a>(
         }
 
         // take an expression, initially assumed as a value candidate
-        let value = parse_expression(s)?;
+        let value = parse_expression(s, true)?;
 
         let (key, value) = if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
             // nope, it wasn't a value -- it was a key!
@@ -201,7 +201,7 @@ fn parse_composite_literal_element_list<'a>(
                     optional_keys,
                 )?)
             } else {
-                CompositeLiteralElementNode::Expr(parse_expression(s)?)
+                CompositeLiteralElementNode::Expr(parse_expression(s, true)?)
             };
 
             (Some(key), value)
@@ -232,7 +232,7 @@ fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'
 
     expect(s, TokenKind::ParenL, Some("explicit conversion"))?;
 
-    let expr = Box::new(parse_expression(s)?);
+    let expr = Box::new(parse_expression(s, true)?);
 
     expect(s, TokenKind::ParenR, Some("explicit conversion"))?;
 
@@ -315,7 +315,7 @@ fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Ex
         Some(of_kind!(TokenKind::Struct)) => with_conversion_fallback!(parse_struct_literal),
         Some(of_kind!(TokenKind::ParenL)) => {
             s.next(); // advance
-            let inner = parse_expression(s)?;
+            let inner = parse_expression(s, true)?;
             expect(s, TokenKind::ParenR, Some("parenthesized expression"))?;
 
             inner
@@ -342,7 +342,10 @@ fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Ex
     parse_postfix_if_exists(s, expr)
 }
 
-pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
+pub fn parse_primary_expression<'a>(
+    s: &mut TokenStream<'a>,
+    allow_composite_after_name: bool,
+) -> PResult<'a, ExprNode<'a>> {
     // the real parser is `parse_inner_primary_expression` above, but we need to
     // have this wrapper because of the possibility of composite literals, which
     // might invalidate a parsed expression even if parsing was successful.
@@ -354,43 +357,39 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
 
     let inner = parse_inner_primary_expression(b)?;
 
-    // heuristic: we assume all composite literals have types starting with an
-    // uppercase character (e.g., `T { ... }` but not `t { ... }`), since
-    // otherwise we cannot distinguish the case `for range ch { };` (which is
-    // not a composite literal). the same applies for `if x { };`, and so on.
-    // in the future it might make sense to consider limiting this assumption to
-    // only empty composite literals (i.e., uppercase is only checked after the
-    // literal has been parsed successfully and yielding an empty literal), but
-    // that would be harder and bring its own disadvantages
-    // (another alternative would be to have a separate parse_primary_expression
-    // just for the case where a block is expected after the expression, but it
-    // would probably be harder since this function exists within a larger
-    // parse_expression pipeline)
-    let operand = match &inner {
-        ExprNode::Name(name) => Some(name),
-        ExprNode::Selection(selection) => {
-            if let ExprNode::Name(name) = &*selection.base {
-                Some(name)
-            } else {
-                None
-            }
+    // only attempt (expensive) composite literal parsing if the prefix is valid
+    // for a composite literal
+    let is_potential_composite_literal_type = match &inner {
+        ExprNode::Name(_) => true,
+        ExprNode::Selection(SelectionNode { base, .. }) => {
+            matches!(&**base, ExprNode::Name(_))
         }
-        _ => None,
+        ExprNode::Indexing(IndexingNode { base, .. }) => match &**base {
+            ExprNode::Name(_) => true,
+            ExprNode::Selection(SelectionNode {
+                base: inner_base, ..
+            }) => {
+                matches!(&**inner_base, ExprNode::Name(_))
+            }
+            _ => false,
+        },
+        _ => false,
     };
 
-    let expr = if operand
-        .map(Span::content)
-        .map(str::chars)
-        .as_mut()
-        .and_then(Iterator::next)
-        .is_some_and(char::is_uppercase)
+    // `allow_composite_after_name` resolves the ambiguity between a composite
+    // literal `T{...}` and a TypeName followed by an unrelated `{` block
+    // (which only arises immediately after the `if`/`for`/`switch` keyword
+    // through the opening `{` of the body, and the Go spec requires composite
+    // literals in such positions to be parenthesized)
+    let expr = if allow_composite_after_name
+        && is_potential_composite_literal_type
         && matches!(b.peek(), Some(Ok(of_kind!(TokenKind::CurlyL))))
     {
-        // now we know there's a trailing {, but we don't know if that is
-        // because of a composite literal (`x { ... }`) or completely unrelated
-        // (`if x {`), so we need to try parsing a composite literal but be
-        // ready to backtrack (must use the original stream since if correct
-        // then `inner` is wrong)
+        // we have a TypeName-shaped expression followed by `{`; try parsing it
+        // as a composite literal - if that fails, fall back to the inner expr.
+        // we have to re-parse the prefix as a type, so we operate on a fresh
+        // backtracking view of the original stream
+
         let mut context2 = BacktrackingContext::new(s);
         let b2 = context2.stream();
 
@@ -421,13 +420,17 @@ pub fn parse_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Expr
     parse_postfix_if_exists(s, expr)
 }
 
-pub fn parse_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprNode<'a>> {
-    ops::parse_expression_bp(s, 0)
+pub fn parse_expression<'a>(
+    s: &mut TokenStream<'a>,
+    allow_composite_after_name: bool,
+) -> PResult<'a, ExprNode<'a>> {
+    ops::parse_expression_bp(s, 0, allow_composite_after_name)
 }
 
 pub fn parse_expressions_list<'a, F, R, E>(
     s: &mut TokenStream<'a>,
     stop_cond: F,
+    allow_composite_after_name: bool,
 ) -> PResult<'a, Option<(Vec<ExprNode<'a>>, R)>>
 where
     F: Fn(Token<'a>) -> Result<R, E>,
@@ -447,7 +450,7 @@ where
             // (^^ we know this will error, that's the point)
         }
 
-        exprs.push(parse_expression(s)?);
+        exprs.push(parse_expression(s, allow_composite_after_name)?);
 
         if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
             s.next(); // advance
@@ -465,12 +468,15 @@ where
 pub fn parse_expressions_list_while<'a, F>(
     s: &mut TokenStream<'a>,
     cond: F,
+    allow_composite_after_name: bool,
 ) -> PResult<'a, Option<Vec<ExprNode<'a>>>>
 where
     F: Fn(Token<'a>) -> bool,
 {
-    Ok(
-        parse_expressions_list(s, |token| (!cond(token)).then_some(()).ok_or(()))?
-            .map(|(exprs, ())| exprs),
-    )
+    Ok(parse_expressions_list(
+        s,
+        |token| (!cond(token)).then_some(()).ok_or(()),
+        allow_composite_after_name,
+    )?
+    .map(|(exprs, ())| exprs))
 }

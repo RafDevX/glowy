@@ -115,9 +115,11 @@ fn parse_spec<'a>(
         break;
     }
 
-    let exprs = parse_expressions_list_while(s, |t| {
-        !matches!(t.kind, TokenKind::SemiColon | TokenKind::ParenR)
-    })?
+    let exprs = parse_expressions_list_while(
+        s,
+        |t| !matches!(t.kind, TokenKind::SemiColon | TokenKind::ParenR),
+        true,
+    )?
     .unwrap_or_else(Vec::new); // got end-of-file but that's fine, same as empty expressions list
 
     Ok(BindingDeclSpecNode { ids, exprs, r#type })

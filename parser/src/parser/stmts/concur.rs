@@ -12,7 +12,7 @@ pub fn parse_go_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementN
     // to hook into the expression parsing internal postfix logic, so it's
     // easier to just let the AST consumer deal with potentially illegal
     // (non-call) expressions later down the line
-    let expr = parse_expression(s)?;
+    let expr = parse_expression(s, true)?;
     // ^ technically parenthesized expressions are illegal here, but yeah...
 
     Ok(StatementNode::Go {
@@ -30,7 +30,7 @@ pub fn parse_defer_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Stateme
     // to hook into the expression parsing internal postfix logic, so it's
     // easier to just let the AST consumer deal with potentially illegal
     // (non-call) expressions later down the line
-    let expr = parse_expression(s)?;
+    let expr = parse_expression(s, true)?;
     // ^ technically parenthesized expressions are illegal here, but yeah...
 
     Ok(StatementNode::Defer {

@@ -95,7 +95,7 @@ fn parse_array_or_slice_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNod
         // slice
         None
     } else {
-        Some(Box::new(parse_expression(s)?))
+        Some(Box::new(parse_expression(s, true)?))
     };
 
     expect(s, TokenKind::SquareR, Some("array/slice type"))?;

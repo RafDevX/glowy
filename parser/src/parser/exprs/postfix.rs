@@ -41,9 +41,11 @@ fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, Ex
         None
     };
 
-    let args = parse_expressions_list_while(s, |token| {
-        !matches!(token.kind, TokenKind::Ellipsis | TokenKind::ParenR)
-    })?
+    let args = parse_expressions_list_while(
+        s,
+        |token| !matches!(token.kind, TokenKind::Ellipsis | TokenKind::ParenR),
+        true,
+    )?
     .unwrap_or_else(Vec::new); // got end-of-file, but it's fine because the upcoming expect will fail
 
     let variadic = if let Some(Ok(of_kind!(TokenKind::Ellipsis))) = s.peek() {
@@ -84,7 +86,7 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
                     // was just a trailing comma
                     None
                 } else {
-                    Some(Box::new(parse_expression(s)?))
+                    Some(Box::new(parse_expression(s, true)?))
                 }
             }
         };
@@ -137,7 +139,7 @@ fn parse_slicing<'a>(
         // slicing of the form a[low:] (or a[:] is low is None)
         (None, None)
     } else {
-        let high = parse_expression(s)?;
+        let high = parse_expression(s, true)?;
 
         if let Some(Ok(of_kind!(TokenKind::SquareR))) = s.peek() {
             // a[low:high] or a[:high]
@@ -146,7 +148,7 @@ fn parse_slicing<'a>(
             // a[low:high:max] or a[:high:max]
             expect(s, TokenKind::Colon, Some("full slicing expression"))?;
 
-            let max = parse_expression(s)?;
+            let max = parse_expression(s, true)?;
 
             (Some(high), Some(max))
         }
@@ -175,7 +177,7 @@ fn parse_indexing_or_slice<'a>(
         return parse_slicing(s, base, None).map(Into::into);
     }
 
-    let index = parse_expression(s)?;
+    let index = parse_expression(s, true)?;
 
     if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
         return parse_slicing(s, base, Some(index)).map(Into::into);
@@ -286,7 +288,7 @@ mod tests {
     fn parse(input: &str) -> PResult<'_, ExprNode<'_>> {
         let mut stream = TokenStream::new(Lexer::new(input));
 
-        parse_expression(&mut stream)
+        parse_expression(&mut stream, true)
     }
 
     #[test]
