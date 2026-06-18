@@ -218,6 +218,11 @@ impl<'a> SymbolCaptureCollector<'a> for FunctionDeclNode<'a> {
             declared.insert(self.name.content());
         }
 
+        let Some(body) = &self.body else {
+            // nothing else to do
+            return;
+        };
+
         let mut declared = declared.clone();
 
         declared.extend(extract_names_from_signature(
@@ -225,7 +230,7 @@ impl<'a> SymbolCaptureCollector<'a> for FunctionDeclNode<'a> {
             self.receiver.as_ref(),
         ));
 
-        self.body.collect_captured_symbols(captured, &mut declared);
+        body.collect_captured_symbols(captured, &mut declared);
     }
 }
 

@@ -33,7 +33,7 @@ fn visit_function_def<'a>(
     decl_symbol: Option<Pinned<'a, Span<'a>>>,
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
-    body: &BlockNode<'a>,
+    body: Option<&BlockNode<'a>>,
     annotation: Option<&Annotation<'a>>,
 ) -> ValueRef<'a> {
     let value_location = match r#ref {
@@ -64,6 +64,11 @@ fn visit_function_def<'a>(
 
         ctx.declare_new_symbol(symbol);
     }
+
+    let Some(body) = body else {
+        // no body provided -> no known implementation, nothing else to do here
+        return value;
+    };
 
     ctx.symtab_mut().select_next_child_scope(); // push
 
@@ -264,7 +269,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         Some(func_name),
         &node.signature,
         node.receiver.as_ref(),
-        &node.body,
+        node.body.as_ref(),
         node.annotation.as_deref(),
     );
 }
@@ -278,7 +283,7 @@ pub fn visit_function_literal<'a>(
 ) -> ValueRef<'a> {
     let r#ref = FunctionRef::Anonymous(ctx.pin(location.clone()));
 
-    visit_function_def(ctx, &r#ref, None, signature, None, body, annotation)
+    visit_function_def(ctx, &r#ref, None, signature, None, Some(body), annotation)
 }
 
 pub fn visit_return<'a>(

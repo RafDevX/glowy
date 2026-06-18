@@ -139,9 +139,10 @@ pub fn visit_source_file<'a>(
         // top-level declarations (i.e., package scope), not anywhere else
         if let DeclNode::Function(func) = decl
             && func.name.content() == "init"
+            && let Some(body) = &func.body
         {
             // this will create a new scope, which is intended
-            visit_block(ctx, &func.body);
+            visit_block(ctx, body);
 
             continue;
         }
