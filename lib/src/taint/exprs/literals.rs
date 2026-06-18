@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use parser::{
     Location,
     ast::{
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, LiteralNode,
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, FieldDeclNode, LiteralNode,
         StructLiteralFieldsNode, TypeNode,
     },
 };
@@ -205,18 +205,22 @@ fn visit_struct_composite_literal<'a>(
                 fields: type_fields,
             } = r#type
             {
-                let candidate: Vec<_> = type_fields
-                    .iter()
-                    .flat_map(|f| f.ids.iter())
-                    .map(Option::as_ref)
-                    .collect();
+                let mut candidate = Some(Vec::new());
 
-                if candidate.len() == entries.len() {
-                    Some(candidate)
-                } else {
-                    // this should never happen, but oh well
-                    None
+                for field in type_fields {
+                    match field {
+                        FieldDeclNode::Explicit(explicit) if let Some(c) = &mut candidate => {
+                            c.extend(explicit.ids.iter().map(Option::as_ref));
+                        }
+                        FieldDeclNode::Explicit(_) => {}
+                        FieldDeclNode::Embedded(_) => {
+                            candidate = None;
+                            break;
+                        }
+                    }
                 }
+
+                candidate.filter(|c| c.len() == entries.len())
             } else {
                 None
             };
