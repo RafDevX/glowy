@@ -479,8 +479,9 @@ impl SnapshotAware for FunctionValue<'_> {
 /// Represents an unambiguous reference to a function declaration.
 ///
 /// Among other uses, this is necessary to guarantee uniqueness of a
-/// [`crate::labels::LabelTag::Synthetic`] when paired with a function parameter
-/// index.
+/// [`LabelTag::Synthetic`](crate::labels::LabelTag::Synthetic) when paired with
+/// a function parameter index or another equivalent function-specific
+/// identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FunctionRef<'a> {
     /// A normal function with a native declared name.
@@ -497,6 +498,9 @@ pub enum FunctionRef<'a> {
 }
 
 impl<'a> FunctionRef<'a> {
+    /// Returns the function's declared symbol name, if any exists.
+    #[must_use]
+    #[inline]
     pub fn declared_name(&self) -> Option<&'a str> {
         match self {
             Self::Named(span) => Some(span.content()),
@@ -505,6 +509,13 @@ impl<'a> FunctionRef<'a> {
         }
     }
 
+    /// Returns whether the function is considered to be the main entrypoint.
+    ///
+    /// This indicates whether the analyzer considers a given function to be the
+    /// program's primary entrypoint, which is derived from heuristics and
+    /// assumptions, meaning that it might differ from the Go compiler's views.
+    #[must_use]
+    #[inline]
     pub fn is_main(&self) -> bool {
         if let Self::Named(name) = self {
             name.content() == "main" && name.file() == "/main.go"
@@ -515,6 +526,7 @@ impl<'a> FunctionRef<'a> {
 }
 
 impl fmt::Display for FunctionRef<'_> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Named(name) => name.content().fmt(f),
@@ -535,6 +547,7 @@ impl fmt::Display for FunctionRef<'_> {
 // it), even though in this particular case we really do need a total order,
 // even if a bit arbitrary
 impl Ord for FunctionRef<'_> {
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self, other) {
             (Self::Named(a), Self::Named(b)) => a.cmp(b),
@@ -557,6 +570,7 @@ impl Ord for FunctionRef<'_> {
 }
 
 impl PartialOrd for FunctionRef<'_> {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }

@@ -17,7 +17,11 @@ use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, iter};
 
 use parser::{Location, Span};
 
-use crate::{Pinned, values::FunctionRef};
+use crate::Pinned;
+
+// we need this to be publicly accessible and documented, since it's referenced
+// publicly by LabelTag::Synthetic
+pub use crate::values::FunctionRef;
 
 /// Represents a synthetic label tag's purpose and identity, for some function.
 ///
@@ -46,7 +50,7 @@ pub enum SyntheticSlot {
     /// Conceptual placeholder for a captured symbol's label.
     ///
     /// The enclosed value is the registered index of the symbol capture within
-    /// the [`FunctionValue`](crate::values::FunctionValue) in question.
+    /// the internal analysis function value in question.
     ///
     /// A synthetic representation is necessary because a closure function
     /// sharing symbols with an outer scope still experiences mutations to them
@@ -108,7 +112,7 @@ pub enum LabelTag<'a> {
         slot: SyntheticSlot,
         /// The parameter's assigned identifier, if any.
         ///
-        /// Note that this is redundant with [`LabelTag::Synthetic::index`], but
+        /// Note that this is redundant with [`LabelTag::Synthetic::slot`], but
         /// allows for a more human-friendly representation when present.
         identifier: Option<Span<'a>>,
     },
