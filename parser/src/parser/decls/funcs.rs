@@ -4,7 +4,7 @@ use crate::{
     parser::{
         BacktrackingContext, PResult, expect, of_kind,
         stmts::{self, parse_block},
-        types::parse_type,
+        types::{parse_type, parse_type_params},
     },
     token::TokenKind,
 };
@@ -175,13 +175,11 @@ pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionD
 
     let name = expect(s, TokenKind::Ident, Some("function name"))?.span;
 
-    if let Some(Ok(of_kind!(TokenKind::SquareL))) = s.peek() {
-        // TODO: support type parameters
-        return Err(ParsingError::UnexpectedConstruct {
-            expected: "function signature",
-            found: s.next().transpose()?,
-        });
-    }
+    let type_params = if let Some(Ok(of_kind!(TokenKind::SquareL))) = s.peek() {
+        parse_type_params(s)?
+    } else {
+        Vec::new()
+    };
 
     let signature = parse_signature(s)?;
 
@@ -192,6 +190,7 @@ pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionD
     Ok(FunctionDeclNode {
         receiver,
         name,
+        type_params,
         signature,
         body,
         location,

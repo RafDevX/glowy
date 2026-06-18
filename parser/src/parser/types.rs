@@ -1,7 +1,10 @@
 use super::{PResult, expect, exprs::parse_expression, of_kind};
 use crate::{
     ParsingError, TokenStream,
-    ast::{ChannelDirection, FieldDeclNode, InterfaceElementNode, InterfaceTypeTermNode, TypeNode},
+    ast::{
+        ChannelDirection, FieldDeclNode, InterfaceElementNode, InterfaceTypeTermNode, TypeNode,
+        TypeParam,
+    },
     parser::{BacktrackingContext, decls},
     token::{Token, TokenKind},
 };
@@ -284,6 +287,55 @@ pub fn parse_type<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeNode<'a>> {
             found,
         }),
     }
+}
+
+pub fn parse_type_params<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeParam<'a>>> {
+    expect(s, TokenKind::SquareL, Some("type parameters"))?;
+
+    let mut params = vec![];
+
+    loop {
+        params.push(parse_type_param(s)?);
+
+        if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
+            s.next(); // advance
+
+            // check if this was an optional trailing comma before ]
+            if let Some(Ok(of_kind!(TokenKind::SquareR))) = s.peek() {
+                s.next(); // advance
+
+                break;
+            }
+        } else {
+            expect(s, TokenKind::SquareR, Some("type parameters"))?;
+
+            break;
+        }
+    }
+
+    Ok(params)
+}
+
+fn parse_type_param<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeParam<'a>> {
+    let mut ids = vec![];
+
+    loop {
+        let id = expect(s, TokenKind::Ident, Some("type parameter identifier"))?;
+
+        ids.push(id.span);
+
+        if !matches!(s.peek(), Some(Ok(of_kind!(TokenKind::Comma)))) {
+            break;
+        }
+
+        s.next(); // advance comma
+    }
+
+    let InterfaceElementNode::TypeUnion(constraint) = parse_interface_type_union_element(s)? else {
+        unreachable!()
+    };
+
+    Ok(TypeParam { ids, constraint })
 }
 
 pub fn parse_types_until<'a>(

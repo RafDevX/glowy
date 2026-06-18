@@ -64,8 +64,14 @@ pub struct BindingDeclSpecNode<'a> {
 pub struct TypeDeclSpecNode<'a> {
     pub alias: bool, // otherwise, typedef
     pub id: Span<'a>,
-    // TODO: params
+    pub params: Vec<TypeParam<'a>>,
     pub r#type: TypeNode<'a>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeParam<'a> {
+    pub ids: Vec<Span<'a>>,
+    pub constraint: Vec<InterfaceTypeTermNode<'a>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,7 +129,7 @@ pub struct FieldDeclNode<'a> {
 pub struct FunctionDeclNode<'a> {
     pub receiver: Option<FunctionParamDeclNode<'a>>, // if method
     pub name: Span<'a>,
-    // TODO: pub type_params: Vec<___>,
+    pub type_params: Vec<TypeParam<'a>>,
     pub signature: FunctionSignatureNode<'a>,
     /// note: this parser intentionally does not support omitted bodies!
     /// (it would defeat the purpose of information flow control, and
