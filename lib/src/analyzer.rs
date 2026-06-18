@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, hash_map::Entry},
-    fs,
+    env, fs,
     io::{self, BufRead},
     path,
 };
@@ -44,6 +44,8 @@ pub struct Analyzer {
     /// This is used instead of in-source function annotations, especially for
     /// functions not defined in this module (such as standard library ones).
     blanket_directives: BlanketDirectives,
+    /// Whether to output more detailed status information during the analysis.
+    verbose: bool,
 }
 
 impl Analyzer {
@@ -73,6 +75,7 @@ impl Analyzer {
             module_base: module_base.to_owned(),
             files: Vec::new(),
             blanket_directives: BlanketDirectives::new(),
+            verbose: env::var("GLOWY_VERBOSE").is_ok(),
         }
     }
 
@@ -361,6 +364,12 @@ impl Analyzer {
     /// file is found in the project root.
     #[inline]
     pub fn ingest_structured_config(&mut self, config: AnalysisConfig) {
+        if !self.verbose {
+            // never downgrade verbosity: if envvar is set, we never want it to
+            // be overridden by e.g. a config file
+            self.verbose = config.verbose;
+        }
+
         let blanket_directives = config
             .sources
             .into_iter()
@@ -538,6 +547,10 @@ impl Analyzer {
             return Err(parse_errors);
         }
 
+        if self.verbose {
+            println!("Finished parsing {} file(s)", parsed.len());
+        }
+
         let mut context = AnalysisContext::new(&self.blanket_directives);
 
         macro_rules! process_taint_analysis_iteration {
@@ -566,6 +579,10 @@ impl Analyzer {
 
         process_taint_analysis_iteration!(decls::visit_source_file, false);
 
+        if self.verbose {
+            println!("Finished Stage 1");
+        }
+
         // Stage #2: StabilizeLabels
         //     Repeatedly visit symbols and assign them labels (per taint
         //     propagation) until all labels stabilize. This must be repeated
@@ -574,6 +591,12 @@ impl Analyzer {
         context.set_stage(AnalysisStage::StabilizeLabels);
 
         let mut last_snapshot = None;
+
+        // u8 is fine because this number should never be very high (<10), but
+        // even if we do somehow reach overflow (>255), it's not the end of the
+        // world to "restart" the iteration index from 0 since this is only used
+        // for outputting status reports in verbose mode
+        let mut iteration_index = 0_u8;
 
         loop {
             process_taint_analysis_iteration!(taint::visit_source_file, true);
@@ -587,6 +610,16 @@ impl Analyzer {
             }
 
             last_snapshot = Some(snapshot);
+
+            iteration_index += 1;
+
+            if self.verbose {
+                println!("Finished convergence iteration #{iteration_index} (Stage 2)");
+            }
+        }
+
+        if self.verbose {
+            println!("Finished Stage 2");
         }
 
         // Stage #3: EnforceSecurityPolicies
@@ -596,6 +629,10 @@ impl Analyzer {
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
         process_taint_analysis_iteration!(taint::visit_source_file, true);
+
+        if self.verbose {
+            println!("Finished Stage 3 -- Analysis is complete");
+        }
 
         // All done: return based on final context.
 

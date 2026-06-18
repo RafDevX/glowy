@@ -185,6 +185,12 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 #[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
 #[derive(Default)]
 pub struct AnalysisConfig {
+    /// Whether to output more detailed status information during the analysis.
+    ///
+    /// Note that setting this to `false` has no effect if the environment
+    /// variable `GLOWY_VERBOSE` is set (in which case the analyzer is always
+    /// verbose).
+    pub verbose: bool,
     /// Functions universally recognized as blanket information sources.
     ///
     /// These functions will always be considered to yield the associated label,
