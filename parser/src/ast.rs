@@ -131,11 +131,7 @@ pub struct FunctionDeclNode<'a> {
     pub name: Span<'a>,
     pub type_params: Vec<TypeParam<'a>>,
     pub signature: FunctionSignatureNode<'a>,
-    /// note: this parser intentionally does not support omitted bodies!
-    /// (it would defeat the purpose of information flow control, and
-    ///  make parsing much more complicated due to 2 optional elements
-    ///  in a row, namely signature result and body)
-    pub body: BlockNode<'a>,
+    pub body: Option<BlockNode<'a>>,
     pub location: Location,
     pub annotation: Option<Box<Annotation<'a>>>,
 }

@@ -1,13 +1,28 @@
 use crate::{
-    ParsingError, TokenStream,
+    TokenStream,
     ast::{FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode},
     parser::{
         BacktrackingContext, PResult, expect, of_kind,
-        stmts::{self, parse_block},
+        stmts::parse_block,
         types::{parse_type, parse_type_params},
     },
     token::TokenKind,
 };
+
+fn can_start_single_result_type(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Star
+            | TokenKind::Func
+            | TokenKind::SquareL
+            | TokenKind::Map
+            | TokenKind::Struct
+            | TokenKind::Interface
+            | TokenKind::Chan
+            | TokenKind::LtMinus
+            | TokenKind::Ident
+    )
+}
 
 fn parse_type_only_param_decl<'a>(
     s: &mut TokenStream<'a>,
@@ -145,11 +160,20 @@ fn parse_params<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<FunctionParamDec
 pub fn parse_signature<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionSignatureNode<'a>> {
     let params = parse_params(s)?;
 
-    let result = match s.peek().cloned().transpose()? {
-        None => FunctionResultNode::None,
-        Some(of_kind!(kind)) if stmts::terminal_token(&kind) => FunctionResultNode::None,
-        Some(of_kind!(TokenKind::ParenL)) => FunctionResultNode::Params(parse_params(s)?),
-        _ => FunctionResultNode::Single(parse_type(s)?),
+    // we must recognize tokens that may start a type, to avoid greedily trying
+    // to parse something as a result when it is not one, as simply ruling out {
+    // is not enough: this signature can be enclosed in strange places, itself
+    // representing a function param type or something else, meaning that the
+    // next token following the signature might be ), ], =, etc., which forces
+    // us to have a whitelist of token kinds rather than a blacklist
+    let next_kind = s.peek().cloned().transpose()?.map(|t| t.kind);
+
+    let result = match next_kind {
+        Some(TokenKind::ParenL) => FunctionResultNode::Params(parse_params(s)?),
+        Some(ref kind) if can_start_single_result_type(kind) => {
+            FunctionResultNode::Single(parse_type(s)?)
+        }
+        _ => FunctionResultNode::None,
     };
 
     Ok(FunctionSignatureNode { params, result })
@@ -183,7 +207,11 @@ pub fn parse_function_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FunctionD
 
     let signature = parse_signature(s)?;
 
-    let body = parse_block(s)?;
+    let body = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
+        Some(parse_block(s)?)
+    } else {
+        None
+    };
 
     let location = s.location_since(&beginning);
 
