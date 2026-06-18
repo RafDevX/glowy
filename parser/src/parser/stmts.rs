@@ -250,9 +250,9 @@ fn parse_statement<'a>(
         Some(of_kind!(TokenKind::Defer)) if allow_non_simple => parse_defer_statement(s)?,
 
         // declarations (sadly cannot be abstracted, indistinguishable if not for keywords)
-        Some(of_kind!(TokenKind::Const)) => parse_const_decl(s)?.into(),
-        Some(of_kind!(TokenKind::Var)) => parse_var_decl(s)?.into(),
-        Some(of_kind!(TokenKind::Type)) => parse_type_decl(s)?.into(),
+        Some(of_kind!(TokenKind::Const)) if allow_non_simple => parse_const_decl(s)?.into(),
+        Some(of_kind!(TokenKind::Var)) if allow_non_simple => parse_var_decl(s)?.into(),
+        Some(of_kind!(TokenKind::Type)) if allow_non_simple => parse_type_decl(s)?.into(),
 
         Some(of_kind!(TokenKind::Ident)) => parse_identifier_first_stmt(s)?,
         _ => parse_expression_first_stmt(s)?,
