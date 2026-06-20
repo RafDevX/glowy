@@ -77,6 +77,21 @@ impl<'a> Span<'a> {
     pub fn location(&self) -> Location {
         self.offset..(self.offset + self.content.len())
     }
+
+    #[must_use]
+    #[inline]
+    pub fn subspan(&self, range: Range<usize>) -> Self {
+        let line_delta = self.content[..range.start]
+            .chars()
+            .filter(|ch| *ch == '\n')
+            .count();
+
+        Self::new(
+            &self.content[range.clone()],
+            self.offset + range.start,
+            self.line + line_delta,
+        )
+    }
 }
 
 #[allow(clippy::missing_inline_in_public_items)]

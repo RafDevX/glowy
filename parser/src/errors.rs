@@ -1,12 +1,14 @@
 use crate::{
     Span,
     lexer::LexingError,
+    parser::BuildConstraintParsingError,
     token::{Token, TokenKind},
 };
 
 #[derive(Clone, Debug)]
 pub enum ParsingError<'a> {
     Lexing(LexingError<'a>),
+    BuildConstraint(BuildConstraintParsingError<'a>),
     UnexpectedTokenKind {
         expected: TokenKind,
         found: Option<Token<'a>>,      // None means EOF
@@ -22,6 +24,13 @@ impl<'a> From<LexingError<'a>> for ParsingError<'a> {
     #[inline]
     fn from(err: LexingError<'a>) -> Self {
         Self::Lexing(err)
+    }
+}
+
+impl<'a> From<BuildConstraintParsingError<'a>> for ParsingError<'a> {
+    #[inline]
+    fn from(err: BuildConstraintParsingError<'a>) -> Self {
+        Self::BuildConstraint(err)
     }
 }
 
@@ -74,6 +83,7 @@ impl<'a> Diagnostics<'a> for ParsingError<'a> {
 
         match self {
             Self::Lexing(e) => e.diagnostics(),
+            Self::BuildConstraint(e) => e.diagnostics(),
             Self::UnexpectedTokenKind {
                 expected,
                 found,

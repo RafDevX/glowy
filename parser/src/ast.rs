@@ -7,6 +7,7 @@ pub struct SourceFileNode<'a> {
     pub package_clause: PackageClauseNode<'a>,
     pub imports: Vec<ImportNode<'a>>,
     pub top_level_decls: Vec<DeclNode<'a>>,
+    pub build_constraint: Option<BuildConstraintNode<'a>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -869,4 +870,18 @@ pub struct TypeSwitchNode<'a> {
 pub struct TypeSwitchCaseClause<'a> {
     pub types: Vec<Option<TypeNode<'a>>>, // empty means "default"; None = "nil"
     pub body: Vec<StatementNode<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildConstraintNode<'a> {
+    pub expr: BuildConstraintExprNode<'a>,
+    pub location: Location,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuildConstraintExprNode<'a> {
+    Tag(&'a str),
+    Not(Box<Self>),
+    And(Vec<Self>),
+    Or(Vec<Self>),
 }

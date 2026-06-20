@@ -1,13 +1,16 @@
+pub use build_constraints::BuildConstraintParsingError;
 use decls::try_parse_top_level_decl;
 use imports::try_parse_import;
 
 use crate::{
     ast::{PackageClauseNode, SourceFileNode},
     errors::ParsingError,
+    parser::build_constraints::try_parse_build_constraint,
     stream::TokenStream,
     token::{Token, TokenKind},
 };
 
+mod build_constraints;
 mod decls;
 mod exprs;
 mod imports;
@@ -77,10 +80,15 @@ pub fn parse_source_file<'a>(s: &mut TokenStream<'a>) -> PResult<'a, SourceFileN
         expect(s, TokenKind::SemiColon, None)?;
     }
 
+    // cannot be done first because build constraint is not yet extracted by the
+    // lexer before any token is returned (e.g., as part of the package clause)
+    let build_constraint = try_parse_build_constraint(s)?;
+
     Ok(SourceFileNode {
         package_clause,
         imports,
         top_level_decls,
+        build_constraint,
     })
 }
 

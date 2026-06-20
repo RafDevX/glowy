@@ -14,6 +14,8 @@ use crate::{
     token::{Annotation, Token, TokenKind},
 };
 
+const BUILD_CONSTRAINT_PREFIX: &str = "//go:build ";
+
 static ANNOTATION_REGEX: LazyLock<Regex> = {
     LazyLock::new(|| {
         Regex::new(
@@ -125,6 +127,8 @@ pub struct Lexer<'a> {
     last_annotation: Option<Annotation<'a>>, // prevent clearing by whitespace
 
     enable_implicit_semicolon: bool, // whether to enable implicit semicolon insertion
+
+    build_constraint: Option<Span<'a>>, // from `//go:build ...` at the beginning
 }
 
 type LResult<'a> = Result<Token<'a>, LexingError<'a>>;
@@ -143,11 +147,17 @@ impl<'a> Lexer<'a> {
             last_annotation: None,
 
             enable_implicit_semicolon: true,
+
+            build_constraint: None,
         }
     }
 
     pub fn take_last_annotation(&mut self) -> Option<Box<Annotation<'a>>> {
         self.last_annotation.take().map(Box::new)
+    }
+
+    pub fn get_build_constraint(&self) -> Option<Span<'a>> {
+        self.build_constraint
     }
 
     fn peek_char(&mut self) -> Option<char> {
@@ -290,6 +300,66 @@ impl<'a> Lexer<'a> {
                 _ => {} // not a comment
             }
         }
+    }
+
+    fn try_extract_build_constraint(&mut self) {
+        if self.build_constraint.is_some() || self.last_token_kind.is_some() {
+            // nothing to do: either we already have a build constraint (and
+            // only the first one is allowed), or we've already returned some
+            // token (not a comment nor a blank) so no more build constraints
+            // are allowed for this file
+            return;
+        }
+
+        // cloned so we can peek freely
+        let mut it = self.src.clone();
+
+        // try to parse a build constraint, but we can only commit if everything
+        // actually pans out at the end (including blank line after this)
+
+        for ch in BUILD_CONSTRAINT_PREFIX.chars() {
+            if it.next() != Some(ch) {
+                return;
+            }
+        }
+
+        let mut constraint = String::new();
+
+        for ch in it.by_ref() {
+            if ch == '\n' {
+                break;
+            }
+
+            constraint.push(ch);
+        }
+
+        // check if an empty line follows
+        if it.next() != Some('\n') {
+            // nope, this is not accepted as a build constraint; it is
+            // considered just a normal comment, so abort everything
+            return;
+        }
+
+        // at this point we know it was an actual build constraint
+
+        self.read_n(BUILD_CONSTRAINT_PREFIX.len());
+
+        let trim_start = constraint.len() - constraint.trim_start().len();
+        if trim_start > 0 {
+            self.read_n(trim_start);
+        }
+
+        let span_len = constraint.trim().len();
+        let span = self.read_n(span_len);
+
+        let trim_end = constraint.trim_start().len() - span_len;
+        if trim_end > 0 {
+            self.read_n(trim_end);
+        }
+
+        self.read_n(2); // for the 2 \n
+
+        self.build_constraint = Some(span);
     }
 
     fn identifier_or_keyword(&mut self) -> Token<'a> {
@@ -801,6 +871,8 @@ impl<'a> Iterator for Lexer<'a> {
 
             return Some(Ok(queued));
         }
+
+        self.try_extract_build_constraint();
 
         self.skip_comments();
 
