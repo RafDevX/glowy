@@ -9,6 +9,7 @@ use crate::{
     Pinned,
     context::AnalysisContext,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
+    snapshots::SnapshotAware,
     symbols::{Symbol, SymbolRef},
     values::{CaptureBinding, FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -203,9 +204,20 @@ pub fn apply_capture_mutations<'a>(
             realized = Cow::Owned(local_value.clone_inner());
         }
 
-        if ctx.was_symbol_declared_within_active_split(&outer_symbol) == Some(false) {
-            let outer_value = outer_symbol.borrow().value().get();
+        let outer_value = outer_symbol.borrow().value().get();
 
+        if (*realized).snapshot_aware_eq(&outer_value) {
+            // avoid unbounded growth of the outer symbol's backtrace tree
+            // across repeated closure calls, as otherwise later backtrace
+            // comparisons (e.g., the == at derive_best_backtraces_for_captures)
+            // would suffer monumental performance penalties, and memory usage
+            // would grow substantially, overall affecting efficiency by several
+            // orders of magnitude; nesting this would essentially lead to
+            // virtual non-termination of the analysis process
+            continue;
+        }
+
+        if ctx.was_symbol_declared_within_active_split(&outer_symbol) == Some(false) {
             realized = Cow::Owned(realized.nest_backtrace(
                 LabelBacktraceKind::Assignment,
                 Some(outer_decl.content()),
