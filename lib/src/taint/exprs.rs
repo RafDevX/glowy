@@ -71,12 +71,8 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
     } else {
         let value = result.pop().unwrap(); // already checked
 
-        return if let Some(expandable) = value.as_expandable() {
-            // collapse into single value
-            expandable.primary()
-        } else {
-            value
-        };
+        // collapse into single value, if Möbius/expandable
+        return value.extract_collapsed_single();
     }
 
     ValueRef::new_bottom(ctx.pin(node.location().into_owned()))

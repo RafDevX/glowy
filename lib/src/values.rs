@@ -153,6 +153,41 @@ impl<'a> ValueRef<'a> {
             *self.value.borrow_mut() = new;
         }
     }
+
+    pub fn try_expand_to(&self, desired_len: usize) -> Option<Vec<Self>> {
+        // this utility method enforces correctness by *always* checking for
+        // Möbius *before* expandable: it is very important to always check
+        // Möbius first and foremost, as otherwise it would be upgraded
+        // into a size-1 expandable, discarding the important information
+        // that it can already be expanded to any arbitrary size
+
+        if let Some(mobius) = self.as_mobius() {
+            Some(mobius.expand_to(desired_len))
+        } else {
+            // note that this might lead to a different length than the one
+            // requested via `desired_len`!
+            self.as_expandable().as_deref().map(ExpandableValue::expand)
+        }
+    }
+
+    pub fn extract_collapsed_single(&self) -> Self {
+        // this utility method enforces correctness by *always* checking for
+        // Möbius *before* expandable: it is very important to always check
+        // Möbius first and foremost, as otherwise it would be upgraded
+        // into a size-1 expandable, discarding the important information
+        // that it can already be expanded to any arbitrary size
+
+        if let Some(mobius) = self.as_mobius() {
+            Self::new(
+                (*mobius.inner().value.borrow()).clone(),
+                self.location().clone(),
+            )
+        } else if let Some(expandable) = self.as_expandable() {
+            expandable.primary()
+        } else {
+            self.clone()
+        }
+    }
 }
 
 macro_rules! extract_inner {
@@ -182,13 +217,15 @@ macro_rules! extract_inner {
     reason = "We explicitly want to match only one variant and ignore all others"
 )]
 impl<'a> ValueRef<'a> {
-    pub fn as_expandable(&self) -> Option<Ref<'_, ExpandableValue<'a>>> {
+    // private to force going through Self::try_expand_to
+    fn as_expandable(&self) -> Option<Ref<'_, ExpandableValue<'a>>> {
         self.try_upgrade_to(Value::Expandable);
 
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::Expandable)).ok()
     }
 
-    pub fn as_mobius(&self) -> Option<Ref<'_, MobiusValue<'a>>> {
+    // private to force going through Self::try_expand_to
+    fn as_mobius(&self) -> Option<Ref<'_, MobiusValue<'a>>> {
         self.try_upgrade_to(Value::Mobius);
 
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::Mobius)).ok()
