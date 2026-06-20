@@ -225,9 +225,9 @@ impl<'a> Lexer<'a> {
         self.accumulate_while((), |ch, (), _| cond(ch)).0
     }
 
-    fn read_n<const N: usize>(&mut self) -> Span<'a> {
+    fn read_n(&mut self, n: usize) -> Span<'a> {
         let (span, _) = self.accumulate_while(0, |_, count, _| {
-            if *count < N {
+            if *count < n {
                 *count += 1;
                 true
             } else {
@@ -247,7 +247,7 @@ impl<'a> Lexer<'a> {
                 Some('/') => {
                     // line comment
 
-                    self.read_n::<2>(); // step over //
+                    self.read_n(2); // step over //
 
                     let start = self.offset;
 
@@ -278,7 +278,7 @@ impl<'a> Lexer<'a> {
                 Some('*') => {
                     // general comment
 
-                    self.read_n::<2>(); // step over /*
+                    self.read_n(2); // step over /*
                     loop {
                         self.read_while(|ch| ch != '*');
                         self.read_char(); // step over *
@@ -706,7 +706,7 @@ impl<'a> Lexer<'a> {
         let upcoming: Vec<_> = self.src.clone().take(3).collect();
 
         let token = if upcoming.len() == 3 && upcoming.iter().all(|x| *x == '.') {
-            Token::new(TokenKind::Ellipsis, self.read_n::<3>())
+            Token::new(TokenKind::Ellipsis, self.read_n(3))
         } else if upcoming.first() == Some(&'.') {
             if upcoming.get(1).is_some_and(char::is_ascii_digit) {
                 // float literal with elided integer part, such as .25 == 0.25
