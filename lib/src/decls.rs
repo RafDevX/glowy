@@ -1,7 +1,9 @@
 //! Used exclusively for Stage 1: `RecordDeclarations`
 //! (visit top-level declarations).
 
-use parser::ast::{BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode};
+use parser::ast::{
+    BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode, TypeNameNode, TypeNode,
+};
 
 use crate::{
     FullPackagePath, context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol,
@@ -92,5 +94,28 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
 
     let symbol = Symbol::new_ref(name, false, value);
 
-    ctx.declare_new_symbol(symbol);
+    ctx.declare_function_or_method(node.receiver.as_ref(), symbol);
+}
+
+pub fn receiver_base_type_name<'a>(r#type: &TypeNode<'a>) -> Option<&'a str> {
+    // per the Go spec, a method receiver type must be either a defined type `T`
+    // or a pointer to one (`*T`). generic methods take the form `(*T[K, V])`,
+    // where the type parameter list does not affect identity for the purposes
+    // of method-set membership: `methodName` is the same method on `T`
+    // regardless of whether it's referred to as `T`, `*T`, `T[A]`, or `*T[A]`
+
+    match r#type {
+        TypeNode::Name(TypeNameNode {
+            package: None, id, ..
+        }) => Some(id.content()),
+        TypeNode::Pointer { base } => receiver_base_type_name(base),
+        TypeNode::Name(_)
+        | TypeNode::Channel { .. }
+        | TypeNode::Array { .. }
+        | TypeNode::Slice { .. }
+        | TypeNode::Map { .. }
+        | TypeNode::Struct { .. }
+        | TypeNode::Interface { .. }
+        | TypeNode::Function { .. } => None, // invalid or unrecognized
+    }
 }

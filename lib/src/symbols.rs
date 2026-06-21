@@ -65,6 +65,11 @@ pub struct SymbolTable<'a> {
 
     /// Currently selected (package or sub-package) scope.
     current_scope: ScopeRef<'a>,
+    /// Path of the package whose root the [`Self::current_scope`] is nested in.
+    ///
+    /// Tracked so that we can resolve methods (which live on the package
+    /// envelope, not in the lexical scope chain) from any nested scope depth.
+    current_package_path: Option<FullPackagePath>,
     /// Count of traversed children for each level (last value = current level).
     ///
     /// For example, a cursor of:
@@ -88,6 +93,7 @@ impl<'a> SymbolTable<'a> {
             // only truly active after the first `enter_package` invocation.
             // This dead end will then be automatically deleted (by Rc).
             current_scope: Scope::new_root_ref(),
+            current_package_path: None,
             current_cursor: Vec::new(),
         }
     }
@@ -103,7 +109,7 @@ impl<'a> SymbolTable<'a> {
 
         let envelope = self
             .package_scopes
-            .entry(path)
+            .entry(path.clone())
             .or_insert_with(|| Some(PackageScopeEnvelope::new(name)));
 
         let envelope = envelope
@@ -114,6 +120,7 @@ impl<'a> SymbolTable<'a> {
         self.current_file_wildcard_imports.clear();
 
         self.current_scope = Rc::clone(&envelope.scope);
+        self.current_package_path = Some(path);
         self.current_cursor = vec![envelope.next_child_index];
 
         envelope.package_name
@@ -131,6 +138,18 @@ impl<'a> SymbolTable<'a> {
         for envelope in self.package_scopes.values_mut().flatten() {
             envelope.next_child_index = 0;
         }
+    }
+
+    fn current_package_envelope(&self) -> Option<&PackageScopeEnvelope<'a>> {
+        let path = self.current_package_path.as_ref()?;
+
+        self.package_scopes.get(path)?.as_ref()
+    }
+
+    fn current_package_envelope_mut(&mut self) -> Option<&mut PackageScopeEnvelope<'a>> {
+        let path = self.current_package_path.as_ref()?;
+
+        self.package_scopes.get_mut(path)?.as_mut()
     }
 
     pub fn select_next_child_scope(&mut self) {
@@ -256,6 +275,15 @@ impl<'a> SymbolTable<'a> {
             {
                 return Some(symbol);
             }
+
+            // methods aren't part of the lexical scope chain, but closures
+            // captured inside method bodies may still need to resolve their
+            // declaration sites (e.g. for self-referential method calls)
+            for method in envelope.methods_by_name(declaration.content()) {
+                if method.borrow().declared_name() == declaration {
+                    return Some(Rc::clone(method));
+                }
+            }
         }
 
         self.universe_scope.get_symbol_by_declaration(declaration)
@@ -274,6 +302,38 @@ impl<'a> SymbolTable<'a> {
         self.current_scope
             .borrow_mut()
             .set_local_symbol(name, symbol)
+    }
+
+    pub fn declare_new_method(
+        &mut self,
+        receiver_type: &'a str,
+        name: &'a str,
+        symbol: SymbolRef<'a>,
+    ) -> Option<SymbolRef<'a>> {
+        let envelope = self
+            .current_package_envelope_mut()
+            .expect("a package should be active when declaring a method");
+
+        envelope.set_method(receiver_type, name, symbol)
+    }
+
+    pub fn lookup_unique_method_in_current_package(&self, name: &str) -> Option<SymbolRef<'a>> {
+        // note: cross-package is not supported here, since methods are
+        // necessarily registered in the envelopes associated with their
+        // receiver type, so we'd need to know `x`'s type (in `x.M`) statically
+        // to know which other package envelope to look at
+
+        let envelope = self.current_package_envelope()?;
+
+        let mut iter = envelope.methods_by_name(name);
+        let first = iter.next()?;
+
+        if iter.next().is_some() {
+            // ambiguous: fall back to blackbox (cannot disambiguate which type)
+            return None;
+        }
+
+        Some(Rc::clone(first))
     }
 
     /// Returns None if no qualifier was specified but the package has not yet
@@ -384,6 +444,7 @@ impl<'a> SymbolTable<'a> {
 
             if let Some(envelope) = envelope {
                 items.extend(envelope.scope.borrow().partial_snapshot(&namespace));
+                items.extend(envelope.partial_method_snapshot(path));
             }
         }
 
@@ -422,6 +483,22 @@ struct PackageScopeEnvelope<'a> {
     package_name: Pinned<'a, Span<'a>>,
     /// The package's root scope.
     scope: ScopeRef<'a>,
+    /// Method declarations, keyed by receiver type then method name.
+    ///
+    /// Methods live here (and not in [`Self::scope`]) so that several distinct
+    /// receiver types may declare a method of the same name without colliding,
+    /// as Go's spec namespaces methods under their receiver's defined type
+    /// rather than under the package-block identifier namespace shared by free
+    /// functions, vars, constants, and types.
+    ///
+    /// The outer key is the receiver's defined type name (after stripping any
+    /// pointer indirection or generic type arguments); the inner key is the
+    /// method's name.
+    ///
+    /// Per Go's spec, a method's receiver type must be defined in the same
+    /// package as the method itself, so every entry here is owned by the
+    /// enclosing envelope's package.
+    methods: HashMap<&'a str, HashMap<&'a str, SymbolRef<'a>>>,
     /// Next child to be selected, for cross-file synergy/allow resuming count.
     next_child_index: usize,
 }
@@ -433,8 +510,55 @@ impl<'a> PackageScopeEnvelope<'a> {
         Self {
             package_name,
             scope,
+            methods: HashMap::new(),
             next_child_index: 0,
         }
+    }
+
+    fn set_method(
+        &mut self,
+        receiver_type: &'a str,
+        name: &'a str,
+        symbol: SymbolRef<'a>,
+    ) -> Option<SymbolRef<'a>> {
+        self.methods
+            .entry(receiver_type)
+            .or_default()
+            .insert(name, symbol)
+    }
+
+    fn methods_by_name<'s>(&'s self, name: &'s str) -> impl Iterator<Item = &'s SymbolRef<'a>> {
+        self.methods
+            .values()
+            .filter_map(move |inner| inner.get(name))
+    }
+
+    fn partial_method_snapshot(&self, package_path: &str) -> Vec<SymbolTableSnapshotItem<'a>> {
+        let mut items = vec![];
+
+        // sort for deterministic ordering (HashMap iteration is unordered)
+        let mut sorted: Vec<_> = self.methods.iter().collect();
+        sorted.sort_unstable_by_key(|(recv, _)| *recv);
+
+        for (recv_type, methods) in sorted {
+            let namespace = Rc::from(format!("{package_path}#{recv_type}").as_str());
+
+            let mut sorted_methods: Vec<_> = methods.iter().collect();
+            sorted_methods.sort_unstable_by_key(|(name, _)| *name);
+
+            for (name, symbol) in sorted_methods {
+                let borrowed = symbol.borrow();
+
+                items.push(SymbolTableSnapshotItem::new(
+                    Rc::clone(&namespace),
+                    name,
+                    borrowed.mutable(),
+                    borrowed.value().get(),
+                ));
+            }
+        }
+
+        items
     }
 }
 

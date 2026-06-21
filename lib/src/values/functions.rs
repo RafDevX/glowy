@@ -138,6 +138,10 @@ impl<'a> FunctionValue<'a> {
         self.signature.as_ref()
     }
 
+    pub fn has_receiver(&self) -> bool {
+        self.has_receiver
+    }
+
     pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
         self.outcome.as_ref()
     }

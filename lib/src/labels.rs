@@ -70,6 +70,22 @@ pub enum SyntheticSlot {
     CallSiteBranch,
 }
 
+impl SyntheticSlot {
+    fn label_backtrace_kind(&self) -> LabelBacktraceKind {
+        match self {
+            Self::Param(_) => LabelBacktraceKind::FunctionArgument,
+            Self::Receiver => LabelBacktraceKind::MethodReceiver,
+            Self::Capture(_) => LabelBacktraceKind::ClosureCaptureBinding,
+            // CallSiteBranch is realized via [`LabelBacktrace::realize`]'s
+            // dedicated Branch arm, which substitutes the concrete branch
+            // backtrace wholesale (preserving its kind), so this method is
+            // not actually invoked for it -- we still return Branch for
+            // robustness against future refactors that route through here
+            Self::CallSiteBranch => LabelBacktraceKind::Branch,
+        }
+    }
+}
+
 impl fmt::Display for SyntheticSlot {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -906,7 +922,7 @@ impl<'a> LabelBacktrace<'a> {
                 .is_synthetic_representation(from_func, from_slot)
             {
                 Self::new(
-                    LabelBacktraceKind::FunctionArgument,
+                    from_slot.label_backtrace_kind(),
                     concrete.map_or(&Label::Bottom, Self::label).clone(),
                     self.symbol(),
                     self.location().clone(),
@@ -1102,8 +1118,21 @@ pub enum LabelBacktraceKind {
     FunctionArgument,
     /// Aggregate label for all arguments passed to a variadic parameter.
     FunctionVariadicAggregation,
+    /// Concrete label associated to a method's receiver at the binding site.
+    ///
+    /// Conceptually, the receiver-flavored counterpart of
+    /// [`LabelBacktraceKind::FunctionArgument`], used both when a synthetic
+    /// receiver placeholder is realized at a call site and when a receiver's
+    /// taint is propagated into a bound method value (e.g. `f := x.M`).
+    MethodReceiver,
     /// Synthetic label assigned to a captured symbol shared with outer scope.
     ClosureCapture,
+    /// Concrete label associated to a captured symbol at closure invocation.
+    ///
+    /// The realized counterpart of [`LabelBacktraceKind::ClosureCapture`],
+    /// mirroring the [`LabelBacktraceKind::FunctionParameter`] <->
+    /// [`LabelBacktraceKind::FunctionArgument`] pair.
+    ClosureCaptureBinding,
     /// Individual label for one particular expression in a return statement.
     Return,
     /// Conservative label returned by a function without known implementation.

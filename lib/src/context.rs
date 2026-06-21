@@ -1,9 +1,10 @@
 use std::{fmt, path::Path};
 
-use parser::Location;
+use parser::{Location, Span, ast::FunctionParamDeclNode};
 
 use crate::{
     Pinned, SinkDescriptor,
+    decls::receiver_base_type_name,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
@@ -325,26 +326,62 @@ impl<'a> AnalysisContext<'a> {
     /// defined in the Go spec).
     pub fn declare_new_symbol(&mut self, symbol: SymbolRef<'a>) {
         let name = symbol.borrow().declared_name();
+        let existing = self.symbol_table.declare_new_symbol(name.content(), symbol);
 
-        if let Some(existing) = self.symbol_table.declare_new_symbol(name.content(), symbol) {
-            if existing.borrow().declared_name() == name {
-                // we do multiple passes over the source code, so it's not an
-                // error if a previous declaration is at the same location as
-                // this "new" one (i.e., if they're actually the same)
-                return;
-            }
+        self.report_if_real_redeclaration(name, existing);
+    }
 
-            if existing.borrow().declared_name().pinned_location() > name.pinned_location() {
-                // the "existing" is actually a redeclaration of this
-                // declaration, so we shouldn't report an error either
-                return;
-            }
+    /// Method-specific alternative to [`AnalysisContext::declare_new_symbol`].
+    pub fn declare_new_method_symbol(&mut self, receiver_type: &'a str, symbol: SymbolRef<'a>) {
+        let name = symbol.borrow().declared_name();
 
-            self.report_error(AnalysisErrorKind::IllegalRedeclaration {
-                previous: existing.borrow().declared_name(),
-                found: *name.inner(),
-            });
+        let existing = self
+            .symbol_table
+            .declare_new_method(receiver_type, name.content(), symbol);
+
+        self.report_if_real_redeclaration(name, existing);
+    }
+
+    /// Dispatcher for [`AnalysisContext::declare_new_symbol`] and
+    /// [`AnalysisContext::declare_new_method_symbol`].
+    pub fn declare_function_or_method(
+        &mut self,
+        receiver: Option<&FunctionParamDeclNode<'a>>,
+        symbol: SymbolRef<'a>,
+    ) {
+        match receiver.and_then(|rcv| receiver_base_type_name(&rcv.r#type)) {
+            Some(receiver_type) => self.declare_new_method_symbol(receiver_type, symbol),
+            None => self.declare_new_symbol(symbol),
         }
+    }
+
+    fn report_if_real_redeclaration(
+        &mut self,
+        name: Pinned<'a, Span<'a>>,
+        existing: Option<SymbolRef<'a>>,
+    ) {
+        let Some(existing) = existing else { return };
+        let previous = existing.borrow().declared_name();
+
+        // identical location == same declaration re-visited (Stage 2/3 re-runs)
+        // (we do multiple passes over the source code, so it's not an error if
+        // a previous declaration is at the same location as this "new" one,
+        // i.e. they're actually the same declaration, so all is good)
+        if previous == name {
+            return;
+        }
+
+        // we already saw a *later* declaration in a previous pass; this call
+        // is the *earlier* one, so the later one was the redeclaration and was
+        // reported (or skipped) at the time
+        if previous.pinned_location() > name.pinned_location() {
+            return;
+        }
+
+        self.report_error(AnalysisErrorKind::IllegalRedeclaration {
+            previous,
+            found: *name.inner(),
+        });
     }
 }
 

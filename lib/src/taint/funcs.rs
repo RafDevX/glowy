@@ -62,7 +62,7 @@ fn visit_function_def<'a>(
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
 
-        ctx.declare_new_symbol(symbol);
+        ctx.declare_function_or_method(receiver, symbol);
     }
 
     let Some(body) = body else {
@@ -696,6 +696,18 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         } else {
             Some(base.backtrace())
         }
+    } else if func.has_receiver() {
+        // this is a method called via a non-selection expression, such as a
+        // method value like `f := obj.M; f()`; we don't have a selection.base
+        // to read the bound receiver from (here), but its taint was already
+        // nested into `func.backtrace()` at the binding site in
+        // `visit_selection`, and *that* backtrace gets nested into the result
+        // below -- so the receiver's labels still reach the call result.
+        //
+        // nevertheless, we MUST still realize SyntheticSlot::Receiver
+        // (with no concrete bt) to cancel the synthetic; otherwise it would
+        // escape this function and eventually reach `main` (breaking invariant)
+        Some(None)
     } else {
         None
     };

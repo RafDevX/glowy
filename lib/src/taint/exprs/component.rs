@@ -20,6 +20,47 @@ pub fn visit_selection<'a>(
     }
 
     let location = ctx.pin(node.location.clone());
+    let selector = node.selector.content();
+
+    // try method dispatch (current package only) before struct-field lookup.
+    // the order matters: `as_struct` would upgrade a Simple/Bottom base into
+    // an empty struct, after which `get_const(selector)` unconditionally
+    // returns Bottom and masks the method. Go's spec forbids a method and a
+    // field sharing a name on the same defined type, so dispatching the
+    // method first is correct for any well-typed access.
+    //
+    // we nest the base's backtrace into the returned method value so taint
+    // flows soundly whether the result is invoked (`x.M()`) or read as a
+    // method value (`f := x.M`). for an immediate call, the receiver's taint
+    // *also* propagates through `SyntheticSlot::Receiver` realization in
+    // `visit_call`; the union is idempotent.
+    //
+    // unresolved selections (all sound, all later degrade to standard blackbox
+    // handling in `visit_call`):
+    // - cross-package: `x.M` where `x` is not the current package -- we don't track
+    //   `x`'s static type, so we can't know it's a method
+    // - locally ambiguous: two receiver types in the current package both declare
+    //   the same `selector` identifier as a method
+    // - interface dispatch: method-set resolution is not modeled
+    if let Some(method) = ctx
+        .symtab()
+        .lookup_unique_method_in_current_package(selector)
+    {
+        let value = method.borrow().value().get();
+
+        return match base.backtrace() {
+            Some(base_bt) => value.nest_backtrace(
+                LabelBacktraceKind::MethodReceiver,
+                None,
+                location,
+                [base_bt],
+            ),
+            None => {
+                // receiver is Bottom so we can skip all the nesting complexity
+                value
+            }
+        };
+    }
 
     let Some(r#struct) = base.as_struct() else {
         ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
@@ -29,7 +70,7 @@ pub fn visit_selection<'a>(
         return ValueRef::new_bottom(location);
     };
 
-    r#struct.get_const(&node.selector.content().to_owned(), location)
+    r#struct.get_const(&selector.to_owned(), location)
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
