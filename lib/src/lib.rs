@@ -151,11 +151,13 @@ use std::{cmp, fmt, path::Path};
 use indexmap::IndexMap;
 
 pub use analyzer::Analyzer;
+pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
 pub use files::SourceFile;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
 pub use taint::{SinkDescriptor, SinkKind};
 
 mod analyzer;
+mod build_constraints;
 mod context;
 mod decls;
 pub mod errors;
@@ -183,7 +185,6 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 /// constructing an instance and the invoker only wishes to partially specify
 /// configuration preferences.
 #[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
-#[derive(Default)]
 pub struct AnalysisConfig {
     /// Whether to output more detailed status information during the analysis.
     ///
@@ -215,6 +216,35 @@ pub struct AnalysisConfig {
     /// [`Label`](labels::Label), with each individual [`String`] element
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sinks: IndexMap<String, Vec<String>>,
+    /// Whether to include `_test.go` files in the analysis.
+    ///
+    /// Defaults to `false`, matching the behavior of `go build` (test files
+    /// are only compiled by `go test`). Set to `true` to also analyze tests.
+    pub include_tests: bool,
+    /// Maximum number of free build-tag dimensions to enumerate combinatorially.
+    ///
+    /// `//go:build` directives and GOOS/GOARCH-style filename suffixes each
+    /// introduce a boolean dimension whose `2^N` on/off combinations the
+    /// analyzer would otherwise explore in full. When a corpus mentions more
+    /// distinct dimensions than this cap, the analysis with a
+    /// [`TooManyBuildTagDimensions`](errors::AnalysisErrorKind::TooManyBuildTagDimensions)
+    /// error so the invoker can decide whether to raise the cap and retry.
+    ///
+    /// Defaults to [`DEFAULT_MAX_BUILD_TAG_DIMENSIONS`].
+    pub max_build_tag_dimensions: usize,
+}
+
+impl Default for AnalysisConfig {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            verbose: false,
+            sources: IndexMap::new(),
+            sinks: IndexMap::new(),
+            include_tests: false,
+            max_build_tag_dimensions: DEFAULT_MAX_BUILD_TAG_DIMENSIONS,
+        }
+    }
 }
 
 /// Object, component, or metadata bound to a specific file.

@@ -6,8 +6,12 @@ use std::{
     path,
 };
 
+use indexmap::IndexSet;
+use parser::ast::SourceFileNode;
+
 use crate::{
-    AnalysisConfig, FullPackagePath, SourceFile,
+    AnalysisConfig, DEFAULT_MAX_BUILD_TAG_DIMENSIONS, FullPackagePath, SourceFile,
+    build_constraints::{self, BuildPermutation},
     context::{AnalysisContext, AnalysisStage},
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
@@ -46,6 +50,13 @@ pub struct Analyzer {
     blanket_directives: BlanketDirectives,
     /// Whether to output more detailed status information during the analysis.
     verbose: bool,
+    /// Whether `_test.go` files should be admitted into the analysis, mirroring
+    /// `go build` (which excludes them) versus `go test` (which includes them).
+    include_tests: bool,
+    /// Maximum number of free build-tag dimensions to enumerate.
+    ///
+    /// See [`AnalysisConfig::max_build_tag_dimensions`] for semantics.
+    max_build_tag_dimensions: usize,
 }
 
 impl Analyzer {
@@ -76,6 +87,8 @@ impl Analyzer {
             files: Vec::new(),
             blanket_directives: BlanketDirectives::new(),
             verbose: env::var("GLOWY_VERBOSE").is_ok(),
+            include_tests: false,
+            max_build_tag_dimensions: DEFAULT_MAX_BUILD_TAG_DIMENSIONS,
         }
     }
 
@@ -370,6 +383,9 @@ impl Analyzer {
             self.verbose = config.verbose;
         }
 
+        self.include_tests = config.include_tests;
+        self.max_build_tag_dimensions = config.max_build_tag_dimensions;
+
         let blanket_directives = config
             .sources
             .into_iter()
@@ -551,23 +567,110 @@ impl Analyzer {
             println!("Finished parsing {} file(s)", parsed.len());
         }
 
+        let build_permutations = build_constraints::enumerate_build_permutations(
+            &parsed,
+            self.include_tests,
+            self.max_build_tag_dimensions,
+        );
+
+        let build_permutations = match build_permutations {
+            Ok(build_permutations) => build_permutations,
+            Err(mentioned) => {
+                return Err(vec![AnalysisError {
+                    file: path::Path::new("/main.go"), // should never be used
+                    kind: AnalysisErrorKind::TooManyBuildTagDimensions {
+                        limit: self.max_build_tag_dimensions,
+                        found: mentioned,
+                    },
+                }]);
+            }
+        };
+
+        if build_permutations.is_empty() {
+            return Err(vec![AnalysisError {
+                file: path::Path::new("/main.go"), // should never be used
+                kind: AnalysisErrorKind::NoRegisteredFiles,
+            }]);
+        }
+
+        let multiple_build_permutations = build_permutations.len() > 1;
+
+        // ilog10 cannot panic here since we already checked that len > 0 (is_empty)
+        let width = 1 + build_permutations.len().ilog10() as usize;
+
+        if self.verbose && multiple_build_permutations {
+            list_build_permutations(&build_permutations, width);
+        }
+
+        let mut all_errors: IndexSet<AnalysisError<'_>> = IndexSet::new();
+
+        for (i, perm) in build_permutations.iter().enumerate() {
+            if self.verbose && multiple_build_permutations {
+                println!(
+                    "[#{:0>width$}/{}] Running analysis for build permutation {} ({} file(s))",
+                    i + 1,
+                    build_permutations.len(),
+                    perm.tag_sets
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" / "),
+                    perm.admitted.len(),
+                );
+            }
+
+            let admitted_asts: Vec<_> = parsed
+                .iter()
+                .filter(|(path, _)| perm.admitted.contains(*path))
+                .map(|(path, ast)| (*path, ast))
+                .collect();
+
+            let errors = self.analyze_permutation(&admitted_asts);
+
+            if self.verbose && multiple_build_permutations {
+                println!(
+                    "Detected {} error(s) while analyzing this build permutation",
+                    errors.len()
+                );
+            }
+
+            all_errors.extend(errors);
+        }
+
+        if self.verbose {
+            println!(
+                "Analysis is complete; detected a total of {} unique error(s)",
+                all_errors.len()
+            );
+        }
+
+        if all_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(all_errors.into_iter().collect())
+        }
+    }
+
+    fn analyze_permutation<'a>(
+        &'a self,
+        admitted: &[(&'a path::Path, &SourceFileNode<'a>)],
+    ) -> Vec<AnalysisError<'a>> {
         let mut context = AnalysisContext::new(&self.blanket_directives);
 
-        macro_rules! process_taint_analysis_iteration {
-            ($visitor:path, false) => {
-                for (path, ast) in &parsed {
+        macro_rules! pass {
+            ($visitor:path, $clear:expr) => {{
+                if $clear {
+                    context.symtab_mut().clear_all_package_progress();
+                }
+
+                for (path, ast) in admitted {
                     context.set_current_file(path);
 
                     let package_path = compute_package_path(&self.module_base, path);
 
                     $visitor(&mut context, ast, package_path);
                 }
-            };
-            ($visitor:path, true) => {
-                context.symtab_mut().clear_all_package_progress();
-
-                process_taint_analysis_iteration!($visitor, false);
-            };
+            }};
         }
 
         // Stage #1: RecordDeclarations (default for AnalysisContext)
@@ -577,7 +680,7 @@ impl Analyzer {
         //     This is also used to scaffold sub-module hierarchies and package
         //     scopes.
 
-        process_taint_analysis_iteration!(decls::visit_source_file, false);
+        pass!(decls::visit_source_file, false);
 
         if self.verbose {
             println!("Finished Stage 1");
@@ -599,7 +702,7 @@ impl Analyzer {
         let mut iteration_index = 0_u8;
 
         loop {
-            process_taint_analysis_iteration!(taint::visit_source_file, true);
+            pass!(taint::visit_source_file, true);
 
             let snapshot = context.symtab().snapshot();
 
@@ -610,7 +713,6 @@ impl Analyzer {
             }
 
             last_snapshot = Some(snapshot);
-
             iteration_index += 1;
 
             if self.verbose {
@@ -628,15 +730,16 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
-        process_taint_analysis_iteration!(taint::visit_source_file, true);
+        pass!(taint::visit_source_file, true);
 
         if self.verbose {
-            println!("Finished Stage 3 -- Analysis is complete");
+            println!("Finished Stage 3");
         }
 
-        // All done: return based on final context.
-
-        Result::from(context)
+        match Result::from(context) {
+            Ok(()) => Vec::new(),
+            Err(errs) => errs,
+        }
     }
 }
 
@@ -659,4 +762,38 @@ fn compute_package_path(module_base: &str, virtual_file_path: &path::Path) -> Fu
 
     // trim for root, e.g. /main.go
     module_base.to_owned() + dir_path.trim_end_matches('/')
+}
+
+fn list_build_permutations(permutations: &[BuildPermutation<'_>], width: usize) {
+    println!(
+        "Detected {} distinct build-constraint permutation(s):",
+        permutations.len()
+    );
+
+    // suppress any always-on tags so the output highlights the dimensions that
+    // actually distinguish permutations from each other in this listing
+    let always_on = build_constraints::always_active_tags(permutations);
+
+    for (i, perm) in permutations.iter().enumerate() {
+        let filtered_tags = perm
+            .tag_sets
+            .iter()
+            .map(|tags| {
+                let tag_set = tags
+                    .iter()
+                    .filter(|tag| !always_on.contains(tag))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                format!("[{tag_set}]")
+            })
+            .collect::<Vec<_>>()
+            .join(" / ");
+
+        println!(
+            "\tPermutation #{:0>width$}: {} file(s) with tags = {filtered_tags}",
+            i + 1,
+            perm.admitted.len(),
+        );
+    }
 }

@@ -40,6 +40,17 @@ pub fn get_structured_error_info<'a>(
                 "another file with this virtual path had already been registered to the analyzer",
             ),
         },
+        AnalysisErrorKind::TooManyBuildTagDimensions { limit, found } => StructuredErrorInfo {
+            title: format!(
+                "too many free build-tag dimensions: {} > limit {limit} (mentioned: [{}])",
+                found.len(),
+                found.iter().copied().collect::<Vec<_>>().join(", "),
+            )
+            .into(),
+            code: "C002".into(),
+            snippets: vec![],
+            help: Some("consider raising the configured `max_build_tag_dimensions`"),
+        },
 
         AnalysisErrorKind::UnknownAnnotationDirective {
             directive,

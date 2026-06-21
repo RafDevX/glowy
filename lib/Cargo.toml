@@ -13,10 +13,10 @@ rust-version.workspace = true
 
 [features]
 default = ["toml-config"]
-toml-config = ["dep:indexmap", "dep:serde", "dep:toml"]
+toml-config = ["indexmap/serde", "dep:serde", "dep:toml"]
 
 [dependencies]
-indexmap = { version = "2.14.0", features = ["serde"], optional = true }
+indexmap = "2.14.0"
 parser = { path = "../parser" }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 subenum = "1.1.3"

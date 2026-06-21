@@ -17,7 +17,7 @@
 //!
 //! See their respective documentation for more details.
 
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 use parser::{Location, ParsingError, Span};
 
@@ -82,6 +82,22 @@ pub enum AnalysisErrorKind<'a> {
     /// The file path associated with this error is irrelevant and should be
     /// ignored.
     NoRegisteredFiles,
+    /// Free build-tag dimensions exceeds the configured limit.
+    ///
+    /// The analyzer enumerates `2^N` permutations of mentioned build tags,
+    /// which becomes impractical beyond a small `N`. When the corpus mentions
+    /// more dimensions than the configured value for
+    /// `max_build_tag_dimensions`, the analysis is aborted so the invoker can
+    /// decide whether to raise the cap and retry or to refine the corpus.
+    ///
+    /// The file path associated with this error is irrelevant and should be
+    /// ignored.
+    TooManyBuildTagDimensions {
+        /// Configured maximum that was exceeded.
+        limit: usize,
+        /// All mentioned tag names, from `//go:build` constraints or filenames.
+        found: BTreeSet<&'a str>,
+    },
 
     /// Unrecognized directive specified for Glowy annotation.
     ///
@@ -406,7 +422,9 @@ impl AnalysisErrorKind<'_> {
             Self::GotoNotSupported { .. }
             | Self::DeferNotDeferred { .. }
             | Self::UnsoundFunctionMergingAssignment { .. } => AnalysisErrorCategory::UnsupportedGo,
-            Self::DuplicateVirtualFilePath => AnalysisErrorCategory::Misconfiguration,
+            Self::DuplicateVirtualFilePath | Self::TooManyBuildTagDimensions { .. } => {
+                AnalysisErrorCategory::Misconfiguration
+            }
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
             Self::NoRegisteredFiles | Self::InvalidDeclassificationSemantics { .. } => {
                 AnalysisErrorCategory::Suspicious
