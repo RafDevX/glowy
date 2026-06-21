@@ -27,7 +27,7 @@ mod mutation;
 ///
 /// This is a lightweight descriptor capturing the essential details of an
 /// information flow sink as declared by the security policy in effect.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SinkDescriptor<'a> {
     /// The type of sink in question.
     pub kind: SinkKind,
@@ -59,7 +59,7 @@ impl SnapshotAware for SinkDescriptor<'_> {
 ///
 /// This is useful to know, for example, to provide more personalized error
 /// messages when a sink's information flow invariant is violated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SinkKind {
     /// A variable/constant declaration.
     Declaration,

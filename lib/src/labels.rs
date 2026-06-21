@@ -13,7 +13,7 @@
 //! These labels' evolution and propagation history can be easily tracked using
 //! a hierarchy structure, which is here implemented via [`LabelBacktrace`].
 
-use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, iter};
+use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem};
 
 use parser::{Location, Span};
 
@@ -35,7 +35,7 @@ pub use crate::values::FunctionRef;
 /// By definition, synthetic tags are transient auxiliary objects and are never
 /// returned to library consumers as part of the reported results for high-level
 /// program analysis, making this enum mostly an internal artifact.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SyntheticSlot {
     /// Conceptual placeholder for a function argument's label.
     ///
@@ -192,6 +192,21 @@ impl PartialEq for LabelTag<'_> {
 
 impl Eq for LabelTag<'_> {}
 
+impl hash::Hash for LabelTag<'_> {
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        mem::discriminant(self).hash(state);
+
+        match self {
+            LabelTag::Concrete(tag) => tag.hash(state),
+            LabelTag::Synthetic { func, slot, .. } => {
+                func.hash(state);
+                slot.hash(state);
+            }
+        }
+    }
+}
+
 /// Represents the security typing associated with some piece of data.
 ///
 /// This enum models metadata connected with information and, more concretely,
@@ -205,7 +220,7 @@ impl Eq for LabelTag<'_> {}
 /// implemented.
 ///
 /// Label derivation and hierarchy is tracked through [`LabelBacktrace`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Label<'a> {
     /// A non-empty set of [`LabelTag`]s.
     Tags(BTreeSet<LabelTag<'a>>),
@@ -688,7 +703,7 @@ impl<'a, 'b> From<&'b Label<'a>> for OwnedLabelCow<'a, 'b> {
 ///     has label `{blue, violet}`, a second child can never have label
 ///     `{blue, yellow}` -- it will instead be trimmed to just `{yellow}` to
 ///     simplify the whole chain and limit hierarchy size).
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct LabelBacktrace<'a> {
     /// What operation caused this label attribution.
     kind: LabelBacktraceKind,
@@ -1063,7 +1078,7 @@ impl<'a> From<LabelBacktrace<'a>> for Label<'a> {
 }
 
 /// The concrete operation that resulted in a label assignment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LabelBacktraceKind {
     /// Explicit source code annotation.
     ExplicitAnnotation,

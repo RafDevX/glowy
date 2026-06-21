@@ -484,7 +484,7 @@ impl SnapshotAware for FunctionValue<'_> {
 /// [`LabelTag::Synthetic`](crate::labels::LabelTag::Synthetic) when paired with
 /// a function parameter index or another equivalent function-specific
 /// identifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FunctionRef<'a> {
     /// A normal function with a native declared name.
     ///
