@@ -1,6 +1,8 @@
+use std::{hash, mem};
+
 use crate::{Location, Span};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum TokenKind {
     SemiColon, // ;
 
@@ -115,7 +117,39 @@ impl TokenKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+// manual PartialEq/Eq/Hash implementation is necessary to handle f64 specially
+impl PartialEq for TokenKind {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(left), Self::Int(right)) => left == right,
+            // bit comparison preserves semantics like 0.0 != -0.0
+            (Self::Float(left), Self::Float(right)) => left.to_bits() == right.to_bits(),
+            (Self::Rune(left), Self::Rune(right)) => left == right,
+            (Self::String(left), Self::String(right)) => left == right,
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for TokenKind {}
+
+impl hash::Hash for TokenKind {
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        mem::discriminant(self).hash(state);
+
+        match self {
+            Self::Int(inner) => inner.hash(state),
+            Self::Float(inner) => inner.to_bits().hash(state),
+            Self::Rune(inner) => inner.hash(state),
+            Self::String(inner) => inner.hash(state),
+            _ => {}
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Token<'a> {
     pub kind: TokenKind,
     pub span: Span<'a>,

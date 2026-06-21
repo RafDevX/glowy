@@ -24,7 +24,7 @@ pub fn try_parse_build_constraint<'a>(
     }))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuildConstraintParsingError<'a> {
     UnexpectedChar {
         expected: char,

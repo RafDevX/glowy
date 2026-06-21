@@ -5,7 +5,7 @@ use crate::{
     token::{Token, TokenKind},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ParsingError<'a> {
     Lexing(LexingError<'a>),
     BuildConstraint(BuildConstraintParsingError<'a>),

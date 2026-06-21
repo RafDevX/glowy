@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    hash, mem,
     num::{ParseFloatError, ParseIntError},
     str::{Chars, FromStr},
     sync::LazyLock,
@@ -26,7 +27,7 @@ static ANNOTATION_REGEX: LazyLock<Regex> = {
     })
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum LexingError<'a> {
     UnknownChar(Span<'a>),
     InvalidNumberLiteralChar(Span<'a>),
@@ -38,6 +39,52 @@ pub enum LexingError<'a> {
     LineBreakInString(Span<'a>),
     InvalidStringEscapeSequence(Span<'a>),
     UnclosedString,
+}
+
+// manual implementation of PartialEq/Eq/Hash is necessary to ignore
+// ParseIntError and ParseFloatError, as they are not Hash
+impl PartialEq for LexingError<'_> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::UnknownChar(left), Self::UnknownChar(right))
+            | (Self::InvalidNumberLiteralChar(left), Self::InvalidNumberLiteralChar(right))
+            | (Self::IntParseFailure(left, _), Self::IntParseFailure(right, _))
+            | (Self::FloatParseFailure(left, _), Self::FloatParseFailure(right, _))
+            | (Self::NumberTrailingUnderscore(left), Self::NumberTrailingUnderscore(right))
+            | (Self::MultipleCharactersInRune(left), Self::MultipleCharactersInRune(right))
+            | (Self::EmptyRune(left), Self::EmptyRune(right))
+            | (Self::LineBreakInString(left), Self::LineBreakInString(right))
+            | (Self::InvalidStringEscapeSequence(left), Self::InvalidStringEscapeSequence(right)) => {
+                left == right
+            }
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for LexingError<'_> {}
+
+impl hash::Hash for LexingError<'_> {
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        mem::discriminant(self).hash(state);
+
+        let span = match self {
+            LexingError::UnknownChar(span)
+            | LexingError::InvalidNumberLiteralChar(span)
+            | LexingError::IntParseFailure(span, _)
+            | LexingError::FloatParseFailure(span, _)
+            | LexingError::NumberTrailingUnderscore(span)
+            | LexingError::MultipleCharactersInRune(span)
+            | LexingError::EmptyRune(span)
+            | LexingError::LineBreakInString(span)
+            | LexingError::InvalidStringEscapeSequence(span) => span,
+            LexingError::UnclosedString => return,
+        };
+
+        span.hash(state);
+    }
 }
 
 impl<'a> Diagnostics<'a> for LexingError<'a> {
