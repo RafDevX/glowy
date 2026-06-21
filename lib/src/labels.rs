@@ -18,7 +18,6 @@ use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem};
 use parser::{Location, Span};
 
 use crate::Pinned;
-
 // we need this to be publicly accessible and documented, since it's referenced
 // publicly by LabelTag::Synthetic
 pub use crate::values::FunctionRef;

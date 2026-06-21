@@ -469,8 +469,11 @@ pub enum StructLiteralFieldsNode<'a> {
     Exhaustive(Vec<CompositeLiteralElementNode<'a>>), // no keys; ordered fields
 }
 
-pub type CompositeLiteralElementListNode<'a> =
-    Vec<(Option<ExprNode<'a>>, CompositeLiteralElementNode<'a>)>;
+#[rustfmt::skip]
+pub type CompositeLiteralElementListNode<'a> = Vec<(
+    Option<ExprNode<'a>>,
+    CompositeLiteralElementNode<'a>
+)>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompositeLiteralElementNode<'a> {

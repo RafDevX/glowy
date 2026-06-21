@@ -199,9 +199,13 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
     ) -> Self {
         let r#const = self.r#const.clone();
 
-        let r#dyn =
-            self.r#dyn
-                .nest_backtrace(parent_kind, parent_symbol, parent_location, extra_children);
+        #[rustfmt::skip]
+        let r#dyn = self.r#dyn.nest_backtrace(
+            parent_kind,
+            parent_symbol,
+            parent_location,
+            extra_children
+        );
 
         Self { r#const, r#dyn }
     }

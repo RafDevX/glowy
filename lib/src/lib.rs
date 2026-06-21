@@ -147,12 +147,11 @@
 
 use std::{cmp, fmt, path::Path};
 
-#[cfg(feature = "toml-config")]
-use indexmap::IndexMap;
-
 pub use analyzer::Analyzer;
 pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
 pub use files::SourceFile;
+#[cfg(feature = "toml-config")]
+use indexmap::IndexMap;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
 pub use taint::{SinkDescriptor, SinkKind};
 
@@ -221,7 +220,7 @@ pub struct AnalysisConfig {
     /// Defaults to `false`, matching the behavior of `go build` (test files
     /// are only compiled by `go test`). Set to `true` to also analyze tests.
     pub include_tests: bool,
-    /// Maximum number of free build-tag dimensions to enumerate combinatorially.
+    /// Maximum number of free build-tag dimensions to enumerate.
     ///
     /// `//go:build` directives and GOOS/GOARCH-style filename suffixes each
     /// introduce a boolean dimension whose `2^N` on/off combinations the

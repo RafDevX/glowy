@@ -448,7 +448,7 @@ impl Analyzer {
     ///
     /// analyzer.add_blanket_source(
     ///     "example.com/company-name/proj/sub.SomeFunc",
-    ///     &Label::from_tags(&["secret"])
+    ///     &Label::from_tags(&["secret"]),
     /// );
     ///
     /// # Ok::<(), std::io::Error>(())
@@ -486,7 +486,7 @@ impl Analyzer {
     ///
     /// analyzer.add_blanket_sink(
     ///     "example.com/company-name/proj/sub.SomeFunc",
-    ///     &Label::from_tags(&["trusted"])
+    ///     &Label::from_tags(&["trusted"]),
     /// );
     ///
     /// # Ok::<(), std::io::Error>(())
