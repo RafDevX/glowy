@@ -380,11 +380,39 @@ impl<'a> Lexer<'a> {
             constraint.push(ch);
         }
 
-        // check if an empty line follows
-        if it.next() != Some('\n') {
-            // nope, this is not accepted as a build constraint; it is
-            // considered just a normal comment, so abort everything
-            return;
+        // `//go:build` only actually counts as a build constraint if followed
+        // by a terminating empty line (with additional line comments between
+        // them, optionally), so we need to check that before accepting this
+
+        let mut extra_comment_chars = 0;
+        loop {
+            match it.next() {
+                Some('\n') => {
+                    // empty line means that this is accepted as a build
+                    // constraint and we can commit all we've been doing
+                    break;
+                }
+                Some('/') if it.next() == Some('/') => {
+                    // line comments are allowed after the build constraint,
+                    // e.g. `// +build` appended for legacy reasons mirroring
+                    // the `//go:build` constraint
+
+                    extra_comment_chars += 2;
+
+                    for ch in it.by_ref() {
+                        extra_comment_chars += 1;
+
+                        if ch == '\n' {
+                            // end of line comment
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    // build constraint is not accepted; rollback
+                    return;
+                }
+            }
         }
 
         // at this point we know it was an actual build constraint
@@ -404,6 +432,7 @@ impl<'a> Lexer<'a> {
             self.read_n(trim_end);
         }
 
+        self.read_n(extra_comment_chars);
         self.read_n(2); // for the 2 \n
 
         self.build_constraint = Some(span);
