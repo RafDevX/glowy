@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use parser::{
     Location, Span,
-    ast::{ExprNode, IndexingNode, SelectionNode},
+    ast::{ExprNode, IndexingNode, SelectionNode, UnaryOpKind},
 };
 
 use crate::{
@@ -73,6 +73,23 @@ fn as_valid_left_value<'a, 'b>(
         ExprNode::Name(name) => name,
         ExprNode::Indexing(indexing) => indexing,
         ExprNode::Selection(selection) => selection,
+
+        // Glowy does not model heap addresses, so `&x` and `*p` are treated as
+        // transparent over their operand (mirroring the read-side transparency
+        // in `taint::exprs::visit_expr`). this is somehow sound because any
+        // taint flowing through the pointer view also flows through the operand
+        // view, but evidently *it is not fully sound* since we lose
+        // pointer-identity precision, as two distinct pointers aliasing the
+        // same cell are not connected (e.g. if `p == q`, changing `*p` will
+        // reflect on `p` but not on `q`).
+        // nevertheless, this present approximation is already very useful as
+        // it enables (at least partially) some constructs such as `*p = ...`,
+        // `(*p).field = ...`, and `(&arr[i]).field = ...` to be left-values
+        ExprNode::UnaryOp {
+            kind: UnaryOpKind::Deref | UnaryOpKind::Address,
+            operand,
+            ..
+        } => return as_valid_left_value(operand, ctx),
 
         // not using wildcard to force revisiting this implementation if a new
         // kind of expression is ever added (need to decide whether to implement
