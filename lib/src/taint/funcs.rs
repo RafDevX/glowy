@@ -912,7 +912,7 @@ fn handle_deferred_checks<'a>(
     reason = "Conveniently represent a receiver's presence/absence"
 )]
 fn calculate_call_result<'a>(
-    ctx: &mut AnalysisContext<'a>,
+    ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     receiver: Option<Option<&LabelBacktrace<'a>>>,
     ids: &[(Option<&Span<'a>>, bool, &TypeNode<'a>)],
@@ -922,10 +922,6 @@ fn calculate_call_result<'a>(
 ) -> Vec<ValueRef<'a>> {
     let mut result = vec![];
     let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
-
-    // clone is necessary to not keep ctx borrowed, since later we need to
-    // re-borrow it as mutable and this would prevent that
-    let call_branch = ctx.branch_backtrace().cloned();
 
     'components: for component in outcome {
         let mut realized = component.clone();
@@ -997,7 +993,7 @@ fn calculate_call_result<'a>(
         realized = realized.realize(
             func.r#ref(),
             SyntheticSlot::CallSiteBranch,
-            call_branch.as_ref(),
+            ctx.branch_backtrace(),
         );
 
         result.push(realized);
@@ -1014,7 +1010,7 @@ fn calculate_call_result<'a>(
 }
 
 fn calculate_concrete_backtrace<'a>(
-    ctx: &mut AnalysisContext<'a>,
+    ctx: &AnalysisContext<'a>,
     index: usize,
     id: Option<&Span<'a>>,
     variadic: bool,

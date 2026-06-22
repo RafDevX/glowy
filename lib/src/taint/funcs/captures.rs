@@ -104,7 +104,7 @@ pub fn record_closure_capture_fallbacks<'a>(ctx: &AnalysisContext<'a>, value: &m
 }
 
 pub fn apply_capture_mutations<'a>(
-    ctx: &mut AnalysisContext<'a>,
+    ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
