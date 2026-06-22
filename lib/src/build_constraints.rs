@@ -144,7 +144,20 @@ pub fn enumerate_build_permutations<'a>(
     include_tests: bool,
     max_dimensions: usize,
 ) -> Result<Vec<BuildPermutation<'a>>, BTreeSet<&'a str>> {
-    let mentioned = collect_mentioned_tags(parsed);
+    // start by removing from the pool entirely all the files with an `ignore`
+    // build tag constraint, which by convention is only required by files that
+    // should never be included (e.g., scripts to generate source code)
+    let not_ignored: BTreeMap<&'a path::Path, &SourceFileNode<'a>> = parsed
+        .iter()
+        .filter(|(_, ast)| {
+            ast.build_constraint
+                .as_ref()
+                .is_none_or(|constraint| !should_ignore(&constraint.expr))
+        })
+        .map(|(path, ast)| (*path, ast))
+        .collect();
+
+    let mentioned = collect_mentioned_tags(not_ignored.iter().map(|(p, a)| (*p, *a)));
 
     if mentioned.len() > max_dimensions {
         return Err(mentioned);
@@ -174,7 +187,7 @@ pub fn enumerate_build_permutations<'a>(
 
         let tags = ActiveTags::new(world.iter().copied());
 
-        let admitted: BTreeSet<&'a path::Path> = parsed
+        let admitted: BTreeSet<&'a path::Path> = not_ignored
             .iter()
             .filter(|(path, ast)| tags.admits_file(path, ast, include_tests))
             .map(|(path, _)| *path)
@@ -210,8 +223,29 @@ pub fn always_active_tags<'a>(perms: &[BuildPermutation<'a>]) -> BTreeSet<&'a st
     })
 }
 
-fn collect_mentioned_tags<'a>(
-    parsed: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
+fn should_ignore(expr: &BuildConstraintExprNode<'_>) -> bool {
+    // the `ignore` tag is never satisfied, by convention
+
+    match expr {
+        BuildConstraintExprNode::Tag("ignore") => true,
+        BuildConstraintExprNode::Tag(_) | BuildConstraintExprNode::Not(_) => {
+            // the Tag case (for anything but "ignore") is trivially false
+
+            // regarding the Not case:
+            // counterintuitively, we should not return `!should_ignore(inner)`:
+            // if inner requires "ignore", negating it means we shouldn't ignore
+            // and if inner does not require "ignore", negating it also means we
+            // should not ignore the file
+
+            false
+        }
+        BuildConstraintExprNode::And(clauses) => clauses.iter().any(should_ignore),
+        BuildConstraintExprNode::Or(clauses) => clauses.iter().all(should_ignore),
+    }
+}
+
+fn collect_mentioned_tags<'a: 'b, 'b>(
+    parsed: impl IntoIterator<Item = (&'a path::Path, &'b SourceFileNode<'a>)>,
 ) -> BTreeSet<&'a str> {
     let mut mentioned: BTreeSet<&'a str> = BTreeSet::new();
 
