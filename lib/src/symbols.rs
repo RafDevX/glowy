@@ -48,7 +48,7 @@ use parser::Span;
 use crate::{
     FullPackagePath, Pinned,
     snapshots::{AssumedImmutable, SymbolTableSnapshot, SymbolTableSnapshotItem},
-    values::{FunctionValue, Value, ValueRef},
+    values::{FunctionRef, FunctionValue, Value, ValueRef},
 };
 
 #[derive(Debug)]
@@ -640,8 +640,22 @@ impl<'a> Scope<'a> {
                 // we treat predeclared types as functions for now because the
                 // only context it should matter for them to be defined is when
                 // using their names in conversions (which should be almost
-                // equivalent to invocations of blackbox functions)
-                predeclared_function!($id, &["v"], false, 1)
+                // equivalent to invocations of blackbox functions).
+                // however, instead of just deferring to predeclared_function!,
+                // we actually flag them as type constructors so that later they
+                // can be picked up in calls and routed not really through the
+                // blackbox-call path, but through something a bit softer that
+                // can preserve the current value shape
+
+                predeclared_constant!(
+                    $id,
+                    ValueRef::new(
+                        Value::Function(Box::new(FunctionValue::new_type_constructor(
+                            FunctionRef::BuiltIn($id),
+                        ))),
+                        predeclared_location.clone(),
+                    )
+                )
             };
         }
 

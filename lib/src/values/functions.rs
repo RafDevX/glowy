@@ -22,6 +22,9 @@ pub struct FunctionValue<'a> {
     signature: Option<FunctionSignatureNode<'a>>, // None if no known decl
     // ^ this will generally only be None for blackbox-inferred functions
     has_receiver: bool,
+    // whether this value represents a type symbol that, when "called", really
+    // expresses a type conversion rather than a function invocation
+    is_type_constructor: bool,
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
@@ -71,6 +74,7 @@ impl<'a> FunctionValue<'a> {
             r#ref,
             signature,
             has_receiver,
+            is_type_constructor: false,
             outcome: None,
             backtrace,
             sanitizer,
@@ -124,6 +128,36 @@ impl<'a> FunctionValue<'a> {
         Self::new(r#ref, Some(signature), false, None, Label::Bottom, None)
     }
 
+    pub fn new_type_constructor(r#ref: FunctionRef<'a>) -> Self {
+        let dummy_type = TypeNode::Name(TypeNameNode {
+            package: None,
+            id: Span::new("unknown", 0, 1),
+            args: vec![],
+        });
+
+        let signature = FunctionSignatureNode {
+            params: vec![FunctionParamDeclNode {
+                ids: vec![Span::new("v", 0, 1)],
+                variadic: false,
+                r#type: dummy_type.clone(),
+            }],
+            result: FunctionResultNode::Single(dummy_type),
+        };
+
+        let mut value = Self::new(
+            r#ref,
+            Some(signature), // never actually used for analysis, so dummy values are ok
+            false,
+            None,
+            Label::Bottom,
+            None,
+        );
+
+        value.is_type_constructor = true;
+
+        value
+    }
+
     fn new_unknown(backtrace: Option<LabelBacktrace<'a>>) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
@@ -140,6 +174,10 @@ impl<'a> FunctionValue<'a> {
 
     pub fn has_receiver(&self) -> bool {
         self.has_receiver
+    }
+
+    pub fn is_type_constructor(&self) -> bool {
+        self.is_type_constructor
     }
 
     pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
@@ -407,6 +445,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
             has_receiver: self.has_receiver,
+            is_type_constructor: self.is_type_constructor,
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -437,6 +476,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
             has_receiver: self.has_receiver,
+            is_type_constructor: self.is_type_constructor,
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -463,6 +503,8 @@ impl SnapshotAware for FunctionValue<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.r#ref.snapshot_aware_eq(&other.r#ref)
             && self.signature == other.signature
+            && self.has_receiver == other.has_receiver
+            && self.is_type_constructor == other.is_type_constructor
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer

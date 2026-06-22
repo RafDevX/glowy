@@ -2,12 +2,16 @@
 //! (visit top-level declarations).
 
 use parser::ast::{
-    BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode, TypeNameNode, TypeNode,
+    BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode, TypeDeclSpecNode,
+    TypeNameNode, TypeNode,
 };
 
 use crate::{
-    FullPackagePath, context::AnalysisContext, errors::AnalysisErrorKind, symbols::Symbol,
-    values::ValueRef,
+    FullPackagePath,
+    context::AnalysisContext,
+    errors::AnalysisErrorKind,
+    symbols::Symbol,
+    values::{FunctionRef, FunctionValue, Value, ValueRef},
 };
 
 pub fn visit_source_file<'a>(
@@ -51,7 +55,7 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
     match node {
         DeclNode::Const { specs, .. } => visit_binding_decl(ctx, specs, false),
         DeclNode::Var { specs, .. } => visit_binding_decl(ctx, specs, true),
-        DeclNode::Type { .. } => {} // we just ignore these
+        DeclNode::Type { specs, .. } => visit_type_decl(ctx, specs),
         DeclNode::Function(func_node) => visit_function_decl(ctx, func_node),
     }
 }
@@ -79,6 +83,37 @@ fn visit_binding_decl_spec<'a>(
 
         ctx.declare_new_symbol(symbol);
     }
+}
+
+fn visit_type_decl<'a>(ctx: &mut AnalysisContext<'a>, specs: &[TypeDeclSpecNode<'a>]) {
+    for spec in specs {
+        visit_type_decl_spec(ctx, spec);
+    }
+}
+
+fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNode<'a>) {
+    // every `type T X` (and `type T = X`) declaration registers `T` as a
+    // package-scoped symbol whose value is a type-constructor function: this
+    // makes `T(x)` at any later call site resolve to a function value, and
+    // `visit_call` then detects the type-constructor flag and dispatches the
+    // expression as a Go conversion (operand pass-through) rather than as an
+    // ordinary call. for aliases (`type T = X`), the conversion semantics
+    // collapse to the identity, which is exactly what we want for taint
+    //
+    // the underlying type `node.type` is intentionally ignored: Go conversions
+    // are value-preserving across all compatible types (and `[]int -> MySlice`
+    // does not reshape), so passing the operand value through verbatim is
+    // sound; anything more complicated would make analysis too complex
+
+    let name = ctx.pin(node.id);
+    let location = name.pinned_location();
+
+    let func_value = FunctionValue::new_type_constructor(FunctionRef::Named(name));
+    let value = ValueRef::new(Value::Function(Box::new(func_value)), location);
+
+    let symbol = Symbol::new_ref(name, false, value);
+
+    ctx.declare_new_symbol(symbol);
 }
 
 fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {

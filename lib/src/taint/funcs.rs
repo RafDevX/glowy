@@ -448,6 +448,13 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         return vec![];
     };
 
+    if func.is_type_constructor() {
+        // treating this as a blackbox would be too punishing: we want to
+        // preserve the existing value shape, so we use special handling
+
+        return vec![visit_type_conversion(ctx, node)];
+    }
+
     // note that f(a, b int) actually has 1 parameter with 2 identifiers, so
     // we can't compare args.len() with params.len() directly; we need to
     // process them first
@@ -757,6 +764,24 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
+}
+
+fn visit_type_conversion<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+    let location = ctx.pin(node.location.clone());
+
+    let [operand] = node.args.as_slice() else {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 1,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return ValueRef::new_bottom(location);
+    };
+
+    // pin the result to the call site so error messages and downstream
+    // backtraces refer to `T(x)`, not just to `x`'s declaration
+    exprs::visit_single_expr(ctx, operand).with_location(location)
 }
 
 fn resolve_blanket_directives<'a, 'b>(
