@@ -361,9 +361,17 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
 ) -> Option<LabelBacktrace<'a>> {
     let cached_backtrace = cached_backtrace.unwrap_or_else(|| value.backtrace());
 
+    // peek before `as_function`: outer captures often arrive as `Value::Simple`
+    // (e.g. a fresh function parameter), and the lazy upgrade in `as_function`
+    // would coerce them into a blackbox `Value::Function`, irreversibly
+    // corrupting every alias. for non-function captures the cached backtrace
+    // is the best information we have to offer anyway.
+    if !value.is_function() {
+        return cached_backtrace;
+    }
+
     let Some(func) = value.as_function() else {
-        // not a function, just a normal value, so this is all we can do
-        // (there are no other treatment options available to us)
+        // should never happen, we checked above, but still
         return cached_backtrace;
     };
 

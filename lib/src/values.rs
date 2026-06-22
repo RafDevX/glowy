@@ -114,6 +114,10 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Map(_))
     }
 
+    pub fn is_function(&self) -> bool {
+        matches!(*self.value.borrow(), Value::Function(_))
+    }
+
     /// Downgrade a complex shape into a [`Value::Simple`] of same backtrace.
     pub fn downgrade<F>(&self, location_if_bottom: F) -> Self
     where

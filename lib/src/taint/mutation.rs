@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use parser::{
     Location, Span,
     ast::{ExprNode, IndexingNode, SelectionNode},
@@ -9,7 +11,9 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::exprs,
-    values::{BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
+    values::{
+        BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
+    },
 };
 
 pub trait LeftValue<'a> {
@@ -166,46 +170,73 @@ impl<'a> LeftValue<'a> for Span<'a> {
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
             let should_override = self.should_override(ctx, simple);
+            let pinned_location = ctx.pin(location.clone());
 
             let mut mutated = if should_override {
                 rhs.nest_backtrace(
                     backtrace_kind,
                     Some(self.content()),
-                    ctx.pin(location.clone()),
+                    pinned_location.clone(),
                     explicit_backtrace
                         .into_iter()
                         .chain(ctx.branch_backtrace())
                         .cloned(),
                 )
-            } else {
+            } else if target.is_function() || rhs.is_function() {
+                // Mergeable intentionally does not handle (Function, Function),
+                // this is instead deferred to the body-derived analysis results
+                // absorption mechanism below
+
+                // note that the `is_function` usage in this branch's condition
+                // is essential: `as_function` would upgrade a Simple into a
+                // blackbox Function, which would corrupt the actual intention
+                // behind the value in most cases
+
                 target.nest_backtrace(
                     backtrace_kind,
                     Some(self.content()),
-                    ctx.pin(location.clone()),
+                    pinned_location.clone(),
                     explicit_backtrace
                         .cloned()
                         .into_iter()
                         .chain(rhs.backtrace())
                         .chain(ctx.branch_backtrace().cloned()),
                 )
+            } else {
+                // neither side is a function, so we can perform a
+                // shape-preserving merge via Mergeable so that e.g. a struct
+                // can keep its shape past a control-flow split if possible
+
+                target
+                    .merge_with(&rhs, backtrace_kind, Cow::Borrowed(&pinned_location))
+                    .nest_backtrace(
+                        backtrace_kind,
+                        Some(self.content()),
+                        pinned_location.clone(),
+                        explicit_backtrace
+                            .cloned()
+                            .into_iter()
+                            .chain(ctx.branch_backtrace().cloned()),
+                    )
             };
 
             // apply declassification
             mutated.subtract_label(subtract);
 
-            // when this assignment is a conservative merge and we cannot safely
-            // overwrite the target symbol entirely, the new value only inherits
-            // the rhs's label, but this is not sufficient for function values:
-            // any deferred enforcement checks would be silently discarded,
-            // which is unsound, so instead we explicitly absorb body-derived
-            // state here if both sides are functions. if the absorption is
-            // refused as unsafe (e.g., closure captures from one lambda
-            // cannot be coherently rebound onto another's), we cannot proceed
-            // soundly and must surface the limitation to the user instead of
-            // silently pretending the analysis is complete
+            // for non-override assignments, `mutated` so far carries only
+            // rhs's *label*, not its body-derived state. that's fine for
+            // ordinary values, but for function values any deferred
+            // enforcement checks would be silently discarded (unsound!) so
+            // we explicitly absorb that body-derived analysis results state
+            // here when both sides are functions. the `rhs.is_function()` peek
+            // prevents the following `as_*` calls from coercing unshaped Simple
+            // operands into a blackbox Function (and corrupting their aliases)
+            // in the (very common) case where the assignment has nothing
+            // to do with functions in the first place
             if !should_override
-                && let Some(mut lhs_func) = mutated.as_function_mut()
+                && rhs.is_function()
                 && let Some(rhs_func) = rhs.as_function()
+                && let Some(mut lhs_func) = mutated.as_function_mut()
             {
                 let absorbed = lhs_func.try_absorb_body_state_from(&rhs_func);
 
@@ -213,8 +244,8 @@ impl<'a> LeftValue<'a> for Span<'a> {
                     // if the absorption is refused as unsafe (e.g., closure
                     // captures from one lambda cannot be coherently rebound
                     // onto another's), we cannot proceed soundly and must
-                    // surface the limitation instead of silently pretending
-                    // the analysis is complete
+                    // surface the limitation instead of silently pretending the
+                    // analysis is complete when it actually failed
                     ctx.report_error(AnalysisErrorKind::UnsoundFunctionMergingAssignment {
                         location: location.clone(),
                     });
