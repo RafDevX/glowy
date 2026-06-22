@@ -377,15 +377,13 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     let mut value = exprs::visit_single_expr(ctx, map);
 
-    if !value.is_map() {
+    let Some(mut composite) = value.as_map_mut() else {
         ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
             location: node.location.clone(),
         });
 
         return;
-    }
-
-    let mut composite = value.as_composite_mut().unwrap(); // already checked
+    };
 
     let location = ctx.pin(node.location.clone());
 

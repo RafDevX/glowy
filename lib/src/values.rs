@@ -247,6 +247,12 @@ impl<'a> ValueRef<'a> {
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Slice)).ok()
     }
 
+    pub fn as_map_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, SimpleConstValue>>> {
+        self.try_upgrade_to(Value::Map);
+
+        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Map)).ok()
+    }
+
     // (complex because Simple is technically also sliceable but not supported
     // here due to the upgrade that would change it to a complex shape)
     pub fn as_complex_sliceable(&self) -> Option<Ref<'_, CompositeValue<'a, u64>>> {
