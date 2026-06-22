@@ -107,6 +107,41 @@ fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<
 
     let list = parse_composite_literal_element_list(s, true)?;
 
+    let fields = try_organize_struct_literal_fields(list)?;
+
+    let location = s.location_since(&beginning);
+
+    Ok(LiteralNode::Struct {
+        r#type,
+        fields,
+        location,
+    })
+}
+
+fn parse_unknown_composite_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
+    let Some(beginning) = s.peek().cloned().transpose()? else {
+        return Err(ParsingError::UnexpectedConstruct {
+            expected: "a composite literal",
+            found: None,
+        });
+    };
+
+    let r#type = parse_type(s)?;
+
+    let values = parse_composite_literal_element_list(s, true)?;
+
+    let location = s.location_since(&beginning);
+
+    Ok(LiteralNode::UnknownComposite {
+        r#type,
+        values,
+        location,
+    })
+}
+
+fn try_organize_struct_literal_fields(
+    list: CompositeLiteralElementListNode<'_>,
+) -> PResult<'_, StructLiteralFieldsNode<'_>> {
     let fields = if list.iter().any(|(k, _)| k.is_some()) {
         // if any element has a key, all elements must have a key
 
@@ -145,13 +180,7 @@ fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<
         StructLiteralFieldsNode::Exhaustive(values)
     };
 
-    let location = s.location_since(&beginning);
-
-    Ok(LiteralNode::Struct {
-        r#type,
-        fields,
-        location,
-    })
+    Ok(fields)
 }
 
 fn parse_composite_literal_element_list<'a>(
@@ -416,8 +445,10 @@ pub fn parse_primary_expression<'a>(
         let mut context2 = BacktrackingContext::new(s);
         let b2 = context2.stream();
 
-        // we default to assume any type is a struct
-        if let Ok(lit) = parse_struct_literal(b2) {
+        // defer composite-shape interpretation to the consumer: we cannot at
+        // this point know what `T`'s underlying type resolves to (i.e., struct,
+        // map, array, or slice), so it's better to not make any assumptions
+        if let Ok(lit) = parse_unknown_composite_literal(b2) {
             // ok, confirmed, everything worked out
             context2.commit()?;
 

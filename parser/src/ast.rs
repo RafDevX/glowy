@@ -285,7 +285,8 @@ impl ExprNode<'_> {
                 | LiteralNode::Array { location, .. }
                 | LiteralNode::Slice { location, .. }
                 | LiteralNode::Map { location, .. }
-                | LiteralNode::Struct { location, .. },
+                | LiteralNode::Struct { location, .. }
+                | LiteralNode::UnknownComposite { location, .. },
             )
             | ExprNode::UnaryOp { location, .. }
             | ExprNode::BinaryOp { location, .. } => location,
@@ -417,8 +418,7 @@ pub enum LiteralNode<'a> {
         annotation: Option<Box<Annotation<'a>>>,
     },
     // all below should in theory be one Composite { r#type, value }, but this
-    // is simpler and works for now; nevertheless, it does not support arbitrary
-    // type literals (where `LiteralType` is `TypeName [TypeArgs]`, per spec)
+    // is simpler and works for now
     Array {
         length: Option<Box<ExprNode<'a>>>, // None if [...]int
         element: TypeNode<'a>,
@@ -439,6 +439,12 @@ pub enum LiteralNode<'a> {
     Struct {
         r#type: TypeNode<'a>,
         fields: StructLiteralFieldsNode<'a>,
+        location: Location,
+    },
+    // we cannot know what this is at parse time (array/slice/map/struct)
+    UnknownComposite {
+        r#type: TypeNode<'a>,
+        values: CompositeLiteralElementListNode<'a>,
         location: Location,
     },
 }
