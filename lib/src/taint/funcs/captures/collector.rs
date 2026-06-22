@@ -544,7 +544,9 @@ impl<'a> SymbolCaptureCollector<'a> for LiteralNode<'a> {
 
                 values
             }
-            LiteralNode::Slice { values, .. } | LiteralNode::Map { values, .. } => values,
+            LiteralNode::Slice { values, .. }
+            | LiteralNode::Map { values, .. }
+            | LiteralNode::UnknownComposite { values, .. } => values,
             LiteralNode::Struct { fields, .. } => fields,
         };
 

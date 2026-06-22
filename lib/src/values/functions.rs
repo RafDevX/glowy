@@ -25,6 +25,12 @@ pub struct FunctionValue<'a> {
     // whether this value represents a type symbol that, when "called", really
     // expresses a type conversion rather than a function invocation
     is_type_constructor: bool,
+    // if this is a type constructor, the underlying type of the defined type
+    // (i.e., the `X` in `type T X`), which allows dispatching named-type
+    // composite literals such as `T{...` to the correct shape interpretation
+    // when X is array/slice/map rather than struct
+    known_underlying_type: Option<TypeNode<'a>>, // None if unknown/not a type
+    // expected result yielded by invoking this function (with synthetics)
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
@@ -75,6 +81,7 @@ impl<'a> FunctionValue<'a> {
             signature,
             has_receiver,
             is_type_constructor: false,
+            known_underlying_type: None,
             outcome: None,
             backtrace,
             sanitizer,
@@ -128,7 +135,7 @@ impl<'a> FunctionValue<'a> {
         Self::new(r#ref, Some(signature), false, None, Label::Bottom, None)
     }
 
-    pub fn new_type_constructor(r#ref: FunctionRef<'a>) -> Self {
+    pub fn new_type_constructor(r#ref: FunctionRef<'a>, underlying: Option<TypeNode<'a>>) -> Self {
         let dummy_type = TypeNode::Name(TypeNameNode {
             package: None,
             id: Span::new("unknown", 0, 1),
@@ -154,6 +161,7 @@ impl<'a> FunctionValue<'a> {
         );
 
         value.is_type_constructor = true;
+        value.known_underlying_type = underlying;
 
         value
     }
@@ -178,6 +186,10 @@ impl<'a> FunctionValue<'a> {
 
     pub fn is_type_constructor(&self) -> bool {
         self.is_type_constructor
+    }
+
+    pub fn known_underlying_type(&self) -> Option<&TypeNode<'a>> {
+        self.known_underlying_type.as_ref()
     }
 
     pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
@@ -446,6 +458,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             signature: self.signature.clone(),
             has_receiver: self.has_receiver,
             is_type_constructor: self.is_type_constructor,
+            known_underlying_type: self.known_underlying_type.clone(),
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -477,6 +490,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             signature: self.signature.clone(),
             has_receiver: self.has_receiver,
             is_type_constructor: self.is_type_constructor,
+            known_underlying_type: self.known_underlying_type.clone(),
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -505,6 +519,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.signature == other.signature
             && self.has_receiver == other.has_receiver
             && self.is_type_constructor == other.is_type_constructor
+            && self.known_underlying_type == other.known_underlying_type
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer

@@ -21,8 +21,8 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::{exprs, mutation::LeftValue},
     values::{
-        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
-        ValueRef,
+        BacktraceContainer, CompositeValue, CompositeValueAdapter, SelfAwareBacktraceContainer,
+        SimpleConstValue, Value, ValueRef,
     },
 };
 

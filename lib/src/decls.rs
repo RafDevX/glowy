@@ -99,16 +99,14 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
     // expression as a Go conversion (operand pass-through) rather than as an
     // ordinary call. for aliases (`type T = X`), the conversion semantics
     // collapse to the identity, which is exactly what we want for taint
-    //
-    // the underlying type `node.type` is intentionally ignored: Go conversions
-    // are value-preserving across all compatible types (and `[]int -> MySlice`
-    // does not reshape), so passing the operand value through verbatim is
-    // sound; anything more complicated would make analysis too complex
 
     let name = ctx.pin(node.id);
     let location = name.pinned_location();
 
-    let func_value = FunctionValue::new_type_constructor(FunctionRef::Named(name));
+    let func_value = FunctionValue::new_type_constructor(
+        FunctionRef::Named(name),
+        Some(node.r#type.clone()), // used for composite literals
+    );
     let value = ValueRef::new(Value::Function(Box::new(func_value)), location);
 
     let symbol = Symbol::new_ref(name, false, value);

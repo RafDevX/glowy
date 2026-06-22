@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use parser::{
     Location,
     ast::{
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, FieldDeclNode, LiteralNode,
-        StructLiteralFieldsNode, TypeNode,
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, FieldDeclNode,
+        LiteralNode, StructLiteralFieldsNode, TypeNameNode, TypeNode,
     },
 };
 
@@ -13,6 +13,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
+    symbols::QualifiedSymbolResolutionResult,
     taint::funcs,
     values::{BacktraceContainer, CompositeValue, SimpleConstValue, Value, ValueRef},
 };
@@ -84,6 +85,132 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
 
             ValueRef::new(value, location)
         }
+        LiteralNode::UnknownComposite {
+            r#type,
+            values,
+            location,
+        } => visit_unknown_composite_literal(ctx, r#type, values, location.clone()),
+    }
+}
+
+// try to figure out what shape to dispatch to
+fn visit_unknown_composite_literal<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    r#type: &TypeNode<'a>,
+    values: &CompositeLiteralElementListNode<'a>,
+    location: Location,
+) -> ValueRef<'a> {
+    let location = ctx.pin(location);
+
+    let underlying = try_resolve_named_type_underlying(ctx, r#type);
+
+    let value = match &underlying {
+        Some(TypeNode::Array { .. }) => Value::Array(visit_integer_keyed_composite_literal(
+            ctx,
+            values,
+            location.clone(),
+        )),
+        Some(TypeNode::Slice { .. }) => Value::Slice(visit_integer_keyed_composite_literal(
+            ctx,
+            values,
+            location.clone(),
+        )),
+        Some(TypeNode::Map { .. }) => {
+            Value::Map(visit_map_composite_literal(ctx, values, location.clone()))
+        }
+        resolved => {
+            // either we know it's a struct (and have its actual definition with
+            // field names), or we couldn't resolve it and treat as struct since
+            // that is the most general composite shape with explicit keys
+
+            let dispatch_type = resolved.as_ref().unwrap_or(r#type);
+            let fields = raw_list_as_struct_fields(values);
+
+            Value::Struct(visit_struct_composite_literal(
+                ctx,
+                &fields,
+                dispatch_type,
+                location.clone(),
+            ))
+        }
+    };
+
+    ValueRef::new(value, location)
+}
+
+fn try_resolve_named_type_underlying<'a>(
+    ctx: &AnalysisContext<'a>,
+    r#type: &TypeNode<'a>,
+) -> Option<TypeNode<'a>> {
+    let TypeNode::Name(name) = r#type else {
+        // if the input is not a Name, it is its own underlying type
+        return Some(r#type.clone());
+    };
+
+    let mut name = Cow::Borrowed(name);
+
+    // this always converges since Go does not allow cyclic type defs
+    loop {
+        let TypeNameNode { package, id, .. } = *name;
+
+        let symbol = match package {
+            None => ctx.symtab().get_symbol(id.content())?,
+            Some(pkg) => match ctx
+                .symtab()
+                .get_qualified_symbol(pkg.content(), id.content())
+            {
+                QualifiedSymbolResolutionResult::Success(symbol) => symbol,
+                QualifiedSymbolResolutionResult::UnknownQualifier
+                | QualifiedSymbolResolutionResult::UnknownSymbol
+                | QualifiedSymbolResolutionResult::PendingAnalysis => return None,
+            },
+        };
+
+        // cloning is necessary because of AssumedImmutable with as_function
+        let value = symbol.borrow().value().get().clone_inner();
+        let func = value.as_function()?; // might coerce, so might mutate
+
+        if !func.is_type_constructor() {
+            // cannot resolve further
+            return None;
+        }
+
+        match func.known_underlying_type() {
+            Some(TypeNode::Name(next)) => {
+                name = Cow::Owned(next.clone()); // make borrow checker happy
+            }
+            // anything other than another indirection (Name) is a success!
+            concrete => return concrete.cloned(),
+        }
+
+        drop(func);
+        symbol.borrow_mut().set_value(value); // apply potential mutation
+    }
+}
+
+// mirrors parser logic
+fn raw_list_as_struct_fields<'a>(
+    list: &CompositeLiteralElementListNode<'a>,
+) -> StructLiteralFieldsNode<'a> {
+    if list.iter().any(|(k, _)| k.is_some()) {
+        let mut pairs = Vec::with_capacity(list.len());
+
+        for (key, value) in list {
+            let Some(ExprNode::Name(id)) = key else {
+                // not a valid Go struct literal shape; degrade by handing
+                // everything off as an exhaustive list with no key info, so
+                // values still contribute to the dyn backtrace
+                return StructLiteralFieldsNode::Exhaustive(
+                    list.iter().map(|(_, v)| v.clone()).collect(),
+                );
+            };
+
+            pairs.push((*id, value.clone()));
+        }
+
+        StructLiteralFieldsNode::Keyed(pairs)
+    } else {
+        StructLiteralFieldsNode::Exhaustive(list.iter().map(|(_, v)| v.clone()).collect())
     }
 }
 

@@ -652,6 +652,7 @@ impl<'a> Scope<'a> {
                     ValueRef::new(
                         Value::Function(Box::new(FunctionValue::new_type_constructor(
                             FunctionRef::BuiltIn($id),
+                            None, // predeclared types have no underlying type
                         ))),
                         predeclared_location.clone(),
                     )
