@@ -544,36 +544,7 @@ impl Analyzer {
         reason = "Main entrypoint method"
     )]
     pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
-        if self.files.is_empty() {
-            return Err(vec![AnalysisError {
-                file: path::Path::new("/main.go"), // should never be used
-                kind: AnalysisErrorKind::NoRegisteredFiles,
-            }]);
-        }
-
-        let mut parsed = BTreeMap::new();
-        let mut parse_errors = vec![];
-
-        for file in &self.files {
-            match parser::parse(file.contents()) {
-                Ok(ast) => {
-                    if parsed.insert(file.virtual_path(), ast).is_some() {
-                        parse_errors.push(AnalysisError {
-                            file: file.virtual_path(),
-                            kind: AnalysisErrorKind::DuplicateVirtualFilePath,
-                        });
-                    }
-                }
-                Err(e) => parse_errors.push(AnalysisError {
-                    file: file.virtual_path(),
-                    kind: e.into(),
-                }),
-            }
-        }
-
-        if !parse_errors.is_empty() {
-            return Err(parse_errors);
-        }
+        let parsed = self.parse_files()?;
 
         if self.verbose {
             println!("Finished parsing {} file(s)", parsed.len());
@@ -668,6 +639,43 @@ impl Analyzer {
             Ok(())
         } else {
             Err(all_errors.into_iter().collect())
+        }
+    }
+
+    fn parse_files(
+        &self,
+    ) -> Result<BTreeMap<&path::Path, SourceFileNode<'_>>, Vec<AnalysisError<'_>>> {
+        if self.files.is_empty() {
+            return Err(vec![AnalysisError {
+                file: path::Path::new("/main.go"), // should never be used
+                kind: AnalysisErrorKind::NoRegisteredFiles,
+            }]);
+        }
+
+        let mut parsed = BTreeMap::new();
+        let mut parse_errors = vec![];
+
+        for file in &self.files {
+            match parser::parse(file.contents()) {
+                Ok(ast) => {
+                    if parsed.insert(file.virtual_path(), ast).is_some() {
+                        parse_errors.push(AnalysisError {
+                            file: file.virtual_path(),
+                            kind: AnalysisErrorKind::DuplicateVirtualFilePath,
+                        });
+                    }
+                }
+                Err(err) => parse_errors.push(AnalysisError {
+                    file: file.virtual_path(),
+                    kind: err.into(),
+                }),
+            }
+        }
+
+        if parse_errors.is_empty() {
+            Ok(parsed)
+        } else {
+            Err(parse_errors)
         }
     }
 
