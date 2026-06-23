@@ -90,19 +90,10 @@ impl<'a> ActiveTags<'a> {
         self.0.iter().copied()
     }
 
-    fn admits_file(
-        &self,
-        virtual_path: &'a path::Path,
-        ast: &SourceFileNode<'a>,
-        include_tests: bool,
-    ) -> bool {
+    fn admits_file(&self, virtual_path: &'a path::Path, ast: &SourceFileNode<'a>) -> bool {
         let Some(filename) = virtual_path.file_name().and_then(OsStr::to_str) else {
             return false;
         };
-
-        if !include_tests && is_test_file(filename) {
-            return false;
-        }
 
         if let Some(constraint) = implicit_tags_from_filename(filename)
             && constraint.iter().any(|tag| !self.contains(tag))
@@ -141,7 +132,6 @@ impl fmt::Display for ActiveTags<'_> {
 
 pub fn enumerate_build_permutations<'a>(
     parsed: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
-    include_tests: bool,
     max_dimensions: usize,
 ) -> Result<Vec<BuildPermutation<'a>>, BTreeSet<&'a str>> {
     // start by removing from the pool entirely all the files with an `ignore`
@@ -189,7 +179,7 @@ pub fn enumerate_build_permutations<'a>(
 
         let admitted: BTreeSet<&'a path::Path> = not_ignored
             .iter()
-            .filter(|(path, ast)| tags.admits_file(path, ast, include_tests))
+            .filter(|(path, ast)| tags.admits_file(path, ast))
             .map(|(path, _)| *path)
             .collect();
 
@@ -301,10 +291,6 @@ fn implicit_tags_from_filename(filename: &str) -> Option<Vec<&str>> {
     }
 
     None
-}
-
-fn is_test_file(filename: &str) -> bool {
-    filename.ends_with("_test.go")
 }
 
 fn is_known_compiler(name: &str) -> bool {

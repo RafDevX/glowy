@@ -101,6 +101,12 @@ impl Analyzer {
     /// the root of which contains a `go.mod` file that specifies the base
     /// module path (via a `module` directive).
     ///
+    /// The specified directory is traversed recursively and all files with a
+    /// `.go` extension are collected, except those with a `_test.go` suffix
+    /// (unless the [`AnalysisConfig::include_tests`] option is enabled). Only
+    /// real files and directories are considered: symlinks, for example, are
+    /// ignored, since they could lead to cycles.
+    ///
     /// Internally, this method uses [`Analyzer::from_go_mod`] and
     /// [`SourceFile::read_from_disk`], so their respective conditions apply.
     /// In particular, this method returns `Ok(None)` if no valid `module`
@@ -223,6 +229,10 @@ impl Analyzer {
                 let file_real_path = entry.path();
 
                 if file_real_path.extension().is_none_or(|e| e != "go") {
+                    continue;
+                }
+
+                if !self.include_tests && file_real_path.ends_with("_test.go") {
                     continue;
                 }
 
@@ -571,7 +581,7 @@ impl Analyzer {
 
         let build_permutations = build_constraints::enumerate_build_permutations(
             &parsed,
-            self.include_tests,
+            // the enumerator aborts early if it expects to exceed this limit
             self.max_build_tag_dimensions,
         );
 
@@ -598,8 +608,23 @@ impl Analyzer {
         // ilog10 cannot panic here since we already checked that len > 0 (is_empty)
         let width = 1 + build_permutations.len().ilog10() as usize;
 
-        if self.verbose && build_permutations.len() > 1 {
-            list_build_permutations(&build_permutations, width);
+        if self.verbose {
+            if build_permutations.len() > 1 {
+                list_build_permutations(&build_permutations, width);
+            }
+
+            for path in parsed.keys() {
+                if !build_permutations
+                    .iter()
+                    .map(|perm| &perm.admitted)
+                    .any(|admitted| admitted.contains(path))
+                {
+                    println!(
+                        "Ignoring file `{}` (not admitted to any build permutation)",
+                        path.display()
+                    );
+                }
+            }
         }
 
         #[cfg(feature = "parallelism")]
