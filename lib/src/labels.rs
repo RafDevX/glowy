@@ -999,6 +999,15 @@ impl<'a> LabelBacktrace<'a> {
     /// constraint, pruning children if they would have [`Label::Bottom`].
     #[must_use]
     fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
+        if self.label.is_subset_of(constraint) {
+            // we already meet this restriction, so prevent recursion and avoid
+            // all the downstream allocations / intersections / etc.
+
+            // this optimization leads to a 50% overall speedup in complex runs
+
+            return Some(self.clone());
+        }
+
         let new_label = self.label.intersect(constraint);
 
         if new_label.is_bottom() {
