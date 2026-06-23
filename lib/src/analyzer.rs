@@ -8,6 +8,8 @@ use std::{
 
 use indexmap::IndexSet;
 use parser::ast::SourceFileNode;
+#[cfg(feature = "parallelism")]
+use rayon::prelude::*;
 
 use crate::{
     AnalysisConfig, DEFAULT_MAX_BUILD_TAG_DIMENSIONS, FullPackagePath, SourceFile,
@@ -593,49 +595,42 @@ impl Analyzer {
             }]);
         }
 
-        let multiple_build_permutations = build_permutations.len() > 1;
-
         // ilog10 cannot panic here since we already checked that len > 0 (is_empty)
         let width = 1 + build_permutations.len().ilog10() as usize;
 
-        if self.verbose && multiple_build_permutations {
+        if self.verbose && build_permutations.len() > 1 {
             list_build_permutations(&build_permutations, width);
         }
 
-        let mut all_errors: IndexSet<AnalysisError<'_>> = IndexSet::new();
-
-        for (i, perm) in build_permutations.iter().enumerate() {
-            if self.verbose && multiple_build_permutations {
-                println!(
-                    "[#{:0>width$}/{}] Running analysis for build permutation {} ({} file(s))",
-                    i + 1,
+        #[cfg(feature = "parallelism")]
+        let all_errors: IndexSet<_> = build_permutations
+            .par_iter()
+            .enumerate()
+            .flat_map_iter(|(index, permutation)| {
+                self.process_permutation(
+                    permutation,
+                    index,
+                    width,
                     build_permutations.len(),
-                    perm.tag_sets
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(" / "),
-                    perm.admitted.len(),
-                );
-            }
+                    &parsed,
+                )
+            })
+            .collect();
 
-            let admitted_asts: Vec<_> = parsed
-                .iter()
-                .filter(|(path, _)| perm.admitted.contains(*path))
-                .map(|(path, ast)| (*path, ast))
-                .collect();
-
-            let errors = self.analyze_permutation(&admitted_asts);
-
-            if self.verbose && multiple_build_permutations {
-                println!(
-                    "Detected {} error(s) while analyzing this build permutation",
-                    errors.len()
-                );
-            }
-
-            all_errors.extend(errors);
-        }
+        #[cfg(not(feature = "parallelism"))]
+        let all_errors: IndexSet<_> = build_permutations
+            .iter()
+            .enumerate()
+            .flat_map(|(index, permutation)| {
+                self.process_permutation(
+                    permutation,
+                    index,
+                    width,
+                    build_permutations.len(),
+                    &parsed,
+                )
+            })
+            .collect();
 
         if self.verbose {
             println!(
@@ -651,9 +646,55 @@ impl Analyzer {
         }
     }
 
+    fn process_permutation<'a>(
+        &'a self,
+        permutation: &BuildPermutation<'a>,
+        index: usize,
+        width: usize,
+        total_permutations: usize,
+        parsed: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
+    ) -> Vec<AnalysisError<'a>> {
+        let verbose_prefix = if self.verbose && total_permutations > 1 {
+            let prefix = format!("[#{:0>width$}/{}] ", index + 1, total_permutations);
+
+            println!(
+                "{prefix}Running analysis for build permutation {} ({} file(s))",
+                permutation
+                    .tag_sets
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" / "),
+                permutation.admitted.len(),
+            );
+
+            Cow::Owned(prefix)
+        } else {
+            Cow::Borrowed("")
+        };
+
+        let admitted_asts: Vec<_> = parsed
+            .iter()
+            .filter(|(path, _)| permutation.admitted.contains(*path))
+            .map(|(path, ast)| (*path, ast))
+            .collect();
+
+        let errors = self.analyze_permutation(&admitted_asts, &verbose_prefix);
+
+        if self.verbose && total_permutations > 1 {
+            println!(
+                "Detected {} error(s) while analyzing this build permutation",
+                errors.len()
+            );
+        }
+
+        errors
+    }
+
     fn analyze_permutation<'a>(
         &'a self,
         admitted: &[(&'a path::Path, &SourceFileNode<'a>)],
+        verbose_prefix: &str,
     ) -> Vec<AnalysisError<'a>> {
         let mut context = AnalysisContext::new(&self.blanket_directives);
 
@@ -683,7 +724,7 @@ impl Analyzer {
         pass!(decls::visit_source_file, false);
 
         if self.verbose {
-            println!("Finished Stage 1");
+            println!("{verbose_prefix}Finished Stage 1");
         }
 
         // Stage #2: StabilizeLabels
@@ -716,12 +757,14 @@ impl Analyzer {
             iteration_index += 1;
 
             if self.verbose {
-                println!("Finished convergence iteration #{iteration_index} (Stage 2)");
+                println!(
+                    "{verbose_prefix}Finished convergence iteration #{iteration_index} (Stage 2)"
+                );
             }
         }
 
         if self.verbose {
-            println!("Finished Stage 2");
+            println!("{verbose_prefix}Finished Stage 2");
         }
 
         // Stage #3: EnforceSecurityPolicies
@@ -733,7 +776,7 @@ impl Analyzer {
         pass!(taint::visit_source_file, true);
 
         if self.verbose {
-            println!("Finished Stage 3");
+            println!("{verbose_prefix}Finished Stage 3");
         }
 
         match Result::from(context) {
