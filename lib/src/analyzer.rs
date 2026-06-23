@@ -652,21 +652,36 @@ impl Analyzer {
             }]);
         }
 
+        #[cfg(feature = "parallelism")]
+        let results: Vec<_> = self
+            .files
+            .par_iter()
+            .map(|file| (file.virtual_path(), file.contents()))
+            .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)))
+            .collect(); // necessary to go from a rayon iter to a normal iter
+
+        #[cfg(not(feature = "parallelism"))]
+        let results = self
+            .files
+            .iter()
+            .map(|file| (file.virtual_path(), file.contents()))
+            .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)));
+
         let mut parsed = BTreeMap::new();
         let mut parse_errors = vec![];
 
-        for file in &self.files {
-            match parser::parse(file.contents()) {
+        for (virtual_path, result) in results {
+            match result {
                 Ok(ast) => {
-                    if parsed.insert(file.virtual_path(), ast).is_some() {
+                    if parsed.insert(virtual_path, ast).is_some() {
                         parse_errors.push(AnalysisError {
-                            file: file.virtual_path(),
+                            file: virtual_path,
                             kind: AnalysisErrorKind::DuplicateVirtualFilePath,
                         });
                     }
                 }
                 Err(err) => parse_errors.push(AnalysisError {
-                    file: file.virtual_path(),
+                    file: virtual_path,
                     kind: err.into(),
                 }),
             }
