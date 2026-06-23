@@ -41,7 +41,13 @@
 // analysis requires multiple iterations to stabilize, meaning we
 // need to remember symbols even after leaving that branch.
 
-use std::{cell::RefCell, collections::HashMap, fmt, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fmt,
+    path::Path,
+    rc::{Rc, Weak},
+};
 
 use parser::Span;
 
@@ -168,7 +174,7 @@ impl<'a> SymbolTable<'a> {
             if let Some(existing) = scope.children.get(index).cloned() {
                 existing
             } else {
-                let new_scope = Scope::new_ref(Rc::clone(&self.current_scope));
+                let new_scope = Scope::new_ref(Rc::downgrade(&self.current_scope));
                 scope.children.push(Rc::clone(&new_scope));
 
                 new_scope
@@ -196,7 +202,7 @@ impl<'a> SymbolTable<'a> {
 
     fn get_parent_scope(&self) -> Option<ScopeRef<'a>> {
         // None if already at the root (package scope)
-        self.current_scope.borrow().parent.clone()
+        self.current_scope.borrow().parent()
     }
 
     fn get_symbol_from_scope_chain(
@@ -213,7 +219,7 @@ impl<'a> SymbolTable<'a> {
                 return Some(symbol);
             }
 
-            let parent = borrowed.parent.clone();
+            let parent = borrowed.parent();
             drop(borrowed);
 
             checking.clone_from(&parent);
@@ -563,6 +569,7 @@ impl<'a> PackageScopeEnvelope<'a> {
 }
 
 type ScopeRef<'a> = Rc<RefCell<Scope<'a>>>;
+type WeakScopeRef<'a> = Weak<RefCell<Scope<'a>>>;
 
 // In the Go spec, this is called a block, but that's a bit confusing
 // since blocks are lexical elements that don't necessarily exist for
@@ -574,13 +581,19 @@ struct Scope<'a> {
     symbols: HashMap<&'a str, SymbolRef<'a>>,
 
     /// Parent scope, unless this is the root scope (package block, & universe).
-    parent: Option<ScopeRef<'a>>,
+    ///
+    /// This needs to be a [`Weak`] reference to break the cycle, as otherwise
+    /// it would cause a (severe) memory leak, since Scopes would never be
+    /// dropped (ref-count would never reach 0, since all parents point to their
+    /// children and all children point to their parents) and thus no Symbol nor
+    /// Value in the scope tree would be dropped even after analysis finished.
+    parent: Option<WeakScopeRef<'a>>,
     /// Children scopes, if any.
     children: Vec<ScopeRef<'a>>,
 }
 
 impl<'a> Scope<'a> {
-    fn new(parent: Option<ScopeRef<'a>>) -> Self {
+    fn new(parent: Option<WeakScopeRef<'a>>) -> Self {
         Self {
             symbols: HashMap::new(),
 
@@ -589,7 +602,7 @@ impl<'a> Scope<'a> {
         }
     }
 
-    fn new_ref(parent: ScopeRef<'a>) -> ScopeRef<'a> {
+    fn new_ref(parent: WeakScopeRef<'a>) -> ScopeRef<'a> {
         Rc::new(RefCell::new(Self::new(Some(parent))))
     }
 
@@ -700,6 +713,13 @@ impl<'a> Scope<'a> {
         predeclared_type!("uintptr");
 
         scope
+    }
+
+    fn parent(&self) -> Option<ScopeRef<'a>> {
+        // returns None if there is no parent (i.e., universe scope), or also
+        // technically if the parent has been deallocated since we only hold a
+        // weak ref to it (but there is no reason why it should have been)
+        self.parent.as_ref().and_then(Weak::upgrade)
     }
 
     fn get_local_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
