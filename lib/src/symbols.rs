@@ -64,6 +64,12 @@ pub struct SymbolTable<'a> {
     /// Root scopes associated with each package (None if blackbox).
     package_scopes: HashMap<FullPackagePath, Option<PackageScopeEnvelope<'a>>>,
 
+    /// Reverse index from each symbol's declaration site to the symbol itself.
+    ///
+    /// This allows [`Self::get_symbol_by_declaration`] to resolve in O(1) time
+    /// instead of having to traverse every package's scope tree.
+    decl_index: HashMap<Pinned<'a, Span<'a>>, SymbolRef<'a>>,
+
     /// Other packages imported by the current file, with an assigned qualifier.
     current_file_named_imports: HashMap<String, FullPackagePath>,
     /// Other packages imported by the current file, via `import . "path"`.
@@ -86,9 +92,20 @@ pub struct SymbolTable<'a> {
 
 impl<'a> SymbolTable<'a> {
     pub fn new() -> Self {
+        let universe_scope = Scope::new_universe();
+
+        // seed the index with the universe scope's pre-declared identifiers
+        let decl_index = universe_scope
+            .symbols
+            .values()
+            .map(|symbol| (symbol.borrow().declared_name(), Rc::clone(symbol)))
+            .collect();
+
         Self {
-            universe_scope: Scope::new_universe(),
+            universe_scope,
             package_scopes: HashMap::from([("fmt".to_owned(), None)]),
+
+            decl_index,
 
             current_file_named_imports: HashMap::new(),
             current_file_wildcard_imports: Vec::new(),
@@ -273,26 +290,7 @@ impl<'a> SymbolTable<'a> {
         &self,
         declaration: Pinned<'a, Span<'a>>,
     ) -> Option<SymbolRef<'a>> {
-        for envelope in self.package_scopes.values().flatten() {
-            if let Some(symbol) = envelope
-                .scope
-                .borrow()
-                .get_symbol_by_declaration(declaration)
-            {
-                return Some(symbol);
-            }
-
-            // methods aren't part of the lexical scope chain, but closures
-            // captured inside method bodies may still need to resolve their
-            // declaration sites (e.g. for self-referential method calls)
-            for method in envelope.methods_by_name(declaration.content()) {
-                if method.borrow().declared_name() == declaration {
-                    return Some(Rc::clone(method));
-                }
-            }
-        }
-
-        self.universe_scope.get_symbol_by_declaration(declaration)
+        self.decl_index.get(&declaration).cloned() // cloning Rc is cheap
     }
 
     pub fn declare_new_symbol(
@@ -305,6 +303,8 @@ impl<'a> SymbolTable<'a> {
         // but we'll leave that kind of extensive checks for the actual Go
         // compiler to enforce
 
+        self.index_declaration(&symbol);
+
         self.current_scope
             .borrow_mut()
             .set_local_symbol(name, symbol)
@@ -316,11 +316,19 @@ impl<'a> SymbolTable<'a> {
         name: &'a str,
         symbol: SymbolRef<'a>,
     ) -> Option<SymbolRef<'a>> {
+        self.index_declaration(&symbol);
+
         let envelope = self
             .current_package_envelope_mut()
             .expect("a package should be active when declaring a method");
 
         envelope.set_method(receiver_type, name, symbol)
+    }
+
+    fn index_declaration(&mut self, symbol: &SymbolRef<'a>) {
+        let decl = symbol.borrow().declared_name();
+
+        self.decl_index.insert(decl, Rc::clone(symbol));
     }
 
     pub fn lookup_unique_method_in_current_package(&self, name: &str) -> Option<SymbolRef<'a>> {
@@ -728,27 +736,6 @@ impl<'a> Scope<'a> {
 
     fn set_local_symbol(&mut self, name: &'a str, symbol: SymbolRef<'a>) -> Option<SymbolRef<'a>> {
         self.symbols.insert(name, symbol)
-    }
-
-    fn get_symbol_by_declaration(
-        &self,
-        declaration: Pinned<'a, Span<'a>>,
-    ) -> Option<SymbolRef<'a>> {
-        if let Some(local) = self.symbols.get(declaration.content())
-            && local.borrow().declared_name() == declaration
-        {
-            return Some(Rc::clone(local));
-        }
-
-        for child in &self.children {
-            let symbol = child.borrow().get_symbol_by_declaration(declaration);
-
-            if symbol.is_some() {
-                return symbol;
-            }
-        }
-
-        None
     }
 
     fn partial_snapshot(&self, namespace: &Rc<str>) -> Vec<SymbolTableSnapshotItem<'a>> {
