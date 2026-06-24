@@ -5,6 +5,8 @@ use std::{
     io::{self, BufRead},
     path,
 };
+#[cfg(feature = "parallelism")]
+use std::{num, sync, thread};
 
 use indexmap::IndexSet;
 use parser::ast::SourceFileNode;
@@ -23,6 +25,27 @@ use crate::{
 
 // parallelizing parsing is not worth it at low total file size (rayon overhead)
 const PARALLELIZE_PARSING_FROM: usize = 1 << 30; // 1 GiB
+
+#[cfg(feature = "parallelism")]
+static ANALYSIS_POOL: sync::LazyLock<rayon::ThreadPool> = sync::LazyLock::new(|| {
+    // we try to leave two CPU cores free so other processes can run and the
+    // system does not get too overwhelmed (all cores at 100% can go wrong).
+    // note that this value is presently not configurable just because it would
+    // mean re-generating this pool every analysis instance when the
+    // configuration changed, which would require taking `&mut self` for
+    // analysis, which is really not ideal
+    let max_threads = thread::available_parallelism()
+        .map(num::NonZero::get)
+        .unwrap_or_default()
+        .saturating_sub(2) // usually this means #cores - 2
+        .max(2); // at least 2, or else there's no point to parallelism
+
+    rayon::ThreadPoolBuilder::new()
+        .thread_name(|i| format!("glowy-analysis-{i}"))
+        .num_threads(max_threads)
+        .build()
+        .unwrap()
+});
 
 /// Primary orchestrator and conductor of the analysis process.
 ///
@@ -610,19 +633,21 @@ impl Analyzer {
 
                 #[cfg(feature = "parallelism")]
                 {
-                    build_permutations
-                        .par_iter()
-                        .enumerate()
-                        .flat_map_iter(|(index, permutation)| {
-                            self.process_permutation(
-                                permutation,
-                                index,
-                                width,
-                                build_permutations.len(),
-                                &parsed,
-                            )
-                        })
-                        .collect()
+                    ANALYSIS_POOL.install(|| {
+                        build_permutations
+                            .par_iter()
+                            .enumerate()
+                            .flat_map_iter(|(index, permutation)| {
+                                self.process_permutation(
+                                    permutation,
+                                    index,
+                                    width,
+                                    build_permutations.len(),
+                                    &parsed,
+                                )
+                            })
+                            .collect()
+                    })
                 }
 
                 #[cfg(not(feature = "parallelism"))]
@@ -777,7 +802,7 @@ impl Analyzer {
 
         if self.verbose && total_permutations > 1 {
             println!(
-                "Detected {} error(s) while analyzing this build permutation",
+                "{verbose_prefix}Detected {} error(s) while analyzing this build permutation",
                 errors.len()
             );
         }
