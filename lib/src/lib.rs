@@ -150,7 +150,6 @@ use std::{cmp, fmt, path::Path};
 pub use analyzer::Analyzer;
 pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
 pub use files::SourceFile;
-#[cfg(feature = "toml-config")]
 use indexmap::IndexMap;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
 pub use taint::{SinkDescriptor, SinkKind};
