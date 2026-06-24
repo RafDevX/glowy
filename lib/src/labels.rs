@@ -13,7 +13,7 @@
 //! These labels' evolution and propagation history can be easily tracked using
 //! a hierarchy structure, which is here implemented via [`LabelBacktrace`].
 
-use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem};
+use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem, sync::Arc};
 
 use parser::{Location, Span};
 
@@ -735,7 +735,16 @@ pub struct LabelBacktrace<'a> {
     /// Where this operation took place.
     location: Pinned<'a, Location>,
     /// Other backtraces through which this label is derived via propagation.
-    children: Vec<Self>,
+    ///
+    /// A reference-counted slice is used to store children (vs. a [`Vec`]) so
+    /// that cloning a [`LabelBacktrace`] does not recursively deep-clone the
+    /// entire propagation tree. This is crucial for efficient "nothing to do"
+    /// paths that just return `self.clone()`, among other many hot paths.
+    ///
+    /// This is sound because nothing ever mutates children, since there is no
+    /// way to get a mutable reference to a child (i.e., [`Arc::get_mut`] is
+    /// never invoked).
+    children: Arc<[Self]>,
 }
 
 impl<'a> LabelBacktrace<'a> {
@@ -759,7 +768,7 @@ impl<'a> LabelBacktrace<'a> {
                 label,
                 symbol,
                 location,
-                children: vec![],
+                children: Arc::from([]),
             })
         }
     }
@@ -780,7 +789,7 @@ impl<'a> LabelBacktrace<'a> {
         }
 
         let mut remaining_label = label.clone();
-        let children: Vec<_> = children
+        let children: Arc<_> = children
             .into_iter()
             .filter_map(|child| {
                 child
@@ -790,7 +799,7 @@ impl<'a> LabelBacktrace<'a> {
             .collect();
 
         // if there is only one child
-        if let [child] = children.as_slice()
+        if let [child] = &*children
             && child.label == label
             && child.location == location
             && child.symbol == symbol
@@ -874,7 +883,7 @@ impl<'a> LabelBacktrace<'a> {
             label: self.label.clone(),
             symbol: parent_symbol,
             location: parent_location,
-            children: vec![self],
+            children: Arc::from([self]),
         }
     }
 
@@ -988,7 +997,7 @@ impl<'a> LabelBacktrace<'a> {
                 self.label.rebind_synthetic_func(from_func, to_func),
                 self.symbol,
                 self.location.clone(),
-                &self.children,
+                &*self.children,
             )
             .unwrap() // safe because self exists
         } else {
