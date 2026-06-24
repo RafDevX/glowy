@@ -21,6 +21,9 @@ use crate::{
     taint::{self, BlanketDirective, BlanketDirectiveKind, BlanketDirectives},
 };
 
+// parallelizing parsing is not worth it at low total file size (rayon overhead)
+const PARALLELIZE_PARSING_FROM: usize = 1 << 30; // 1 GiB
+
 /// Primary orchestrator and conductor of the analysis process.
 ///
 /// This is main entrypoint into Glowy's logic and encapsulates all
@@ -598,35 +601,47 @@ impl Analyzer {
             }
         }
 
-        #[cfg(feature = "parallelism")]
-        let all_errors: IndexSet<_> = build_permutations
-            .par_iter()
-            .enumerate()
-            .flat_map_iter(|(index, permutation)| {
-                self.process_permutation(
-                    permutation,
-                    index,
-                    width,
-                    build_permutations.len(),
-                    &parsed,
-                )
-            })
-            .collect();
+        let all_errors: IndexSet<_> =
+            if cfg!(feature = "parallelism") && build_permutations.len() > 1 {
+                // this looks a bit strange, but it means we can avoid all the
+                // rayon parallelism overhead when there is only one singular
+                // permutation to process, even if the `parallelism` cargo
+                // feature is enabled, since it'd be a waste
 
-        #[cfg(not(feature = "parallelism"))]
-        let all_errors: IndexSet<_> = build_permutations
-            .iter()
-            .enumerate()
-            .flat_map(|(index, permutation)| {
-                self.process_permutation(
-                    permutation,
-                    index,
-                    width,
-                    build_permutations.len(),
-                    &parsed,
-                )
-            })
-            .collect();
+                #[cfg(feature = "parallelism")]
+                {
+                    build_permutations
+                        .par_iter()
+                        .enumerate()
+                        .flat_map_iter(|(index, permutation)| {
+                            self.process_permutation(
+                                permutation,
+                                index,
+                                width,
+                                build_permutations.len(),
+                                &parsed,
+                            )
+                        })
+                        .collect()
+                }
+
+                #[cfg(not(feature = "parallelism"))]
+                IndexSet::new()
+            } else {
+                build_permutations
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(index, permutation)| {
+                        self.process_permutation(
+                            permutation,
+                            index,
+                            width,
+                            build_permutations.len(),
+                            &parsed,
+                        )
+                    })
+                    .collect()
+            };
 
         if self.verbose {
             println!(
@@ -652,39 +667,70 @@ impl Analyzer {
             }]);
         }
 
-        #[cfg(feature = "parallelism")]
-        let results: Vec<_> = self
-            .files
-            .par_iter()
-            .map(|file| (file.virtual_path(), file.contents()))
-            .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)))
-            .collect(); // necessary to go from a rayon iter to a normal iter
-
-        #[cfg(not(feature = "parallelism"))]
-        let results = self
-            .files
-            .iter()
-            .map(|file| (file.virtual_path(), file.contents()))
-            .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)));
-
         let mut parsed = BTreeMap::new();
         let mut parse_errors = vec![];
 
-        for (virtual_path, result) in results {
-            match result {
-                Ok(ast) => {
-                    if parsed.insert(virtual_path, ast).is_some() {
-                        parse_errors.push(AnalysisError {
+        macro_rules! process_results {
+            ($results:expr) => {
+                for (virtual_path, result) in $results {
+                    match result {
+                        Ok(ast) => {
+                            if parsed.insert(virtual_path, ast).is_some() {
+                                parse_errors.push(AnalysisError {
+                                    file: virtual_path,
+                                    kind: AnalysisErrorKind::DuplicateVirtualFilePath,
+                                });
+                            }
+                        }
+                        Err(err) => parse_errors.push(AnalysisError {
                             file: virtual_path,
-                            kind: AnalysisErrorKind::DuplicateVirtualFilePath,
-                        });
+                            kind: err.into(),
+                        }),
                     }
                 }
-                Err(err) => parse_errors.push(AnalysisError {
-                    file: virtual_path,
-                    kind: err.into(),
-                }),
+            };
+        }
+
+        let total_file_size: usize = self
+            .files
+            .iter()
+            .map(SourceFile::contents)
+            .map(str::len)
+            .sum();
+
+        if self.verbose {
+            println!(
+                "Parsing {} Go file(s) corresponding to a total of {total_file_size} bytes",
+                self.files.len()
+            );
+        }
+
+        // this looks a bit strange, but it means we can avoid all the rayon
+        // parallelism overhead when there is not that much to parse, even if
+        // the `parallelism` cargo feature is enabled, since it'd be a waste.
+        // in particular, we cannot do `let results = if cfg! ...` because
+        // `results` has different types depending on the branch (we would have
+        // to collect on the sequential branch, but that allocation is wasteful)
+        if cfg!(feature = "parallelism") && total_file_size >= PARALLELIZE_PARSING_FROM {
+            #[cfg(feature = "parallelism")]
+            {
+                let results: Vec<_> = self
+                    .files
+                    .par_iter()
+                    .map(|file| (file.virtual_path(), file.contents()))
+                    .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)))
+                    .collect(); // necessary to go from a rayon iter to a normal iter
+
+                process_results!(results)
             }
+        } else {
+            let results = self
+                .files
+                .iter()
+                .map(|file| (file.virtual_path(), file.contents()))
+                .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)));
+
+            process_results!(results)
         }
 
         if parse_errors.is_empty() {
