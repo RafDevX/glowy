@@ -462,6 +462,12 @@ impl<'a> Mergeable<'a> for ValueRef<'a> {
 
 impl SnapshotAware for ValueRef<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        if Rc::ptr_eq(&self.value, &other.value) {
+            // in the rare case we already know the two values are (literally)
+            // the same one, we can just exit early
+            return true;
+        }
+
         self.value.borrow().snapshot_aware_eq(&other.value.borrow())
     }
 }
