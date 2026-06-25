@@ -254,16 +254,22 @@ impl Analyzer {
             } else if file_type.is_file() {
                 let file_real_path = entry.path();
 
-                if file_real_path.extension().is_none_or(|e| e != "go") {
+                if file_real_path.extension().is_none_or(|ext| ext != "go") {
                     continue;
                 }
 
-                if !self.include_tests && file_real_path.ends_with("_test.go") {
+                let file_name = entry.file_name();
+
+                if !self.include_tests
+                    && file_name
+                        .to_str()
+                        .is_some_and(|name| name.ends_with("_test.go"))
+                {
                     continue;
                 }
 
                 let file = SourceFile::read_from_disk(
-                    virtual_path.as_ref().join(entry.file_name()),
+                    virtual_path.as_ref().join(file_name),
                     file_real_path,
                 )?;
 
