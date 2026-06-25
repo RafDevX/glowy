@@ -14,7 +14,7 @@ use parser::{
 pub use self::{
     composite::{CompositeValue, CompositeValueAdapter},
     expandable::ExpandableValue,
-    functions::{CaptureBinding, FunctionRef, FunctionValue},
+    function::{CaptureBinding, FunctionRef, FunctionValue},
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,
@@ -27,7 +27,7 @@ use crate::{
 
 mod composite;
 mod expandable;
-mod functions;
+mod function;
 mod mobius;
 mod package_ref;
 mod shapes;

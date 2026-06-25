@@ -7,11 +7,8 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{
-        BacktraceContainer, Mergeable, MobiusValue, PackageRefValue, SelfAwareBacktraceContainer,
-        SimpleConstValue,
-        composite::CompositeValue,
-        expandable::ExpandableValue,
-        functions::{FunctionRef, FunctionValue},
+        BacktraceContainer, CompositeValue, ExpandableValue, FunctionRef, FunctionValue,
+        Mergeable, MobiusValue, PackageRefValue, SelfAwareBacktraceContainer, SimpleConstValue,
     },
 };
 
