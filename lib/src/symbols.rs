@@ -61,8 +61,8 @@ use crate::{
 pub struct SymbolTable<'a> {
     /// Universe block with pre-declared identifiers.
     universe_scope: Scope<'a>,
-    /// Root scopes associated with each package (None if blackbox).
-    package_scopes: HashMap<FullPackagePath, Option<PackageScopeEnvelope<'a>>>,
+    /// Root scopes associated with each package.
+    package_scopes: HashMap<FullPackagePath, PackageScopeEnvelope<'a>>,
 
     /// Reverse index from each symbol's declaration site to the symbol itself.
     ///
@@ -103,7 +103,7 @@ impl<'a> SymbolTable<'a> {
 
         Self {
             universe_scope,
-            package_scopes: HashMap::from([("fmt".to_owned(), None)]),
+            package_scopes: HashMap::new(),
 
             decl_index,
 
@@ -133,11 +133,7 @@ impl<'a> SymbolTable<'a> {
         let envelope = self
             .package_scopes
             .entry(path.clone())
-            .or_insert_with(|| Some(PackageScopeEnvelope::new(name)));
-
-        let envelope = envelope
-            .as_ref()
-            .expect("package to be entered should not be blackbox");
+            .or_insert_with(|| PackageScopeEnvelope::new(name));
 
         self.current_file_named_imports.clear();
         self.current_file_wildcard_imports.clear();
@@ -151,14 +147,15 @@ impl<'a> SymbolTable<'a> {
 
     pub fn save_package_progress(&mut self, path: &FullPackagePath) {
         if let Some(&index) = self.current_cursor.first()
-            && let Some(Some(envelope)) = self.package_scopes.get_mut(path)
+            && let Some(envelope) = self.package_scopes.get_mut(path)
         {
             envelope.next_child_index = index;
         }
     }
 
     pub fn clear_all_package_progress(&mut self) {
-        for envelope in self.package_scopes.values_mut().flatten() {
+        #[expect(clippy::iter_over_hash_type, reason = "Independent mutation")]
+        for envelope in self.package_scopes.values_mut() {
             envelope.next_child_index = 0;
         }
     }
@@ -166,13 +163,13 @@ impl<'a> SymbolTable<'a> {
     fn current_package_envelope(&self) -> Option<&PackageScopeEnvelope<'a>> {
         let path = self.current_package_path.as_ref()?;
 
-        self.package_scopes.get(path)?.as_ref()
+        self.package_scopes.get(path)
     }
 
     fn current_package_envelope_mut(&mut self) -> Option<&mut PackageScopeEnvelope<'a>> {
         let path = self.current_package_path.as_ref()?;
 
-        self.package_scopes.get_mut(path)?.as_mut()
+        self.package_scopes.get_mut(path)
     }
 
     pub fn select_next_child_scope(&mut self) {
@@ -244,7 +241,7 @@ impl<'a> SymbolTable<'a> {
 
         if name.chars().next().is_some_and(char::is_uppercase) {
             for path in &self.current_file_wildcard_imports {
-                if let Some(Some(envelope)) = self.package_scopes.get(path)
+                if let Some(envelope) = self.package_scopes.get(path)
                     && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
                 {
                     return Some(symbol);
@@ -269,7 +266,7 @@ impl<'a> SymbolTable<'a> {
         name: &str,
     ) -> QualifiedSymbolResolutionResult<'a> {
         if let Some(path) = self.current_file_named_imports.get(qualifier) {
-            if let Some(Some(envelope)) = self.package_scopes.get(path) {
+            if let Some(envelope) = self.package_scopes.get(path) {
                 if name.chars().next().is_some_and(char::is_uppercase)
                     && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
                 {
@@ -371,8 +368,10 @@ impl<'a> SymbolTable<'a> {
         let qualifier = qualifier.or_else(|| {
             self.package_scopes
                 .get(&path)
-                .and_then(Option::as_ref)
-                .map(|envelope| envelope.package_name.content().to_owned())
+                .map(|envelope| envelope.package_name)
+                .as_ref()
+                .map(Pinned::content)
+                .map(str::to_owned)
         });
 
         let qualifier = match qualifier {
@@ -431,16 +430,6 @@ impl<'a> SymbolTable<'a> {
         self.current_file_named_imports.get(qualifier)
     }
 
-    pub fn is_package_blackbox(&self, qualifier: &str) -> bool {
-        if let Some(path) = self.current_file_named_imports.get(qualifier)
-            && let Some(envelope) = self.package_scopes.get(path)
-        {
-            return envelope.is_none();
-        }
-
-        false
-    }
-
     pub fn snapshot(&self) -> SymbolTableSnapshot<'a> {
         let mut items = vec![];
 
@@ -456,10 +445,8 @@ impl<'a> SymbolTable<'a> {
             // this function and would depend on &self.package_scopes)
             let namespace = Rc::from(path.as_str());
 
-            if let Some(envelope) = envelope {
-                items.extend(envelope.scope.borrow().partial_snapshot(&namespace));
-                items.extend(envelope.partial_method_snapshot(path));
-            }
+            items.extend(envelope.scope.borrow().partial_snapshot(&namespace));
+            items.extend(envelope.partial_method_snapshot(path));
         }
 
         SymbolTableSnapshot::from(items)
