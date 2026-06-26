@@ -16,7 +16,7 @@ use crate::{
     snapshots::SnapshotAware,
     symbols::Symbol,
     taint::{explicit, exprs},
-    values::{FunctionValue, SelfAwareBacktraceContainer, ValueRef},
+    values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -318,7 +318,7 @@ fn get_for_range_values<'a>(
     // the very *fact* that the loop iterates n times depends on n's label, so
     // we propagate the range_expr's overall backtrace into the loop var (and
     // through the invoker's fold, into the branch backtrace)
-    if is_integer_range_expr(range_expr) {
+    if is_integer_range_expr(ctx, range_expr) {
         return vec![downgraded];
     }
 
@@ -417,18 +417,37 @@ fn get_iter_function_range_values<'a>(
 }
 
 // best effort only; very conservative; only true if statically guaranteed
-fn is_integer_range_expr(expr: &ExprNode<'_>) -> bool {
+fn is_integer_range_expr<'a>(ctx: &AnalysisContext<'a>, expr: &ExprNode<'a>) -> bool {
     #[expect(
         clippy::wildcard_enum_match_arm,
         reason = "We explicitly want to detect only these variants"
     )]
     match expr {
         ExprNode::Literal(LiteralNode::Int { .. }) => true,
-        ExprNode::Call(call) => matches!(
-            call.func.as_ref(),
-            ExprNode::Name(name)
-                if matches!(name.content(), "len" | "cap" | "min" | "max")
-        ),
+        ExprNode::Call(call) => {
+            let ExprNode::Name(func_name) = call.func.as_ref() else {
+                return false;
+            };
+
+            let func_name = func_name.content();
+            if !matches!(func_name, "len" | "cap" | "min" | "max") {
+                // not a known built-in function that would (in this context)
+                // return an integer, so we cannot draw conclusions
+                return false;
+            }
+
+            // must resolve to the predeclared builtin (not a user shadow)
+            let Some(symbol) = ctx.symtab().get_symbol(func_name) else {
+                return false;
+            };
+            let borrow = symbol.borrow();
+            let value = borrow.value().get();
+            let Some(func) = value.as_function() else {
+                return false;
+            };
+
+            matches!(func.r#ref(), FunctionRef::BuiltIn(name) if *name == func_name)
+        }
         _ => false,
     }
 }
