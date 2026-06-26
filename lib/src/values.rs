@@ -12,6 +12,7 @@ use parser::{
 };
 
 pub use self::{
+    channel::ChannelValue,
     composite::{CompositeValue, CompositeValueAdapter},
     expandable::ExpandableValue,
     function::{CaptureBinding, FunctionRef, FunctionValue},
@@ -25,6 +26,7 @@ use crate::{
     snapshots::SnapshotAware,
 };
 
+mod channel;
 mod composite;
 mod expandable;
 mod function;
@@ -108,6 +110,10 @@ impl<'a> ValueRef<'a> {
 
     pub fn is_simple(&self) -> bool {
         matches!(*self.value.borrow(), Value::Simple(_))
+    }
+
+    pub fn is_channel(&self) -> bool {
+        matches!(*self.value.borrow(), Value::Channel(_))
     }
 
     pub fn is_map(&self) -> bool {
@@ -239,6 +245,12 @@ impl<'a> ValueRef<'a> {
         // no coercion because there's no 'blank' package ref
 
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::PackageRef)).ok()
+    }
+
+    pub fn as_channel(&self) -> Option<Ref<'_, ChannelValue<'a>>> {
+        self.try_upgrade_to(Value::Channel);
+
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Channel)).ok()
     }
 
     pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {

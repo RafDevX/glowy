@@ -21,8 +21,8 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::{exprs, mutation::LeftValue},
     values::{
-        BacktraceContainer, CompositeValue, CompositeValueAdapter, SelfAwareBacktraceContainer,
-        SimpleConstValue, Value, ValueRef,
+        BacktraceContainer, ChannelValue, CompositeValue, CompositeValueAdapter,
+        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
     },
 };
 
@@ -89,15 +89,19 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 exprs::visit_single_expr(ctx, m);
             }
 
-            // TODO: maybe add Value::Channel?
-
             let location = ctx.pin(node.location.clone());
 
-            if let Some(n) = &node.n {
-                exprs::visit_single_expr(ctx, n).with_location(location)
-            } else {
-                ValueRef::new_bottom(location)
-            }
+            // buffer size determines when sends block (full buffer => sender
+            // waits), and that blocking is observable to any receiver via
+            // send/receive timing -- so we seed the channel's inner backtrace
+            // with n's backtrace, ensuring everything later received from
+            // this channel inherits n's label as a sound over-approximation
+            let initial = node
+                .n
+                .as_ref()
+                .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
+
+            ValueRef::new(Value::Channel(ChannelValue::new(initial)), location)
         }
         _ => {
             // we don't know what this is, so there's nothing we can do...

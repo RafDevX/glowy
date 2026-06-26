@@ -301,9 +301,9 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the slicing was found.
         location: Location,
     },
-    /// Invalid or unsupported expression used as channel in a send statement.
-    IllegalChannelExpression {
-        /// Where the illegal expression was found.
+    /// Invalid or unsupported expression used as operand in receive expression.
+    InvalidReceiveOperand {
+        /// Where the receive expression was found.
         location: Location,
     },
     /// Illegal `go` statement with a non-call expression.
@@ -412,7 +412,7 @@ impl AnalysisErrorKind<'_> {
             | Self::InvalidSelectionBase { .. }
             | Self::InvalidIndexingBase { .. }
             | Self::InvalidSlicingBase { .. }
-            | Self::IllegalChannelExpression { .. }
+            | Self::InvalidReceiveOperand { .. }
             | Self::GoNotCall { .. }
             | Self::IllegalSelectCase { .. }
             | Self::UnexpectedFallthrough { .. }

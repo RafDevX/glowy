@@ -14,7 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::{SinkDescriptor, SinkKind, annotations, enforcement, mutation::LeftValue},
-    values::{SelfAwareBacktraceContainer, ValueRef},
+    values::ValueRef,
 };
 
 pub fn visit_receive<'a>(
@@ -26,12 +26,18 @@ pub fn visit_receive<'a>(
     // otherwise "has a value been read" or "has the channel been depleted" can
     // be used to exfiltrate information
 
-    exprs::visit_single_expr(ctx, operand).nest_backtrace(
-        LabelBacktraceKind::Receive,
-        None,
-        ctx.pin(location.clone()),
-        vec![],
-    )
+    let value = exprs::visit_single_expr(ctx, operand);
+    let pinned = ctx.pin(location.clone());
+
+    let Some(channel) = value.as_channel() else {
+        ctx.report_error(AnalysisErrorKind::InvalidReceiveOperand {
+            location: location.clone(),
+        });
+
+        return ValueRef::new_bottom(pinned);
+    };
+
+    channel.receive(pinned)
 }
 
 pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {

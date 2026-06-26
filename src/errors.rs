@@ -406,8 +406,8 @@ pub fn get_structured_error_info<'a>(
             ],
             help: Some("check whether the specified slicing base is a string/array/slice"),
         },
-        AnalysisErrorKind::IllegalChannelExpression { location } => StructuredErrorInfo {
-            title: "illegal or unsupported expression used as a channel in a send statement".into(),
+        AnalysisErrorKind::InvalidReceiveOperand { location } => StructuredErrorInfo {
+            title: "invalid operand in receive expression".into(),
             code: "G021".into(),
             snippets: vec![
                 builder.snippet().annotate(
@@ -415,7 +415,7 @@ pub fn get_structured_error_info<'a>(
                         .label("this expression cannot be resolved to a channel"),
                 ),
             ],
-            help: Some("check whether the specified expression is a channel"),
+            help: Some("check whether the specified operand is a channel"),
         },
         AnalysisErrorKind::GoNotCall { location } => StructuredErrorInfo {
             title: "illegal `go` statement with a non-call expression".into(),

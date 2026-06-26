@@ -4,8 +4,8 @@ use parser::{
     Location, Span,
     ast::{
         AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,
-        ForHeaderNode, ForNode, ForRangeNode, FunctionResultNode, IfNode, LiteralNode,
-        StatementNode, SwitchNode, TypeNameNode, TypeNode, TypeSwitchNode,
+        ForHeaderNode, ForNode, ForRangeNode, FunctionResultNode, FunctionSignatureNode, IfNode,
+        LiteralNode, StatementNode, SwitchNode, TypeNameNode, TypeNode, TypeSwitchNode,
     },
 };
 
@@ -16,7 +16,7 @@ use crate::{
     snapshots::SnapshotAware,
     symbols::Symbol,
     taint::{explicit, exprs},
-    values::{SelfAwareBacktraceContainer, ValueRef},
+    values::{FunctionValue, SelfAwareBacktraceContainer, ValueRef},
 };
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -150,24 +150,24 @@ fn visit_for_range<'a>(
 
     let rhs_location = ctx.pin(range_expr.location().into_owned());
 
-    // the Go spec leaves map iteration order unspecified and explicitly
-    // allows entries created during iteration to be observed by subsequent
-    // iterations (see https://go.dev/ref/spec#For_range). for analysis
-    // soundness, the loop variables must therefore reflect any mutations
-    // the body performs on the ranged collection
+    // the Go spec leaves map iteration order unspecified and explicitly allows
+    // entries created during iteration to be observed by subsequent iterations
+    // (see https://go.dev/ref/spec#For_range). for analysis soundness, the loop
+    // variables must therefore reflect any mutations the body performs on the
+    // ranged collection
     //
     // we model this by visiting the body more than once within a single
     // analysis pass: the first visits are speculative and run with errors
-    // suppressed so they only contribute to label propagation; the final
-    // visit runs with errors enabled, and uses loop variable bindings that
-    // already account for everything the prior visits revealed
+    // suppressed so they only contribute to label propagation; the final visit
+    // runs with errors enabled, and uses loop variable bindings that already
+    // account for everything the prior visits revealed
     //
     // loop termination relies on the lattice of labels being finite-height and
-    // growing monotonically across visits (assignments only ever union new
-    // tags into existing values); once a visit produces no new taint on the
-    // range expr, the next visit's bindings match the previous one and
-    // the loop exits. if this ever fails to converge, it is because of a
-    // soundness bug elsewhere in the analysis
+    // growing monotonically across visits (assignments only ever union new tags
+    // into existing values); once a visit produces no new taint on the range
+    // expr, the next visit's bindings match the previous one and the loop
+    // exits. if this ever fails to converge, it is because of a soundness bug
+    // elsewhere in the analysis
 
     let mut last_rhs_backtrace: Option<Option<LabelBacktrace<'a>>> = None;
 
@@ -246,7 +246,7 @@ fn visit_for_range<'a>(
             ctx.push_error_suppression();
         }
 
-        // vvv this will create another scope for the for body, which is intended
+        // vv this will create another scope for the for body, which is intended
         super::visit_block(ctx, body);
 
         if !stable {
@@ -279,109 +279,157 @@ fn get_for_range_values<'a>(
     // visit range_expr, even if just to trigger side effects
     let value = exprs::visit_single_expr(ctx, range_expr);
 
-    // TODO: support channels
+    // see https://go.dev/ref/spec#For_range for the per-type cardinality table;
+    // the order below matches that table, with the trailing string/unknown
+    // branch acting as the conservative catch-all
 
-    // see table at https://go.dev/ref/spec#For_range
+    // channel: 1 value (received element).
+    // we guard on `is_channel` (rather than `as_channel`) because for-range is
+    // polymorphic over many types per the Go spec (channel, int, string, slice,
+    // array, map, iter func), so an unshaped Simple here cannot be safely
+    // coerced into a ChannelValue from the syntactic context alone
+    if value.is_channel()
+        && let Some(channel) = value.as_channel()
+    {
+        return vec![channel.receive(location)];
+    }
+
+    // array / slice / map: 2 values (key/index, element i.e. coll[k])
     if let Some(composite) = value.as_composite() {
-        // 1st value key/index, 2nd value coll[k]
-
         let index_bt = composite.backtrace_at_location(location.clone());
 
-        vec![
+        return vec![
             ValueRef::from_backtrace_or_bottom_at(index_bt, || location.clone()),
             composite.get_at_unknown_key(location),
-        ]
-    } else if let Some(func) = value.as_function() {
-        let yield_type = func
-            .signature()
-            .and_then(|sig| sig.params.first())
-            .filter(|param| param.ids.len() <= 1)
-            .map(|param| &param.r#type);
+        ];
+    }
 
-        if let Some(TypeNode::Function { signature }) = yield_type
-            && let FunctionResultNode::Single(TypeNode::Name(TypeNameNode {
-                package: None,
-                id: yield_result,
-                ..
-            })) = &signature.result
-            && yield_result.content() == "bool"
-        {
-            let downgraded = func.downgrade_as_call(ctx, location.clone());
+    // iter function: cardinality determined by the yield signature
+    if let Some(func) = value.as_function()
+        && let Some(yield_signature) = extract_iter_yield_signature(&func)
+    {
+        return get_iter_function_range_values(ctx, &func, yield_signature, &location);
+    }
 
-            let n_values: usize = signature.count_inputs();
+    let downgraded = value.downgrade(|| location.clone());
 
-            if n_values == 0 {
-                // note: this is wrong, we should return an empty Vec,
-                // but that would lead to an incorrect branch backtrace
-                // being set, which is worse -- branch must depend on
-                // the label of `value`, since a function might have
-                // side effects, and anyway the for body executes only when iter
-                // yields -- which may be conditional on whatever taints
-                // the iter value (e.g., closure captures, branch labels
-                // recorded via `record_yield_call`)
-                return vec![downgraded];
+    // integer: 1 value (the index, of the ranged integer type).
+    // the iteration values themselves (0..n-1) carry no intrinsic label, but
+    // the very *fact* that the loop iterates n times depends on n's label, so
+    // we propagate the range_expr's overall backtrace into the loop var (and
+    // through the invoker's fold, into the branch backtrace)
+    if is_integer_range_expr(range_expr) {
+        return vec![downgraded];
+    }
+
+    // remaining valid options: a string (2 values: index, rune) or a
+    // non-literal integer we couldn't recognize syntactically (1 value).
+    // we conservatively yield 2 - truncation to lhs_len downstream handles
+    // the 1-ident case sound either way, and 2-ident strings are common.
+    // for any other (unsupported) shape this also gives a safe fallback that
+    // avoids spurious cardinality errors while keeping label propagation
+    vec![downgraded.clone_inner(), downgraded]
+}
+
+fn extract_iter_yield_signature<'a, 'f>(
+    func: &'f FunctionValue<'a>,
+) -> Option<&'f FunctionSignatureNode<'a>> {
+    let yield_type = func
+        .signature()
+        .and_then(|sig| sig.params.first())
+        .filter(|param| param.ids.len() <= 1)
+        .map(|param| &param.r#type)?;
+
+    let TypeNode::Function { signature } = yield_type else {
+        return None;
+    };
+
+    let FunctionResultNode::Single(TypeNode::Name(TypeNameNode {
+        package: None, id, ..
+    })) = &signature.result
+    else {
+        return None;
+    };
+
+    (id.content() == "bool").then_some(signature.as_ref())
+}
+
+fn get_iter_function_range_values<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    yield_signature: &FunctionSignatureNode<'a>,
+    location: &Pinned<'a, Location>,
+) -> Vec<ValueRef<'a>> {
+    let downgraded = func.downgrade_as_call(ctx, location.clone());
+
+    let n_values: usize = yield_signature.count_inputs();
+
+    if n_values == 0 {
+        // note: this is wrong, we should return an empty Vec, but that would
+        // lead to an incorrect branch backtrace being set, which would actually
+        // be much worse -- branch must depend on the label of `value`, since a
+        // function might have side effects, and anyway the for body executes
+        // only when iter yields, which may be conditional on whatever taints
+        // the iter value (e.g., closure captures, branch labels recorded via
+        // `record_yield_call`)
+        return vec![downgraded];
+    }
+
+    // map each yield argument position to the labels accumulated from
+    // `yield(args)` calls inside the iter function body
+    // (see `FunctionValue::record_yield_call`); fall back to the function
+    // value's overall taint when nothing was recorded (e.g., on the first
+    // stabilization iteration, or when the iter wasn't recognized as such)
+    let yield_acc = func.yield_acc();
+
+    if yield_acc.is_empty() {
+        // function was never (previously) detected as being iter-shaped, but
+        // this is likely because it has never been visited yet, or because it
+        // has no known implementation for some other reason, so we still want
+        // to match the correct lhs cardinality so that the binding is accepted
+        // without reporting an error
+        return iter::repeat_with(|| downgraded.clone_inner())
+            .take(n_values)
+            .collect();
+    }
+
+    let call_branch = super::funcs::calculate_effective_call_site_branch_backtrace_for(
+        ctx,
+        func,
+        location.clone(),
+    );
+
+    yield_acc
+        .iter()
+        .map(|yielded| {
+            let realized = yielded.realize(
+                func.r#ref(),
+                SyntheticSlot::CallSiteBranch,
+                call_branch.as_ref(),
+            );
+
+            match realized {
+                Some(bt) => ValueRef::from(bt).with_location(location.clone()),
+                None => downgraded.clone_inner(), // fallback
             }
+        })
+        .collect()
+}
 
-            // map each yield argument position to the labels accumulated
-            // from `yield(args)` calls inside the iter function body
-            // (see `FunctionValue::record_yield_call`); fall back to the
-            // function value's overall taint when nothing was recorded
-            // (e.g., on the first stabilization iteration, or when the
-            // iter wasn't recognized as such)
-            let yield_acc = func.yield_acc();
-
-            #[expect(clippy::if_not_else, reason = "Easier to understand")]
-            return if !yield_acc.is_empty() {
-                let call_branch = super::funcs::calculate_effective_call_site_branch_backtrace_for(
-                    ctx,
-                    &func,
-                    location.clone(),
-                );
-
-                yield_acc
-                    .iter()
-                    .map(|yielded| {
-                        let realized = yielded.realize(
-                            func.r#ref(),
-                            SyntheticSlot::CallSiteBranch,
-                            call_branch.as_ref(),
-                        );
-
-                        match realized {
-                            Some(bt) => ValueRef::from(bt).with_location(location.clone()),
-                            None => downgraded.clone_inner(), // fallback
-                        }
-                    })
-                    .collect()
-            } else {
-                // function was never detected as being iter-shaped, but this is
-                // likely because it has never been visited yet, or because it
-                // has no known implementation for some other reason, so we
-                // still want to match the correct lhs cardinality so that the
-                // binding is accepted without reporting an error
-
-                iter::repeat_with(|| downgraded.clone_inner())
-                    .take(n_values)
-                    .collect()
-            };
-        }
-
-        vec![]
-    } else if let ExprNode::Literal(LiteralNode::Int { .. }) = range_expr {
-        // this does not catch all the ints (see below), but it does catch some
-        // of them (directly passed integer literals)
-
-        vec![ValueRef::new_bottom(location)] // (literals necessarily have no label)
-    } else {
-        // the only options remaining (if this is a valid Go program) is either
-        // a string or a (non-literal) integer, but we can't know which this is,
-        // so we assume it's a string (2 values vs 1 offers more flexibility,
-        // and the 1st value would coincide)
-
-        let downgraded = value.downgrade(|| location.clone());
-
-        // 1st value index, 2nd value code point
-        vec![downgraded.clone_inner(), downgraded]
+// best effort only; very conservative; only true if statically guaranteed
+fn is_integer_range_expr(expr: &ExprNode<'_>) -> bool {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "We explicitly want to detect only these variants"
+    )]
+    match expr {
+        ExprNode::Literal(LiteralNode::Int { .. }) => true,
+        ExprNode::Call(call) => matches!(
+            call.func.as_ref(),
+            ExprNode::Name(name)
+                if matches!(name.content(), "len" | "cap" | "min" | "max")
+        ),
+        _ => false,
     }
 }
 

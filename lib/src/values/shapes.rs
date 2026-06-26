@@ -7,8 +7,9 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{
-        BacktraceContainer, CompositeValue, ExpandableValue, FunctionRef, FunctionValue,
-        Mergeable, MobiusValue, PackageRefValue, SelfAwareBacktraceContainer, SimpleConstValue,
+        BacktraceContainer, ChannelValue, CompositeValue, ExpandableValue, FunctionRef,
+        FunctionValue, Mergeable, MobiusValue, PackageRefValue, SelfAwareBacktraceContainer,
+        SimpleConstValue,
     },
 };
 
@@ -20,6 +21,7 @@ pub enum Value<'a> {
     Expandable(ExpandableValue<'a>),
     Mobius(MobiusValue<'a>),
     PackageRef(PackageRefValue<'a>),
+    Channel(ChannelValue<'a>),
     Array(CompositeValue<'a, u64>),
     Slice(CompositeValue<'a, u64>),
     Map(CompositeValue<'a, SimpleConstValue>),
@@ -30,7 +32,10 @@ pub enum Value<'a> {
 impl<'a> Value<'a> {
     pub(super) fn is_copy_by_reference(&self) -> bool {
         // https://go.dev/ref/spec#Representation_of_values
-        matches!(self, Self::Slice(..) | Self::Function { .. })
+        matches!(
+            self,
+            Self::Channel(..) | Self::Slice(..) | Self::Map(..) | Self::Function(..)
+        )
     }
 
     fn sub_container(&self) -> &dyn BacktraceContainer<'a> {
@@ -39,6 +44,7 @@ impl<'a> Value<'a> {
             Self::Expandable(exp) => exp,
             Self::Mobius(mobius) => mobius,
             Self::PackageRef(pkg) => pkg,
+            Self::Channel(channel) => channel,
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
@@ -52,6 +58,7 @@ impl<'a> Value<'a> {
             Self::Expandable(exp) => exp,
             Self::Mobius(mobius) => mobius,
             Self::PackageRef(pkg) => pkg,
+            Self::Channel(channel) => channel,
             Self::Array(composite) | Self::Slice(composite) => composite,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
@@ -99,6 +106,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
+            Self::Channel(channel) => Self::Channel(recurs!(channel)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
@@ -125,6 +133,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
             Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
             Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
+            Self::Channel(channel) => Self::Channel(recurs!(channel)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
             Self::Map(composite) => Self::Map(recurs!(composite)),
@@ -152,12 +161,26 @@ impl<'a> Mergeable<'a> for Value<'a> {
             (Self::Expandable(a), Self::Expandable(b)) => Self::Expandable(recurs!(a, b)),
             (Self::Mobius(a), Self::Mobius(b)) => Self::Mobius(recurs!(a, b)),
             (Self::PackageRef(_), Self::PackageRef(_)) => Self::Simple(None),
+            (Self::Channel(a), Self::Channel(b)) => Self::Channel(recurs!(a, b)),
             (Self::Array(a), Self::Array(b)) => Self::Array(recurs!(a, b)),
             (Self::Slice(a), Self::Slice(b)) => Self::Slice(recurs!(a, b)),
             (Self::Map(a), Self::Map(b)) => Self::Map(recurs!(a, b)),
             (Self::Struct(a), Self::Struct(b)) => Self::Struct(recurs!(a, b)),
             // intentionally not handling (Fn, Fn)
             // ---
+            // any ChannelValue must remain a ChannelValue after merging with
+            // anything else (e.g. a `ch <- v` send stmt folds `v`'s overall
+            // backtrace into the channel's pending label). this is the best
+            // (sound) over-approximation and must come before the catch-alls
+            // below to avoid collapsing the channel into a SimpleValue. we
+            // coerce the non-channel side into a ChannelValue carrying just
+            // its overall backtrace so the standard Mergeable flow applies
+            (Self::Channel(channel), other) | (other, Self::Channel(channel)) => {
+                let other_bt = other.backtrace_at_location(at_location.clone().into_owned());
+                let other_as_channel = ChannelValue::new(other_bt);
+
+                Self::Channel(recurs!(channel, &other_as_channel))
+            }
             (Self::Simple(None), other) | (other, Self::Simple(None)) => other.clone(),
             (Self::Simple(Some(bt)), other) | (other, Self::Simple(Some(bt))) => other
                 .nest_backtrace(
@@ -198,6 +221,7 @@ impl SnapshotAware for Value<'_> {
             (Self::Expandable(a), Self::Expandable(b)) => a.snapshot_aware_eq(b),
             (Self::Mobius(a), Self::Mobius(b)) => a.snapshot_aware_eq(b),
             (Self::PackageRef(a), Self::PackageRef(b)) => a.snapshot_aware_eq(b),
+            (Self::Channel(a), Self::Channel(b)) => a.snapshot_aware_eq(b),
             (Self::Array(a), Self::Array(b)) | (Self::Slice(a), Self::Slice(b)) => {
                 a.snapshot_aware_eq(b)
             }
@@ -213,6 +237,7 @@ impl SnapshotAware for Value<'_> {
                 | Self::Expandable(_)
                 | Self::Mobius(_)
                 | Self::PackageRef(_)
+                | Self::Channel(_)
                 | Self::Array(_)
                 | Self::Slice(_)
                 | Self::Map(_)
