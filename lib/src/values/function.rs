@@ -175,10 +175,10 @@ impl<'a> FunctionValue<'a> {
         value
     }
 
-    fn new_unknown(backtrace: Option<LabelBacktrace<'a>>) -> Self {
+    pub fn new_unknown(backtrace: Option<LabelBacktrace<'a>>, has_receiver: bool) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, false, backtrace, Label::Bottom, None)
+        Self::new(r#ref, None, has_receiver, backtrace, Label::Bottom, None)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -524,7 +524,7 @@ impl<'a> Upgrade<'a> for FunctionValue<'a> {
         backtrace: Option<LabelBacktrace<'a>>,
         _location: Cow<Pinned<'a, Location>>,
     ) -> Self {
-        Self::new_unknown(backtrace)
+        Self::new_unknown(backtrace, false)
     }
 }
 

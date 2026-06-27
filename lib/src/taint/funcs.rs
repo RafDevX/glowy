@@ -440,7 +440,9 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     let mut value = exprs::visit_single_expr(ctx, &node.func);
 
-    let Some(func) = value.as_function() else {
+    // can't call this `func` right away because later we need to manually call
+    // `drop` on specifically this reference
+    let Some(value_func) = value.as_function() else {
         ctx.report_error(AnalysisErrorKind::IllegalCallExpression {
             location: node.location.clone(),
         });
@@ -448,12 +450,31 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         return vec![];
     };
 
-    if func.is_type_constructor() {
+    if value_func.is_type_constructor() {
         // treating this as a blackbox would be too punishing: we want to
         // preserve the existing value shape, so we use special handling
 
         return vec![visit_type_conversion(ctx, node)];
     }
+
+    // for direct method-form calls (`x.M(...)` where `x` isn't a package
+    // qualifier), `visit_selection` infers a method using a name-only heuristic
+    // across the current package's method set. if exactly one in-package method
+    // by that name has an arity incompatible with this call site, the pickup is
+    // conclusively wrong (the receiver must actually be of an unrelated type
+    // whose real `M` we never saw, because the input compiles). enforcing the
+    // inferred method's signature would cascade into spurious errors, so we
+    // use an unknown FunctionValue instead of the known-incorrect `func_value`.
+    // sound: blackbox folds all input taint, Möbius accepts any cardinality
+    let blackbox_replacement = is_incompatible_arity_method(ctx, node).then(|| {
+        FunctionValue::new_unknown(
+            value_func.backtrace().cloned(),
+            true, // we still know this, just don't know the type
+        )
+    });
+    // ^^ we keep only `value_func`'s overall access backtrace
+
+    let func: &FunctionValue<'a> = blackbox_replacement.as_ref().unwrap_or(&value_func);
 
     // note that f(a, b int) actually has 1 parameter with 2 identifiers, so
     // we can't compare args.len() with params.len() directly; we need to
@@ -494,25 +515,9 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         None
     };
 
-    // for direct method-form calls (`x.M(...)` where `x` isn't a package
-    // qualifier), `visit_selection` infers a method using a name-only heuristic
-    // across the current package's method set. if exactly one in-package method
-    // by that name has an arity incompatible with this call site, the pickup is
-    // conclusively wrong (the receiver must actually be of an unrelated type
-    // whose real `M` we never saw, because the input compiles). enforcing the
-    // inferred method's signature would cascade into spurious errors, so we
-    // degrade silently to blackbox dispatch with a single Möbius outcome --
-    // sound: blackbox folds all input taint, Möbius accepts any cardinality
-    let arity_veto = has_method_arity_veto(ctx, node);
-    // ^^^ if true, this means that we should skip the cardinality check
-
     // can only check for correct cardinality if we have a signature,
     // otherwise we just assume everything is fine (would be wrong to error)
-    // (when `arity_veto` is true, we know the inferred method is the wrong one;
-    // don't report an error, the call will eventually be routed through
-    // `dispatch_blackbox` further down)
-    if !arity_veto
-        && let Some(ids) = &ids
+    if let Some(ids) = &ids
         && node.args.len() != ids.len()
     {
         let variadic = ids.last().is_some_and(|(_, variadic, _)| *variadic);
@@ -643,21 +648,6 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         )
     };
 
-    if arity_veto {
-        // we know the heuristic-inferred method is wrong, so we need to ignore
-        // the inferred method's signature entirely
-
-        return dispatch_blackbox(
-            ctx,
-            &func,
-            &with_backtraces_ref,
-            blanket_bt.as_ref(),
-            &call_location,
-            &node.location,
-            None,
-        );
-    }
-
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must
         // treat it as a blackbox and assume the label of all its outputs is the
@@ -665,7 +655,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
         return dispatch_blackbox(
             ctx,
-            &func,
+            func,
             &with_backtraces_ref,
             blanket_bt.as_ref(),
             &call_location,
@@ -701,23 +691,23 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // `visit_selection`, and *that* backtrace gets nested into the result
         // below -- so the receiver's labels still reach the call result.
         //
-        // nevertheless, we MUST still realize SyntheticSlot::Receiver
-        // (with no concrete bt) to cancel the synthetic; otherwise it would
+        // nevertheless, we MUST still realize SyntheticSlot::Receiver (with no
+        // (concrete backtrace) to cancel the synthetic; otherwise it would
         // escape this function and eventually reach `main` (breaking invariant)
         Some(None)
     } else {
         None
     };
 
-    captures::apply_capture_mutations(ctx, &func, &with_backtraces_ref, &node.location);
+    captures::apply_capture_mutations(ctx, func, &with_backtraces_ref, &node.location);
 
-    handle_deferred_checks(ctx, &func, &ids, &with_backtraces_ref, &node.location);
+    handle_deferred_checks(ctx, func, &ids, &with_backtraces_ref, &node.location);
 
     let receiver_ref = receiver.as_ref().map(Option::as_ref);
 
     let mut result = calculate_call_result(
         ctx,
-        &func,
+        func,
         receiver_ref,
         &ids,
         outcome,
@@ -745,8 +735,11 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
 
     // re-borrow as mutable
-    drop(func);
-    if let Some(mut func_mut) = value.as_function_mut() {
+    drop(value_func);
+
+    if blackbox_replacement.is_none()
+        && let Some(mut func_mut) = value.as_function_mut()
+    {
         func_mut.record_call();
     }
 
@@ -874,7 +867,8 @@ fn dispatch_blackbox<'a>(
     result
 }
 
-fn has_method_arity_veto<'a>(ctx: &AnalysisContext<'a>, node: &CallNode<'a>) -> bool {
+// whether a heuristically-inferred method is incompatible with expected arity
+fn is_incompatible_arity_method<'a>(ctx: &AnalysisContext<'a>, node: &CallNode<'a>) -> bool {
     let ExprNode::Selection(selection) = &*node.func else {
         return false;
     };
@@ -905,16 +899,13 @@ fn has_method_arity_veto<'a>(ctx: &AnalysisContext<'a>, node: &CallNode<'a>) -> 
     let args_len = node.args.len();
 
     if args_len == arity {
-        // no point in a veto if the check will pass
+        // plausible
         return false;
     }
 
-    // a variadic last parameter absorbs trailing args, so any
-    // `args_len > arity` is a legitimate variadic call. note this matches the
-    // existing arity check's variadic handling (uses `>` not `>=`)
-    let variadic = signature.params.last().is_some_and(|p| p.variadic);
+    let variadic = signature.params.last().is_some_and(|param| param.variadic);
     if variadic && args_len > arity {
-        // no point in a veto if the check will pass
+        // plausible
         return false;
     }
 
