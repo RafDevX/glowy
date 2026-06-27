@@ -23,7 +23,9 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
         LiteralNode::Int { location, .. }
         | LiteralNode::Float { location, .. }
         | LiteralNode::Rune { location, .. }
-        | LiteralNode::String { location, .. } => ValueRef::new_bottom(ctx.pin(location.clone())),
+        | LiteralNode::String { location, .. } => {
+            ValueRef::new_bottom(ctx.pin(location.clone()), None)
+        }
         LiteralNode::Function {
             signature,
             body,
@@ -41,7 +43,7 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
                 location.clone(),
             ));
 
-            ValueRef::new(value, location)
+            ValueRef::new(value, location, None)
         }
         LiteralNode::Slice {
             values, location, ..
@@ -57,7 +59,7 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
                 location.clone(),
             ));
 
-            ValueRef::new(value, location)
+            ValueRef::new(value, location, None)
         }
         LiteralNode::Map {
             values, location, ..
@@ -66,7 +68,7 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
 
             let value = Value::Map(visit_map_composite_literal(ctx, values, location.clone()));
 
-            ValueRef::new(value, location)
+            ValueRef::new(value, location, None)
         }
         LiteralNode::Struct {
             r#type,
@@ -83,7 +85,7 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
                 location.clone(),
             ));
 
-            ValueRef::new(value, location)
+            ValueRef::new(value, location, ctx.types().resolve(ctx.symtab(), r#type))
         }
         LiteralNode::UnknownComposite {
             r#type,
@@ -135,7 +137,7 @@ fn visit_unknown_composite_literal<'a>(
         }
     };
 
-    ValueRef::new(value, location)
+    ValueRef::new(value, location, ctx.types().resolve(ctx.symtab(), r#type))
 }
 
 fn try_resolve_named_type_underlying<'a>(
@@ -410,7 +412,7 @@ fn visit_array_literal_element<'a>(
 
             if values.is_empty() {
                 // quicker escape to avoid clones et al. if they're unnecessary
-                ValueRef::new_bottom(location.clone())
+                ValueRef::new_bottom(location.clone(), None)
             } else if values.len() == 1 {
                 values.pop().unwrap()
             } else {

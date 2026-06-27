@@ -24,6 +24,7 @@ use crate::{
     Pinned,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
+    types::TypeInfo,
 };
 
 mod channel;
@@ -39,18 +40,31 @@ mod shapes;
 pub struct ValueRef<'a> {
     value: Rc<RefCell<Value<'a>>>,
     location: Pinned<'a, Location>,
+    // declared static type, derived directly from explicit syntax.
+    // this is None if unknown, which is the most common case, as we only do
+    // very rudimentary type propagation to help improve (slightly) method
+    // dispatch by receiver type without resorting to too complex type handling
+    declared_type: Option<Rc<TypeInfo<'a>>>,
 }
 
 impl<'a> ValueRef<'a> {
-    pub fn new(value: Value<'a>, location: Pinned<'a, Location>) -> Self {
+    pub fn new(
+        value: Value<'a>,
+        location: Pinned<'a, Location>,
+        declared_type: Option<Rc<TypeInfo<'a>>>,
+    ) -> Self {
         Self {
             value: Rc::new(RefCell::new(value)),
             location,
+            declared_type,
         }
     }
 
-    pub fn new_bottom(location: Pinned<'a, Location>) -> Self {
-        Self::new(Value::Simple(None), location)
+    pub fn new_bottom(
+        location: Pinned<'a, Location>,
+        declared_type: Option<Rc<TypeInfo<'a>>>,
+    ) -> Self {
+        Self::new(Value::Simple(None), location, declared_type)
     }
 
     pub fn from_backtrace_or_bottom_at<F>(
@@ -63,8 +77,24 @@ impl<'a> ValueRef<'a> {
         if let Some(backtrace) = backtrace {
             Self::from(backtrace)
         } else {
-            Self::new_bottom(bottom_at())
+            Self::new_bottom(bottom_at(), None)
         }
+    }
+
+    pub fn with_location(&self, location: Pinned<'a, Location>) -> Self {
+        Self {
+            value: Rc::clone(&self.value),
+            location,
+            declared_type: self.declared_type.clone(), // cheap
+        }
+    }
+
+    // takes ownership to avoid cloning location
+    // (otherwise, use Self::set_declared_type)
+    pub fn into_with_declared_type(mut self, declared_type: Option<Rc<TypeInfo<'a>>>) -> Self {
+        self.declared_type = declared_type;
+
+        self
     }
 
     /// Copy by value or by reference according to Go aliasing rules.
@@ -77,6 +107,7 @@ impl<'a> ValueRef<'a> {
             Self {
                 value: Rc::new(RefCell::new(borrowed.clone())),
                 location: self.location.clone(),
+                declared_type: self.declared_type.clone(), // cheap
             }
         }
     }
@@ -88,24 +119,26 @@ impl<'a> ValueRef<'a> {
         Self {
             value: Rc::new(RefCell::new(borrowed.clone())),
             location: self.location.clone(),
+            declared_type: self.declared_type.clone(), // cheap
         }
-    }
-
-    pub fn with_location(&self, location: Pinned<'a, Location>) -> Self {
-        Self {
-            value: Rc::clone(&self.value),
-            location,
-        }
-    }
-
-    pub fn location(&self) -> &Pinned<'a, Location> {
-        &self.location
     }
 
     pub fn backtrace(&self) -> Option<LabelBacktrace<'a>> {
         self.value
             .borrow()
             .backtrace_at_location(self.location.clone())
+    }
+
+    pub fn location(&self) -> &Pinned<'a, Location> {
+        &self.location
+    }
+
+    pub fn declared_type(&self) -> Option<&Rc<TypeInfo<'a>>> {
+        self.declared_type.as_ref()
+    }
+
+    pub fn set_declared_type(&mut self, declared_type: Rc<TypeInfo<'a>>) {
+        self.declared_type = Some(declared_type);
     }
 
     pub fn is_simple(&self) -> bool {
@@ -191,6 +224,7 @@ impl<'a> ValueRef<'a> {
             Self::new(
                 (*mobius.inner().value.borrow()).clone(),
                 self.location().clone(),
+                mobius.inner().declared_type.clone(), // cheap
             )
         } else if let Some(expandable) = self.as_expandable() {
             expandable.primary()
@@ -337,6 +371,7 @@ impl<'a> From<LabelBacktrace<'a>> for ValueRef<'a> {
         Self::new(
             Value::Simple(Some(backtrace.clone())),
             backtrace.location().clone(),
+            None,
         )
     }
 }
@@ -414,6 +449,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         Self {
             value: Rc::new(RefCell::new(realized)),
             location: self.location.clone(),
+            declared_type: self.declared_type.clone(), // cheap
         }
     }
 
@@ -437,6 +473,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         Self {
             value: Rc::new(RefCell::new(nested)),
             location: self.location.clone(),
+            declared_type: self.declared_type.clone(), // cheap
         }
     }
 }
@@ -465,9 +502,19 @@ impl<'a> Mergeable<'a> for ValueRef<'a> {
 
         let merged = b1.merge_with(&b2, with_kind, at_location);
 
+        let declared_type = if let Some(t1) = self.declared_type()
+            && let Some(t2) = other.declared_type()
+            && Rc::ptr_eq(t1, t2)
+        {
+            Some(Rc::clone(t1))
+        } else {
+            None
+        };
+
         Self {
             value: Rc::new(RefCell::new(merged)),
             location: self.location.clone(),
+            declared_type,
         }
     }
 }

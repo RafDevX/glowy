@@ -226,6 +226,7 @@ fn visit_for_range<'a>(
                 true,
                 header_location,
                 None,
+                None,
             );
         } else if let ForRangeNode::Assignment { lhs, .. } = range {
             explicit::visit_raw_assignment(

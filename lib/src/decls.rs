@@ -102,9 +102,17 @@ fn visit_binding_decl_spec<'a>(
     node: &BindingDeclSpecNode<'a>,
     mutable: bool,
 ) {
+    let declared_type = node
+        .r#type
+        .as_ref()
+        .and_then(|r#type| ctx.types().resolve(ctx.symtab(), r#type));
+
     for &id in &node.ids {
         let name = ctx.pin(id);
-        let value = ValueRef::new_bottom(name.pinned_location());
+        let value = ValueRef::new_bottom(
+            name.pinned_location(),
+            declared_type.clone(), // cheap
+        );
 
         let symbol = Symbol::new_ref(name, mutable, value);
 
@@ -138,7 +146,7 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
         target_type,
     );
 
-    let value = ValueRef::new(Value::Function(Box::new(func_value)), location);
+    let value = ValueRef::new(Value::Function(Box::new(func_value)), location, None);
 
     let symbol = Symbol::new_ref(name, false, value);
 
@@ -184,7 +192,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
     }
 
     let name = ctx.pin(node.name);
-    let value = ValueRef::new_bottom(name.pinned_location());
+    let value = ValueRef::new_bottom(name.pinned_location(), None);
 
     let symbol = Symbol::new_ref(name, false, value);
 

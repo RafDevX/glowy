@@ -51,7 +51,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 location.clone(),
             );
 
-            ValueRef::new(Value::Slice(composite), location)
+            ValueRef::new(Value::Slice(composite), location, None)
         }
         TypeNode::Map { .. } => {
             if let Some(m) = &node.m {
@@ -75,6 +75,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
             ValueRef::new(
                 Value::Map(CompositeValue::empty(None)),
                 ctx.pin(node.location.clone()),
+                None,
             )
         }
         TypeNode::Channel { .. } => {
@@ -101,7 +102,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 .as_ref()
                 .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
 
-            ValueRef::new(Value::Channel(ChannelValue::new(initial)), location)
+            ValueRef::new(Value::Channel(ChannelValue::new(initial)), location, None)
         }
         _ => {
             // we don't know what this is, so there's nothing we can do...
@@ -148,7 +149,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     }
 
     let original = node.args.first().unwrap(); // already checked length
@@ -160,7 +161,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     };
 
     if node.variadic {
@@ -173,7 +174,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
                 location: node.location.clone(),
             });
 
-            return ValueRef::new_bottom(location);
+            return ValueRef::new_bottom(location, None);
         };
 
         let value = exprs::visit_single_expr(ctx, other);
@@ -210,7 +211,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     };
 
     let mut dst = exprs::visit_single_expr(ctx, dst_expr);
@@ -228,7 +229,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     };
 
     slice.clear(); // we don't want const info anymore
@@ -287,7 +288,7 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     let new = if current.is_map() {
         // overwrite to bottom
-        ValueRef::new_bottom(location)
+        ValueRef::new_bottom(location, None)
     } else {
         // ideally we'd do `} else if let Some(mut slice) = ... {` with then
         // another `} else { ctx.report_error(...); return; };` so it would be
@@ -356,7 +357,7 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     arg.assign(
         ctx,
         LabelBacktraceKind::ChannelClose,
-        ValueRef::new_bottom(location),
+        ValueRef::new_bottom(location, None),
         false, // don't want to overwrite
         None,
         &Label::Bottom,
@@ -393,7 +394,7 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     composite.set_at_key(
         SimpleConstValue::try_resolve_from_expr(key),
-        ValueRef::new_bottom(location.clone()),
+        ValueRef::new_bottom(location.clone(), None),
         location,
     );
 

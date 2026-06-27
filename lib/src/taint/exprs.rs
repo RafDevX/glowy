@@ -75,7 +75,7 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
         return value.extract_collapsed_single();
     }
 
-    ValueRef::new_bottom(ctx.pin(node.location().into_owned()))
+    ValueRef::new_bottom(ctx.pin(node.location().into_owned()), None)
 }
 
 pub fn visit_multi_exprs<'a>(
@@ -122,12 +122,16 @@ pub fn visit_operand_name<'a>(
         // not prevent an unknown symbol error from being reported even when
         // a qualifier is valid
 
-        return ValueRef::new(Value::PackageRef(PackageRefValue::new(name)), location);
+        return ValueRef::new(
+            Value::PackageRef(PackageRefValue::new(name)),
+            location,
+            None,
+        );
     }
 
     let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
         // error already reported
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     };
 
     symbol
@@ -197,5 +201,5 @@ fn visit_type_assertion<'a>(
 
     let expandable = ExpandableValue::new(value, vec![secondary]);
 
-    ValueRef::new(Value::Expandable(expandable), location)
+    ValueRef::new(Value::Expandable(expandable), location, None)
 }

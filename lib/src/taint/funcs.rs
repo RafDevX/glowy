@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter, path::Path};
+use std::{borrow::Cow, iter, path::Path, rc::Rc};
 
 use parser::{
     Annotation, Location, Span,
@@ -18,6 +18,7 @@ use crate::{
         BlanketDirective, BlanketDirectiveKind, SinkDescriptor, SinkKind, annotations, enforcement,
         exprs,
     },
+    types::TypeInfo,
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
@@ -27,6 +28,10 @@ use crate::{
 pub mod builtins;
 mod captures;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Very tight coupling means it would become more confusing if split up"
+)]
 fn visit_function_def<'a>(
     ctx: &mut AnalysisContext<'a>,
     r#ref: &FunctionRef<'a>,
@@ -57,7 +62,11 @@ fn visit_function_def<'a>(
         &value_location,
     );
 
-    let mut value = ValueRef::new(Value::Function(Box::new(func_val)), value_location.clone());
+    let mut value = ValueRef::new(
+        Value::Function(Box::new(func_val)),
+        value_location.clone(),
+        None,
+    );
 
     if let Some(name) = decl_symbol {
         let symbol = Symbol::new_ref(name, false, value.clone());
@@ -73,7 +82,7 @@ fn visit_function_def<'a>(
     ctx.symtab_mut().select_next_child_scope(); // push
 
     macro_rules! declare_param {
-        ($id:expr, $slot:expr) => {
+        ($id:expr, $slot:expr, $declared_type:expr) => {
             let synthetic = LabelTag::Synthetic {
                 func: r#ref.clone(),
                 slot: $slot,
@@ -88,11 +97,12 @@ fn visit_function_def<'a>(
             )
             .unwrap(); // safe because we know label is not Bottom
 
-            ctx.declare_new_symbol(Symbol::new_ref(
-                ctx.pin($id),
-                true,
-                ValueRef::from(param_backtrace),
-            ));
+            let mut param_value = ValueRef::from(param_backtrace);
+            if let Some(r#type) = $declared_type {
+                param_value.set_declared_type(r#type);
+            }
+
+            ctx.declare_new_symbol(Symbol::new_ref(ctx.pin($id), true, param_value));
         };
     }
 
@@ -100,16 +110,27 @@ fn visit_function_def<'a>(
         && let [id] = receiver.ids.as_slice()
         && id.content() != "_"
     {
-        declare_param!(*id, SyntheticSlot::Receiver);
+        let receiver_type = ctx.types().resolve(ctx.symtab(), &receiver.r#type);
+
+        declare_param!(*id, SyntheticSlot::Receiver, receiver_type);
     }
 
     let mut param_index = 0;
 
     for param in &signature.params {
+        let param_type = if param.variadic {
+            // variadic `...T` params bind a `[]T` slice when used as a single
+            // param, and that slice has no named representation in the registry
+
+            None
+        } else {
+            ctx.types().resolve(ctx.symtab(), &param.r#type)
+        };
+
         for &id in &param.ids {
             // only ignore if blank identifier
             if id.content() != "_" {
-                declare_param!(id, SyntheticSlot::Param(param_index));
+                declare_param!(id, SyntheticSlot::Param(param_index), param_type.clone());
             }
 
             param_index += 1;
@@ -229,7 +250,7 @@ fn build_function_value<'a>(
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
     // the vec! macro would clone the ValueRef (and so they'd all point to the
     // same value, which is not what we want; they should be independent)
-    let bottom_outcome = iter::repeat_with(|| ValueRef::new_bottom(value_location.clone()))
+    let bottom_outcome = iter::repeat_with(|| ValueRef::new_bottom(value_location.clone(), None))
         .take(signature.result.len())
         .collect();
 
@@ -454,7 +475,11 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // treating this as a blackbox would be too punishing: we want to
         // preserve the existing value shape, so we use special handling
 
-        return vec![visit_type_conversion(ctx, node)];
+        return vec![visit_type_conversion(
+            ctx,
+            node,
+            value_func.target_type().cloned(),
+        )];
     }
 
     // for direct method-form calls (`x.M(...)` where `x` isn't a package
@@ -653,7 +678,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         // treat it as a blackbox and assume the label of all its outputs is the
         // union of the label of all its inputs; we can't do anything fancy
 
-        return dispatch_blackbox(
+        return visit_blackbox_call(
             ctx,
             func,
             &with_backtraces_ref,
@@ -732,6 +757,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         *realized = realized.with_location(call_location.clone());
     }
 
+    // the result's static type is necessarily what the signature declares, not
+    // what was passed to `return`, per Go semantics, so we should override
+    tag_results_with_declared_types(ctx, func.signature(), &mut result);
+
     nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
 
     // re-borrow as mutable
@@ -749,7 +778,11 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // `f("hello", 1, 2, 3)`
 }
 
-fn visit_type_conversion<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+fn visit_type_conversion<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    target_type: Option<Rc<TypeInfo<'a>>>,
+) -> ValueRef<'a> {
     let location = ctx.pin(node.location.clone());
 
     let [operand] = node.args.as_slice() else {
@@ -759,12 +792,14 @@ fn visit_type_conversion<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>)
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, target_type);
     };
 
     // pin the result to the call site so error messages and downstream
     // backtraces refer to `T(x)`, not just to `x`'s declaration
-    exprs::visit_single_expr(ctx, operand).with_location(location)
+    exprs::visit_single_expr(ctx, operand)
+        .with_location(location)
+        .into_with_declared_type(target_type)
 }
 
 fn resolve_blanket_directives<'a, 'b>(
@@ -812,7 +847,7 @@ fn nest_blanket_source<'a>(
     }
 }
 
-fn dispatch_blackbox<'a>(
+fn visit_blackbox_call<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
@@ -859,12 +894,39 @@ fn dispatch_blackbox<'a>(
         vec![ValueRef::new(
             Value::Mobius(MobiusValue::new(inner)),
             call_location.clone(),
+            None,
         )]
     };
+
+    // even if we don't have an implementation, we might have a signature
+    tag_results_with_declared_types(ctx, signature_hint, &mut result);
 
     nest_blanket_source(&mut result, blanket_bt, call_location);
 
     result
+}
+
+fn tag_results_with_declared_types<'a>(
+    ctx: &AnalysisContext<'a>,
+    signature: Option<&FunctionSignatureNode<'a>>,
+    results: &mut [ValueRef<'a>],
+) {
+    let Some(signature) = signature else {
+        // nothing we can do here
+        return;
+    };
+
+    let type_iter: Box<dyn Iterator<Item = &TypeNode<'a>>> = match &signature.result {
+        FunctionResultNode::None => Box::new(iter::empty()),
+        FunctionResultNode::Single(r#type) => Box::new(iter::once(r#type)),
+        FunctionResultNode::Params(params) => Box::new(params.iter().map(|param| &param.r#type)),
+    };
+
+    for (result, type_node) in results.iter_mut().zip(type_iter) {
+        if let Some(r#type) = ctx.types().resolve(ctx.symtab(), type_node) {
+            result.set_declared_type(r#type);
+        }
+    }
 }
 
 // whether a heuristically-inferred method is incompatible with expected arity

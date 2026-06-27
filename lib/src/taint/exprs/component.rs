@@ -67,7 +67,7 @@ pub fn visit_selection<'a>(
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     };
 
     r#struct.get_const(&selector.to_owned(), location)
@@ -83,7 +83,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
             location: node.location.clone(),
         });
 
-        return ValueRef::new_bottom(location);
+        return ValueRef::new_bottom(location, None);
     };
 
     let index = SimpleConstValue::try_resolve_from_expr(&node.index);
@@ -98,7 +98,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
 
         let expandable = ExpandableValue::new(result, vec![presence]);
 
-        ValueRef::new(Value::Expandable(expandable), location)
+        ValueRef::new(Value::Expandable(expandable), location, None)
     } else {
         result
     }

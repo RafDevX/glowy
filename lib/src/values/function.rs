@@ -472,7 +472,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             has_receiver: self.has_receiver,
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
-            target_type: self.target_type.as_ref().map(Rc::clone),
+            target_type: self.target_type.clone(), // cheap
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -505,7 +505,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             has_receiver: self.has_receiver,
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
-            target_type: self.target_type.as_ref().map(Rc::clone),
+            target_type: self.target_type.clone(), // cheap
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),

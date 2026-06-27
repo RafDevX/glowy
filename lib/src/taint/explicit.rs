@@ -15,6 +15,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::Symbol,
     taint::{SinkDescriptor, SinkKind, enforcement, mutation::LeftValue},
+    types::TypeInfo,
     values::ValueRef,
 };
 
@@ -53,6 +54,11 @@ fn visit_binding_decl_spec<'a>(
     annotation: Option<&Annotation<'a>>,
     prev_with_exprs: Option<&BindingDeclSpecNode<'a>>,
 ) {
+    let declared_type = node
+        .r#type
+        .as_ref()
+        .and_then(|r#type| ctx.types().resolve(ctx.symtab(), r#type));
+
     if node.exprs.is_empty() && node.r#type.is_some() && !short {
         // no initialization expression; zero-value is used;
         // for our purposes, we just need to remember the decl exists
@@ -60,7 +66,10 @@ fn visit_binding_decl_spec<'a>(
 
         for name in &node.ids {
             let pinned = ctx.pin(*name);
-            let value = ValueRef::new_bottom(pinned.pinned_location());
+            let value = ValueRef::new_bottom(
+                pinned.pinned_location(),
+                declared_type.clone(), // cheap
+            );
 
             let symbol = Symbol::new_ref(pinned, mutable, value);
 
@@ -97,6 +106,15 @@ fn visit_binding_decl_spec<'a>(
         rhs_values = expanded;
     }
 
+    // override the rhs values' declared_type with the spec's, if any: a typed
+    // declaration necessarily produces a value of the specified type regardless
+    // of the expr's own static type, per the Go spec
+    if let Some(r#type) = &declared_type {
+        for rhs in &mut rhs_values {
+            rhs.set_declared_type(Rc::clone(r#type));
+        }
+    }
+
     visit_raw_binding_decl_spec(
         ctx,
         &node.ids,
@@ -105,10 +123,16 @@ fn visit_binding_decl_spec<'a>(
         short,
         location,
         annotation,
+        declared_type.as_ref(),
     );
 }
 
 // for declaration-like cases more generic than an actual declaration node
+#[expect(clippy::too_many_arguments, reason = "No obvious arg aggregation")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Very tight coupling means it would become more confusing if split up"
+)]
 pub fn visit_raw_binding_decl_spec<'a>(
     ctx: &mut AnalysisContext<'a>,
     ids: &[Span<'a>],
@@ -117,6 +141,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
     short: bool, // allows redeclaration in some circumstances
     location: &Location,
     annotation: Option<&Annotation<'a>>,
+    declared_type: Option<&Rc<TypeInfo<'a>>>,
 ) {
     if ids.len() != rhs_values.len() {
         ctx.report_error(AnalysisErrorKind::UnevenBindingDeclSpec {
@@ -189,10 +214,15 @@ pub fn visit_raw_binding_decl_spec<'a>(
             continue;
         }
 
+        let initial_value = ValueRef::new_bottom(
+            pinned.clone(),
+            declared_type.cloned(), // cheap
+        );
+
         let symbol = Symbol::new_ref(
             ctx.pin(name),
             true, // we initially always set the symbol as mutable
-            ValueRef::new_bottom(pinned.clone()),
+            initial_value,
         );
         let symbol2 = Rc::clone(&symbol); // for later use if needed
 

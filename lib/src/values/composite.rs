@@ -60,7 +60,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn get_const(&self, key: &K, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(key).cloned() {
             Some(value) => value,
-            None => ValueRef::new_bottom(at_location.clone()),
+            None => ValueRef::new_bottom(at_location.clone(), None),
         };
 
         value

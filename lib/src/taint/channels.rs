@@ -34,7 +34,7 @@ pub fn visit_receive<'a>(
             location: location.clone(),
         });
 
-        return ValueRef::new_bottom(pinned);
+        return ValueRef::new_bottom(pinned, None);
     };
 
     channel.receive(pinned)

@@ -662,7 +662,10 @@ impl<'a> Scope<'a> {
                 scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
             };
             ($id:expr) => {
-                predeclared_constant!($id, ValueRef::new_bottom(predeclared_location.clone()))
+                predeclared_constant!(
+                    $id,
+                    ValueRef::new_bottom(predeclared_location.clone(), None)
+                )
             };
         }
 
@@ -678,6 +681,7 @@ impl<'a> Scope<'a> {
                             $n_returned
                         ))),
                         predeclared_location.clone(),
+                        None,
                     )
                 )
             };
@@ -704,6 +708,7 @@ impl<'a> Scope<'a> {
                             None, // and no registered TypeInfo (not user-defined)
                         ))),
                         predeclared_location.clone(),
+                        None,
                     )
                 )
             };
