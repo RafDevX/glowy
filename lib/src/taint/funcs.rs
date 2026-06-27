@@ -494,9 +494,25 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         None
     };
 
+    // for direct method-form calls (`x.M(...)` where `x` isn't a package
+    // qualifier), `visit_selection` infers a method using a name-only heuristic
+    // across the current package's method set. if exactly one in-package method
+    // by that name has an arity incompatible with this call site, the pickup is
+    // conclusively wrong (the receiver must actually be of an unrelated type
+    // whose real `M` we never saw, because the input compiles). enforcing the
+    // inferred method's signature would cascade into spurious errors, so we
+    // degrade silently to blackbox dispatch with a single Möbius outcome --
+    // sound: blackbox folds all input taint, Möbius accepts any cardinality
+    let arity_veto = has_method_arity_veto(ctx, node);
+    // ^^^ if true, this means that we should skip the cardinality check
+
     // can only check for correct cardinality if we have a signature,
     // otherwise we just assume everything is fine (would be wrong to error)
-    if let Some(ids) = &ids
+    // (when `arity_veto` is true, we know the inferred method is the wrong one;
+    // don't report an error, the call will eventually be routed through
+    // `dispatch_blackbox` further down)
+    if !arity_veto
+        && let Some(ids) = &ids
         && node.args.len() != ids.len()
     {
         let variadic = ids.last().is_some_and(|(_, variadic, _)| *variadic);
@@ -627,61 +643,35 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         )
     };
 
+    if arity_veto {
+        // we know the heuristic-inferred method is wrong, so we need to ignore
+        // the inferred method's signature entirely
+
+        return dispatch_blackbox(
+            ctx,
+            &func,
+            &with_backtraces_ref,
+            blanket_bt.as_ref(),
+            &call_location,
+            &node.location,
+            None,
+        );
+    }
+
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must
         // treat it as a blackbox and assume the label of all its outputs is the
         // union of the label of all its inputs; we can't do anything fancy
 
-        captures::apply_capture_mutations(ctx, &func, &with_backtraces_ref, &node.location);
-
-        // note that this case is still possible even if func is a closure,
-        // since e.g. closures can be assigned to previously declared (but not
-        // initialized) variables in an effort to make them self-recursive, as
-        // the whole point of closure capturing is that outer symbols are only
-        // really "evaluated" when the closure is invoked
-
-        let bt = LabelBacktrace::fold(
-            with_backtraces
-                .iter()
-                .flat_map(|(_, bt)| bt)
-                .chain(func.backtrace()),
-            LabelBacktraceKind::BlackboxCall,
-            None,
-            call_location.clone(),
+        return dispatch_blackbox(
+            ctx,
+            &func,
+            &with_backtraces_ref,
+            blanket_bt.as_ref(),
+            &call_location,
+            &node.location,
+            func.signature(),
         );
-
-        if let Some(signature) = func.signature() {
-            // we have a signature, so we know exactly how many values it
-            // returns and so can use that information
-
-            let mut result: Vec<_> = iter::repeat_with(|| {
-                ValueRef::from_backtrace_or_bottom_at(
-                    bt.clone(), // clone makes borrow checker happy
-                    || call_location.clone(),
-                )
-            })
-            .take(signature.result.len())
-            .collect();
-
-            nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
-
-            return result;
-        }
-
-        // we have no way of knowing how many values this function returns, so
-        // the best we can do is return a Möbius value that can be expanded to
-        // however many values the invoker expects
-
-        let inner = ValueRef::from_backtrace_or_bottom_at(bt, || call_location.clone());
-
-        let mut result = vec![ValueRef::new(
-            Value::Mobius(MobiusValue::new(inner)),
-            call_location.clone(),
-        )];
-
-        nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
-
-        return result;
     };
 
     // by this point, we know `func.outcome()` is `Some`, which means we have
@@ -827,6 +817,108 @@ fn nest_blanket_source<'a>(
             [bt.clone()],
         );
     }
+}
+
+fn dispatch_blackbox<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
+    blanket_bt: Option<&LabelBacktrace<'a>>,
+    call_location: &Pinned<'a, Location>,
+    node_location: &Location,
+    signature_hint: Option<&FunctionSignatureNode<'a>>,
+) -> Vec<ValueRef<'a>> {
+    // note that this case is still possible even if func is a closure, since
+    // e.g. closures can be assigned to previously declared (but not
+    // initialized) variables in an effort to make them self-recursive, as the
+    // whole point of closure capturing is that outer symbols are only really
+    // "evaluated" when the closure is invoked
+    captures::apply_capture_mutations(ctx, func, args, node_location);
+
+    let bt = LabelBacktrace::fold(
+        args.iter()
+            .filter_map(|(_, bt)| *bt)
+            .chain(func.backtrace()),
+        LabelBacktraceKind::BlackboxCall,
+        None,
+        call_location.clone(),
+    );
+
+    let mut result = if let Some(signature) = signature_hint {
+        // we have a signature, so we know exactly how many values it returns
+        // and so can use that known cardinality here
+
+        iter::repeat_with(|| {
+            ValueRef::from_backtrace_or_bottom_at(
+                bt.clone(), // clone makes borrow checker happy
+                || call_location.clone(),
+            )
+        })
+        .take(signature.result.len())
+        .collect()
+    } else {
+        // we have no way to know how many values this call returns, so the best
+        // we can do is return a Möbius value that can be expanded to however
+        // many values the invoker expects
+
+        let inner = ValueRef::from_backtrace_or_bottom_at(bt, || call_location.clone());
+
+        vec![ValueRef::new(
+            Value::Mobius(MobiusValue::new(inner)),
+            call_location.clone(),
+        )]
+    };
+
+    nest_blanket_source(&mut result, blanket_bt, call_location);
+
+    result
+}
+
+fn has_method_arity_veto<'a>(ctx: &AnalysisContext<'a>, node: &CallNode<'a>) -> bool {
+    let ExprNode::Selection(selection) = &*node.func else {
+        return false;
+    };
+
+    // reject package-qualified calls: `pkg.Func(...)` is not a method call
+    if let ExprNode::Name(name) = &*selection.base
+        && ctx.symtab().qualifier_exists(name.content())
+    {
+        return false;
+    }
+
+    let Some(method) = ctx
+        .symtab()
+        .lookup_unique_method_in_current_package(selection.selector.content())
+    else {
+        return false;
+    };
+
+    let func_value = method.borrow().value().get();
+    let Some(func) = func_value.as_function() else {
+        return false;
+    };
+    let Some(signature) = func.signature() else {
+        return false;
+    };
+
+    let arity = signature.count_inputs();
+    let args_len = node.args.len();
+
+    if args_len == arity {
+        // no point in a veto if the check will pass
+        return false;
+    }
+
+    // a variadic last parameter absorbs trailing args, so any
+    // `args_len > arity` is a legitimate variadic call. note this matches the
+    // existing arity check's variadic handling (uses `>` not `>=`)
+    let variadic = signature.params.last().is_some_and(|p| p.variadic);
+    if variadic && args_len > arity {
+        // no point in a veto if the check will pass
+        return false;
+    }
+
+    true
 }
 
 fn handle_deferred_checks<'a>(
