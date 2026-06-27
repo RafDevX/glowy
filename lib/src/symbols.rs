@@ -763,14 +763,6 @@ impl<'a> Scope<'a> {
 
 impl fmt::Debug for Scope<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[derive(Debug)]
-        #[expect(dead_code, reason = "Fake struct not meant to be used")]
-        struct Scope<'d, 'a> {
-            symbols: &'d HashMap<&'a str, SymbolRef<'a>>,
-            // no `parent` to avoid infinite loop
-            children: &'d Vec<ScopeRef<'a>>,
-        }
-
         #[expect(
             clippy::unneeded_field_pattern,
             reason = "Force revisiting this implementation if a field is added"
@@ -781,7 +773,11 @@ impl fmt::Debug for Scope<'_> {
             parent: _,
         } = self;
 
-        fmt::Debug::fmt(&Scope { symbols, children }, f)
+        f.debug_struct("Scope")
+            .field("symbols", symbols)
+            // intentionally omitting `parent` to avoid infinite loop
+            .field("children", children)
+            .finish_non_exhaustive()
     }
 }
 
