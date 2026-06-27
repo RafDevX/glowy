@@ -1,9 +1,11 @@
 //! Used exclusively for Stage 1: `RecordDeclarations`
 //! (visit top-level declarations).
 
+use std::rc::Rc;
+
 use parser::ast::{
-    BindingDeclSpecNode, DeclNode, FunctionDeclNode, SourceFileNode, TypeDeclSpecNode,
-    TypeNameNode, TypeNode,
+    BindingDeclSpecNode, DeclNode, FunctionDeclNode, ImportNode, ImportSpecNode, SourceFileNode,
+    TypeDeclSpecNode, TypeNameNode, TypeNode,
 };
 
 use crate::{
@@ -11,6 +13,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     symbols::Symbol,
+    types::TypeInfo,
     values::{FunctionRef, FunctionValue, Value, ValueRef},
 };
 
@@ -26,7 +29,7 @@ pub fn visit_source_file<'a>(
 
     let package_name = ctx.pin(node.package_clause.id);
 
-    let original_name = ctx.symtab_mut().enter_package(package_name, package_path);
+    let original_name = ctx.enter_package(package_name, package_path);
 
     if original_name.content() != node.package_clause.id.content() {
         // the scope already had a different native identifier, meaning that
@@ -43,12 +46,36 @@ pub fn visit_source_file<'a>(
         return; // skip the file
     }
 
+    for import in &node.imports {
+        visit_import(ctx, import);
+    }
+
     for decl in &node.top_level_decls {
         visit_decl(ctx, decl);
     }
 
     // there should be no package progress to save in the symtab, since
     // we didn't create any sub-package scopes
+}
+
+fn visit_import<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportNode<'a>) {
+    for spec in &node.specs {
+        visit_import_spec(ctx, spec);
+    }
+}
+
+fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a>) {
+    // discard the returned value: any potential errors are reported later in
+    // the analysis process, for now we just want to try registering all imports
+
+    let _ = ctx.register_import_spec(
+        node.identifier
+            .as_ref()
+            .map(parser::Span::content)
+            .map(str::to_owned),
+        node.path.clone(),
+        true,
+    );
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
@@ -103,15 +130,49 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
     let name = ctx.pin(node.id);
     let location = name.pinned_location();
 
+    let target_type = register_type_in_registry(ctx, node);
+
     let func_value = FunctionValue::new_type_constructor(
         FunctionRef::Named(name),
         Some(node.r#type.clone()), // used for composite literals
+        target_type,
     );
+
     let value = ValueRef::new(Value::Function(Box::new(func_value)), location);
 
     let symbol = Symbol::new_ref(name, false, value);
 
     ctx.declare_new_symbol(symbol);
+}
+
+fn register_type_in_registry<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &TypeDeclSpecNode<'a>,
+) -> Option<Rc<TypeInfo<'a>>> {
+    let package = ctx.symtab().current_package_path()?.clone();
+    let name = node.id.content();
+
+    let (types, symtab) = ctx.types_mut_with_symtab();
+
+    if node.alias {
+        types
+            .declare_alias(symtab, package.clone(), name, &node.r#type)
+            .or_else(|| {
+                // target type chain is unresolvable for now, so just queue it
+                // for later retry
+
+                types.queue_pending_alias(symtab, package, name, node.r#type.clone());
+
+                None
+            })
+    } else {
+        let info = types.declare(symtab, package, name, &node.r#type);
+
+        // just in case this is a struct with any unresolved field types
+        types.queue_pending_field_resolutions_for(symtab, &info);
+
+        Some(info)
+    }
 }
 
 fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
@@ -126,6 +187,34 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
     let value = ValueRef::new_bottom(name.pinned_location());
 
     let symbol = Symbol::new_ref(name, false, value);
+
+    // if this is a method (has a receiver), also register it on the receiver's
+    // TypeInfo so typed dispatch can later look it up by name.
+    // if the receiver type isn't yet registered (sibling file or import order),
+    // queue for the deferred resolution.
+    // we do this before `declare_function_or_method` to avoid cloning the
+    // SymbolRef except when actually necessary
+    if let Some(receiver) = node.receiver.as_ref()
+        && let Some(receiver_type_name) = receiver_base_type_name(&receiver.r#type)
+        && let Some(package) = ctx.symtab().current_package_path().cloned()
+    {
+        if let Some(r#type) = ctx.types().lookup(&package, receiver_type_name) {
+            // receiver type was successfully resolved, so we can register the
+            // method directly
+
+            r#type.register_method(node.name.content(), Rc::clone(&symbol));
+        } else {
+            // receiver type chain is unresolvable for now, so just queue it for
+            // later retry
+
+            ctx.types_mut().queue_pending_method(
+                package,
+                receiver_type_name,
+                node.name.content(),
+                Rc::clone(&symbol),
+            );
+        }
+    }
 
     ctx.declare_function_or_method(node.receiver.as_ref(), symbol);
 }

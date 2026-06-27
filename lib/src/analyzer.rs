@@ -844,9 +844,13 @@ impl Analyzer {
         //     and record what symbols exist, since they can be referenced from
         //     anywhere in any order (even textually before their definition).
         //     This is also used to scaffold sub-module hierarchies and package
-        //     scopes.
+        //     scopes, as well as register top-level named types.
 
         pass!(decls::visit_source_file, false);
+
+        // retry resolving type registry entries that were enqueued during the
+        // per-file decl walk above because their target was not yet known
+        context.types_mut().run_deferred_resolutions();
 
         if self.verbose {
             println!("{verbose_prefix}Finished Stage 1");

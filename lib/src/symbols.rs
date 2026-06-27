@@ -121,6 +121,10 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
+    pub fn current_package_path(&self) -> Option<&FullPackagePath> {
+        self.current_package_path.as_ref()
+    }
+
     /// This function should be called upon starting analysis of each file.
     pub fn enter_package(
         &mut self,
@@ -430,6 +434,21 @@ impl<'a> SymbolTable<'a> {
         self.current_file_named_imports.get(qualifier)
     }
 
+    pub fn current_file_named_imports(&self) -> &HashMap<String, FullPackagePath> {
+        &self.current_file_named_imports
+    }
+
+    pub fn current_file_wildcard_imports(&self) -> &[FullPackagePath] {
+        &self.current_file_wildcard_imports
+    }
+
+    pub fn current_file_imports_record(&self) -> FileImportsRecord {
+        FileImportsRecord {
+            named: self.current_file_named_imports.clone(),
+            wildcard: self.current_file_wildcard_imports.clone(),
+        }
+    }
+
     pub fn snapshot(&self) -> SymbolTableSnapshot<'a> {
         let mut items = vec![];
 
@@ -476,6 +495,27 @@ pub enum QualifiedSymbolResolutionResult<'a> {
     UnknownSymbol,
     /// Specified symbol was successfully found in the referenced package.
     Success(SymbolRef<'a>),
+}
+
+// represents a snapshot of what is normally stored in the symtab, for future
+// reference when it is necessary to know what values the symtab held at a
+// concrete, specific moment (e.g., when some type resolution was deferred)
+//
+// not to be confused with the overall analysis convergence snapshot mechanism!
+#[derive(Debug)]
+pub struct FileImportsRecord {
+    named: HashMap<String, FullPackagePath>,
+    wildcard: Vec<FullPackagePath>,
+}
+
+impl FileImportsRecord {
+    pub fn named(&self) -> &HashMap<String, FullPackagePath> {
+        &self.named
+    }
+
+    pub fn wildcard(&self) -> &[FullPackagePath] {
+        &self.wildcard
+    }
 }
 
 #[derive(Debug)]
@@ -661,6 +701,7 @@ impl<'a> Scope<'a> {
                         Value::Function(Box::new(FunctionValue::new_type_constructor(
                             FunctionRef::BuiltIn($id),
                             None, // predeclared types have no underlying type
+                            None, // and no registered TypeInfo (not user-defined)
                         ))),
                         predeclared_location.clone(),
                     )

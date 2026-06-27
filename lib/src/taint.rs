@@ -120,10 +120,7 @@ pub fn visit_source_file<'a>(
 ) {
     let package_name = ctx.pin(node.package_clause.id);
 
-    let original_name = ctx
-        .symtab_mut()
-        .enter_package(package_name, package_path.clone());
-    // ^ automatically primes symtab for children
+    let original_name = ctx.enter_package(package_name, package_path.clone());
 
     if original_name.content() != node.package_clause.id.content() {
         // error was already reported in Stage 1 -- [`decls::visit_source_file`]
@@ -160,7 +157,7 @@ pub fn visit_source_file<'a>(
 fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a>) {
     let first_stage = ctx.stage().is_first();
 
-    match ctx.symtab_mut().register_import_spec(
+    match ctx.register_import_spec(
         node.identifier
             .as_ref()
             .map(Span::content)

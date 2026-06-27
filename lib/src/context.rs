@@ -3,13 +3,14 @@ use std::{fmt, path::Path};
 use parser::{Location, Span, ast::FunctionParamDeclNode};
 
 use crate::{
-    Pinned, SinkDescriptor,
+    FullPackagePath, Pinned, SinkDescriptor,
     decls::receiver_base_type_name,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
     taint::{BlanketDirective, BlanketDirectives},
+    types::TypeRegistry,
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -18,6 +19,8 @@ pub struct AnalysisContext<'a> {
     stage: AnalysisStage,
     /// Global symbol manager, including all scope logic.
     symbol_table: SymbolTable<'a>,
+    /// Global registry of named types.
+    type_registry: TypeRegistry<'a>,
     /// Current file under analysis (absolute path, where root = module base).
     current_file: Option<&'a Path>,
     /// Errors emitted during analysis.
@@ -82,6 +85,7 @@ impl<'a> AnalysisContext<'a> {
         AnalysisContext {
             stage: AnalysisStage::default(),
             symbol_table: SymbolTable::new(),
+            type_registry: TypeRegistry::new(),
             current_file: None,
             errors: Vec::new(),
             funcs: Vec::new(),
@@ -101,6 +105,41 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn symtab_mut(&mut self) -> &mut SymbolTable<'a> {
         &mut self.symbol_table
+    }
+
+    pub fn types(&self) -> &TypeRegistry<'a> {
+        &self.type_registry
+    }
+
+    pub fn types_mut(&mut self) -> &mut TypeRegistry<'a> {
+        &mut self.type_registry
+    }
+
+    // make borrow checker happy (&mut + & to self)
+    pub fn types_mut_with_symtab(&mut self) -> (&mut TypeRegistry<'a>, &SymbolTable<'a>) {
+        (&mut self.type_registry, &self.symbol_table)
+    }
+
+    pub fn enter_package(
+        &mut self,
+        name: Pinned<'a, parser::Span<'a>>,
+        path: FullPackagePath,
+    ) -> Pinned<'a, parser::Span<'a>> {
+        self.type_registry.invalidate_imports_snapshot();
+
+        self.symbol_table.enter_package(name, path)
+    }
+
+    pub fn register_import_spec(
+        &mut self,
+        qualifier: Option<String>,
+        path: FullPackagePath,
+        infer_from_path: bool,
+    ) -> Option<bool> {
+        self.type_registry.invalidate_imports_snapshot();
+
+        self.symbol_table
+            .register_import_spec(qualifier, path, infer_from_path)
     }
 
     pub fn stage(&self) -> &AnalysisStage {

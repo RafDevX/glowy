@@ -13,6 +13,7 @@ use crate::{
     context::{AnalysisContext, DeferredEnforcementCheck},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
+    types::TypeInfo,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
 
@@ -30,6 +31,8 @@ pub struct FunctionValue<'a> {
     // composite literals such as `T{...` to the correct shape interpretation
     // when X is array/slice/map rather than struct
     known_underlying_type: Option<TypeNode<'a>>, // None if unknown/not a type
+    // if this is a type constructor, a ref to the registered TypeInfo, if known
+    target_type: Option<Rc<TypeInfo<'a>>>,
     // expected result yielded by invoking this function (with synthetics)
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
@@ -82,6 +85,7 @@ impl<'a> FunctionValue<'a> {
             has_receiver,
             is_type_constructor: false,
             known_underlying_type: None,
+            target_type: None,
             outcome: None,
             backtrace,
             sanitizer,
@@ -135,7 +139,11 @@ impl<'a> FunctionValue<'a> {
         Self::new(r#ref, Some(signature), false, None, Label::Bottom, None)
     }
 
-    pub fn new_type_constructor(r#ref: FunctionRef<'a>, underlying: Option<TypeNode<'a>>) -> Self {
+    pub fn new_type_constructor(
+        r#ref: FunctionRef<'a>,
+        underlying: Option<TypeNode<'a>>,
+        target_type: Option<Rc<TypeInfo<'a>>>,
+    ) -> Self {
         let dummy_type = TypeNode::Name(TypeNameNode {
             package: None,
             id: Span::new("unknown", 0, 1),
@@ -162,6 +170,7 @@ impl<'a> FunctionValue<'a> {
 
         value.is_type_constructor = true;
         value.known_underlying_type = underlying;
+        value.target_type = target_type;
 
         value
     }
@@ -190,6 +199,10 @@ impl<'a> FunctionValue<'a> {
 
     pub fn known_underlying_type(&self) -> Option<&TypeNode<'a>> {
         self.known_underlying_type.as_ref()
+    }
+
+    pub fn target_type(&self) -> Option<&Rc<TypeInfo<'a>>> {
+        self.target_type.as_ref()
     }
 
     pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
@@ -459,6 +472,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             has_receiver: self.has_receiver,
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
+            target_type: self.target_type.as_ref().map(Rc::clone),
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -491,6 +505,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             has_receiver: self.has_receiver,
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
+            target_type: self.target_type.as_ref().map(Rc::clone),
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -520,6 +535,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.has_receiver == other.has_receiver
             && self.is_type_constructor == other.is_type_constructor
             && self.known_underlying_type == other.known_underlying_type
+            && self.target_type == other.target_type
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer

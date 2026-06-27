@@ -164,6 +164,7 @@ pub mod labels;
 mod snapshots;
 mod symbols;
 mod taint;
+mod types;
 mod values;
 
 type FullPackagePath = String; // e.g. example.com/org/something/auth
