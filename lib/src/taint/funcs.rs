@@ -4,7 +4,7 @@ use parser::{
     Annotation, Location, Span,
     ast::{
         BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode,
-        FunctionSignatureNode, TypeNameNode, TypeNode,
+        FunctionSignatureNode, SelectionNode, TypeNameNode, TypeNode,
     },
 };
 
@@ -18,7 +18,7 @@ use crate::{
         BlanketDirective, BlanketDirectiveKind, SinkDescriptor, SinkKind, annotations, enforcement,
         exprs,
     },
-    types::TypeInfo,
+    types::{TypeInfo, TypeKind},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
@@ -459,7 +459,29 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
-    let mut value = exprs::visit_single_expr(ctx, &node.func);
+    // check if this is a method-form call (`x.M(...)`)
+    // (we keep `base_value` because we only want to visit it once, otherwise it
+    // could lead to side-effects)
+    let method_receiver = if let ExprNode::Selection(selection) = &*node.func
+        && let base_value = exprs::visit_single_expr(ctx, &selection.base)
+        && base_value.as_package_ref().is_none()
+    {
+        Some((selection, base_value))
+    } else {
+        None
+    };
+
+    // if we detected a receiver, prefer extracting the invoked function value
+    // based on type information, since typed dispatch is necessarily correct
+    let (mut value, extracted_from_type) = if let Some((selection, base_value)) =
+        method_receiver.as_ref()
+        && let Some(callee) = try_extract_typed_selection_callee(ctx, selection, base_value)
+    {
+        (callee, true)
+    } else {
+        // nope, special handling failed, so just visit the callee normally
+        (exprs::visit_single_expr(ctx, &node.func), false)
+    };
 
     // can't call this `func` right away because later we need to manually call
     // `drop` on specifically this reference
@@ -482,22 +504,30 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         )];
     }
 
-    // for direct method-form calls (`x.M(...)` where `x` isn't a package
-    // qualifier), `visit_selection` infers a method using a name-only heuristic
-    // across the current package's method set. if exactly one in-package method
-    // by that name has an arity incompatible with this call site, the pickup is
+    // when this was detected as a method-form call but the callee could not be
+    // extracted from type information, fallback to a weaker name-only heuristic
+    // to determine whether the inferred method we decided to assume (from
+    // `visit_selection`) is actually obviously wrong and should be discarded:
+    // if there is exactly one in-package method by that name and it has an
+    // arity incompatible with this call site, the heuristic pickup is
     // conclusively wrong (the receiver must actually be of an unrelated type
     // whose real `M` we never saw, because the input compiles). enforcing the
     // inferred method's signature would cascade into spurious errors, so we
     // use an unknown FunctionValue instead of the known-incorrect `func_value`.
     // sound: blackbox folds all input taint, Möbius accepts any cardinality
-    let blackbox_replacement = is_incompatible_arity_method(ctx, node).then(|| {
-        FunctionValue::new_unknown(
+    let blackbox_replacement = if !extracted_from_type
+        && let Some((selection, _)) = method_receiver.as_ref()
+        && is_incompatible_arity_method(ctx, selection, node.args.len())
+    {
+        Some(FunctionValue::new_unknown(
+            // we keep only the overall access backtrace
             value_func.backtrace().cloned(),
-            true, // we still know this, just don't know the type
-        )
-    });
-    // ^^ we keep only `value_func`'s overall access backtrace
+            // we don't know the type of the receiver, but we know it exists
+            true,
+        ))
+    } else {
+        None
+    };
 
     let func: &FunctionValue<'a> = blackbox_replacement.as_ref().unwrap_or(&value_func);
 
@@ -697,31 +727,22 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // will never panic if all assumptions hold
     let ids = ids.unwrap();
 
-    let receiver = if let ExprNode::Selection(selection) = &*node.func {
-        // we cannot use exprs::get_expr_backtrace since we need to rule out the
-        // case that the ""selection"" is actually just a qualified identifier
-        // and so the ""receiver"" is really just a qualifier (package ref)
-        let base = exprs::visit_single_expr(ctx, &selection.base);
-
-        if base.as_package_ref().is_some() {
-            None
-        } else {
-            Some(base.backtrace())
-        }
-    } else if func.has_receiver() {
-        // this is a method called via a non-selection expression, such as a
-        // method value like `f := obj.M; f()`; we don't have a selection.base
-        // to read the bound receiver from (here), but its taint was already
-        // nested into `func.backtrace()` at the binding site in
-        // `visit_selection`, and *that* backtrace gets nested into the result
-        // below -- so the receiver's labels still reach the call result.
-        //
+    let receiver = match &method_receiver {
+        // method-form call: reuse the receiver value we already evaluated up
+        // top, taint and all
+        Some((_, base)) => Some(base.backtrace()),
+        // this is a method called via a non-selection expression (e.g. in the
+        // form `f := obj.M; f()`); we don't have a `selection.base` to read the
+        // bound receiver from here, but its taint was already nested into
+        // `func.backtrace()` at the binding site in `visit_selection`, and
+        // *that* backtrace gets nested into the result below -- so the
+        // receiver's labels still reach the call result.
         // nevertheless, we MUST still realize SyntheticSlot::Receiver (with no
-        // (concrete backtrace) to cancel the synthetic; otherwise it would
+        // concrete backtrace) to cancel the synthetic; otherwise it would
         // escape this function and eventually reach `main` (breaking invariant)
-        Some(None)
-    } else {
-        None
+        None if func.has_receiver() => Some(None),
+        // not a method call at all, there is no receiver backtrace
+        None => None,
     };
 
     captures::apply_capture_mutations(ctx, func, &with_backtraces_ref, &node.location);
@@ -776,6 +797,53 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
+}
+
+fn try_extract_typed_selection_callee<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    selection: &SelectionNode<'a>,
+    base_value: &ValueRef<'a>,
+) -> Option<ValueRef<'a>> {
+    // exit early if base has no declared type
+    let r#type = base_value.declared_type()?;
+    let selector = selection.selector.content();
+    let location = || ctx.pin(selection.location.clone());
+
+    // direct method on the receiver type's method set
+    if let Some(method) = r#type.get_method(selector) {
+        return Some(nest_receiver_backtrace(
+            method.borrow().value().get(),
+            base_value,
+            location(),
+        ));
+    }
+
+    // otherwise, check if this selection is really just a field access being
+    // called like a method (i.e., `s.F()` where `F` is a `func(...)` field)
+    if matches!(r#type.underlying(), TypeKind::Struct { .. })
+        && let Some(r#struct) = base_value.as_struct()
+    {
+        return Some(r#struct.get_const(&selector.to_owned(), location()));
+    }
+
+    // nothing we can do
+    None
+}
+
+fn nest_receiver_backtrace<'a>(
+    method_value: ValueRef<'a>,
+    receiver: &ValueRef<'a>,
+    at_location: Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    match receiver.backtrace() {
+        Some(backtrace) => method_value.nest_backtrace(
+            LabelBacktraceKind::MethodReceiver,
+            None,
+            at_location,
+            [backtrace],
+        ),
+        None => method_value,
+    }
 }
 
 fn visit_type_conversion<'a>(
@@ -930,18 +998,15 @@ fn tag_results_with_declared_types<'a>(
 }
 
 // whether a heuristically-inferred method is incompatible with expected arity
-fn is_incompatible_arity_method<'a>(ctx: &AnalysisContext<'a>, node: &CallNode<'a>) -> bool {
-    let ExprNode::Selection(selection) = &*node.func else {
-        return false;
-    };
-
-    // reject package-qualified calls: `pkg.Func(...)` is not a method call
-    if let ExprNode::Name(name) = &*selection.base
-        && ctx.symtab().qualifier_exists(name.content())
-    {
-        return false;
-    }
-
+//
+// note: we assume the invoker already ruled out the case where this selection
+// is `a.b` and `a` is a valid package import qualifier; invoker must be
+// confident that this is a method, just not this specific method candidate
+fn is_incompatible_arity_method<'a>(
+    ctx: &AnalysisContext<'a>,
+    selection: &SelectionNode<'a>,
+    args_len: usize,
+) -> bool {
     let Some(method) = ctx
         .symtab()
         .lookup_unique_method_in_current_package(selection.selector.content())
@@ -958,20 +1023,11 @@ fn is_incompatible_arity_method<'a>(ctx: &AnalysisContext<'a>, node: &CallNode<'
     };
 
     let arity = signature.count_inputs();
-    let args_len = node.args.len();
-
-    if args_len == arity {
-        // plausible
-        return false;
-    }
-
     let variadic = signature.params.last().is_some_and(|param| param.variadic);
-    if variadic && args_len > arity {
-        // plausible
-        return false;
-    }
 
-    true
+    // exact match is plausible; an excess of args is fine iff the last param is
+    // variadic (it soaks up the rest); any other shape is conclusively wrong
+    args_len != arity && !(variadic && args_len > arity)
 }
 
 fn handle_deferred_checks<'a>(
