@@ -604,9 +604,14 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     {
         let variadic = ids.last().is_some_and(|(_, variadic, _)| *variadic);
 
-        if !(variadic && node.args.len() > ids.len()) {
+        // if the last parameter is variadic, then it does not count for our
+        // expected cardinality, so we subtract one. we then use >= because 0 or
+        // more arguments can be folded into the variadic parameter
+        let expected = ids.len().saturating_sub(1);
+
+        if !(variadic && node.args.len() >= expected) {
             ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                expected: ids.len(),
+                expected,
                 found: node.args.len(),
                 location: node.location.clone(),
             });
@@ -1073,7 +1078,7 @@ fn is_incompatible_arity_method<'a>(
 
     // exact match is plausible; an excess of args is fine iff the last param is
     // variadic (it soaks up the rest); any other shape is conclusively wrong
-    args_len != arity && !(variadic && args_len > arity)
+    args_len != arity && !(variadic && args_len >= arity.saturating_sub(1))
 }
 
 fn handle_deferred_checks<'a>(
