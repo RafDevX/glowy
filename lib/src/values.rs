@@ -214,22 +214,53 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn extract_collapsed_single(&self) -> Self {
-        // this utility method enforces correctness by *always* checking for
-        // Möbius *before* expandable: it is very important to always check
-        // Möbius first and foremost, as otherwise it would be upgraded
-        // into a size-1 expandable, discarding the important information
-        // that it can already be expanded to any arbitrary size
+        // we match the inner `Value` variant directly rather than going through
+        // `as_mobius`/`as_expandable`: those getters call `try_upgrade_to`,
+        // which would coerce a `Simple` into a size-1 wrapper -- pointlessly
+        // destructive (a `Simple` is already a single value), and worse, the
+        // coerced inner is reconstructed without the outer's `declared_type`,
+        // silently breaking downstream typed dispatch
 
-        if let Some(mobius) = self.as_mobius() {
-            Self::new(
-                (*mobius.inner().value.borrow()).clone(),
-                self.location().clone(),
-                mobius.inner().declared_type.clone(), // cheap
-            )
-        } else if let Some(expandable) = self.as_expandable() {
-            expandable.primary()
-        } else {
-            self.clone()
+        match &*self.value.borrow() {
+            Value::Mobius(mobius) => {
+                let inner = mobius.inner();
+
+                // prefer the inner's `declared_type` (the typical case where
+                // the producer tagged it on the inner directly), falling back
+                // to the outer's tag so type identity survives the unwrap
+                // regardless of where it was stamped
+                let declared_type = inner
+                    .declared_type
+                    .clone()
+                    .or_else(|| self.declared_type.clone());
+
+                Self::new(
+                    inner.value.borrow().clone(),
+                    self.location.clone(),
+                    declared_type,
+                )
+            }
+            Value::Expandable(expandable) => {
+                let mut primary = expandable.primary();
+
+                // primary may have been recorded without a `declared_type`
+                // even when the outer ValueRef carries one; propagate it so
+                // downstream typed dispatch sees the right type
+                if primary.declared_type.is_none() {
+                    primary.declared_type.clone_from(&self.declared_type);
+                }
+
+                primary
+            }
+            // exhaustive to force re-visiting impl if a new type is ever added
+            Value::Simple(_)
+            | Value::PackageRef(_)
+            | Value::Channel(_)
+            | Value::Array(_)
+            | Value::Slice(_)
+            | Value::Map(_)
+            | Value::Struct(_)
+            | Value::Function(_) => self.clone(),
         }
     }
 }
