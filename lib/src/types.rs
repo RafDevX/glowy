@@ -18,7 +18,7 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    fmt, mem,
+    fmt, iter, mem, ops,
     rc::Rc,
 };
 
@@ -69,12 +69,103 @@ impl<'a> TypeInfo<'a> {
         &self.underlying
     }
 
-    pub fn get_method(&self, name: &str) -> Option<SymbolRef<'a>> {
+    fn get_method(&self, name: &str) -> Option<SymbolRef<'a>> {
         self.methods.borrow().get(name).cloned()
     }
 
     pub fn register_method(&self, name: &'a str, symbol: SymbolRef<'a>) -> Option<SymbolRef<'a>> {
         self.methods.borrow_mut().insert(name, symbol)
+    }
+
+    pub fn lookup_promoted_method(self: &Rc<Self>, name: &str) -> Option<SymbolRef<'a>> {
+        // Go allows promoted methods wherein invokers can call methods from
+        // embedded fields directly on the outer object without having to go
+        // through the implicit field (e.g. `x.M` is short-hand for `x.y.M`)
+
+        if let Some(direct) = self.get_method(name) {
+            // direct declarations shadow every embedded candidate
+            return Some(direct);
+        }
+
+        let mut visited = HashSet::from([Rc::as_ptr(self)]);
+
+        match self.search_promoted_method_recurs(name, &mut visited) {
+            PromotionFrontier::Unique(symbol) => Some(symbol),
+            PromotionFrontier::None | PromotionFrontier::Ambiguous => None,
+        }
+    }
+
+    fn search_promoted_method_recurs(
+        self: &Rc<Self>,
+        name: &str,
+        visited: &mut HashSet<*const Self>,
+    ) -> PromotionFrontier<'a> {
+        // only the *shallowest* depth at which `name` is found contributes, and
+        // that depth must contribute exactly one method (multiple paths
+        // converging on the same underlying method are still treated as one, as
+        // the spec specifies "unambiguous"
+
+        // embedded interfaces are skipped: their methods are resolved by
+        // dynamic dispatch, which we don't model
+
+        let TypeKind::Struct { fields } = self.underlying() else {
+            return PromotionFrontier::None;
+        };
+
+        // first pass: collect matches at the immediate next depth -- per the
+        // spec, shallowest wins, so we must finish *this* level before
+        // recursing into anything deeper (breadth-first search)
+
+        let mut at_this_depth = PromotionFrontier::None;
+        let mut descend_into = Vec::new();
+
+        for field in fields {
+            if !field.is_embedded() {
+                // we only care about embedded fields
+                continue;
+            }
+
+            let Some(field_type) = field.resolved_type() else {
+                // skip unresolved type (e.g., not known yet)
+                continue;
+            };
+
+            if matches!(field_type.underlying(), TypeKind::Interface) {
+                // skip embedded interfaces (unsupported)
+                continue;
+            }
+
+            if !visited.insert(Rc::as_ptr(&field_type)) {
+                // skip already visited
+
+                // note that this is necessary to ensure termination, since type
+                // graphs are not required to be acyclic, since Go allows for
+                // pointer-cycle embeds (e.g., `A { *B }` + `B { *A }`)
+                continue;
+            }
+
+            match field_type.get_method(name) {
+                Some(method) => {
+                    at_this_depth = at_this_depth + PromotionFrontier::Unique(method);
+                }
+                None => descend_into.push(field_type),
+            }
+        }
+
+        if !matches!(at_this_depth, PromotionFrontier::None) {
+            // shallowest-wins: a hit at this depth shadows any deeper match
+            return at_this_depth;
+        }
+
+        // second pass: nothing at this depth, so recurse uniformly
+
+        // merging across siblings captures the case where two non-overlapping
+        // subtrees both produce a (possibly distinct) match at the same deeper
+        // depth, which Go treats as ambiguous
+        descend_into
+            .into_iter()
+            .map(|child| child.search_promoted_method_recurs(name, visited))
+            .sum()
     }
 }
 
@@ -108,6 +199,32 @@ impl fmt::Debug for TypeInfo<'_> {
             // intentionally omitting `methods` to avoid borrowing the RefCell,
             // since callers might already hold a borrow
             .finish_non_exhaustive()
+    }
+}
+
+enum PromotionFrontier<'a> {
+    None,
+    Unique(SymbolRef<'a>), // at same depth
+    Ambiguous,
+}
+
+impl ops::Add for PromotionFrontier<'_> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::None, single) | (single, Self::None) => single,
+            (Self::Unique(left), Self::Unique(right)) if Rc::ptr_eq(&left, &right) => {
+                Self::Unique(left)
+            }
+            _ => Self::Ambiguous,
+        }
+    }
+}
+
+impl iter::Sum for PromotionFrontier<'_> {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(PromotionFrontier::None, |a, b| a + b)
     }
 }
 

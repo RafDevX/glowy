@@ -35,7 +35,7 @@ pub fn visit_selection<'a>(
     // scenario and guaranteed to be correct, including cross-package
 
     if let Some(r#type) = base.declared_type().cloned() {
-        if let Some(method) = r#type.get_method(selector) {
+        if let Some(method) = r#type.lookup_promoted_method(selector) {
             return funcs::nest_receiver_backtrace(method.borrow().value().get(), &base, location);
         }
 

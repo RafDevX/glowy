@@ -820,8 +820,9 @@ fn try_extract_typed_selection_callee<'a>(
     let selector = selection.selector.content();
     let location = || ctx.pin(selection.location.clone());
 
-    // direct method on the receiver type's method set
-    if let Some(method) = r#type.get_method(selector) {
+    // method on the receiver type's method set, including methods promoted
+    // through anonymous-embedded struct fields per Go's spec
+    if let Some(method) = r#type.lookup_promoted_method(selector) {
         return Some(nest_receiver_backtrace(
             method.borrow().value().get(),
             base_value,
