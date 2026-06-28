@@ -470,28 +470,44 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         }
     }
 
-    // check if this is a method-form call (`x.M(...)`)
-    // (we keep `base_value` because we only want to visit it once, otherwise it
-    // could lead to side-effects)
-    let method_receiver = if let ExprNode::Selection(selection) = &*node.func
-        && let base_value = exprs::visit_single_expr(ctx, &selection.base)
-        && base_value.as_package_ref().is_none()
+    // this looks a bit strange and convoluted, but it is necessary to guarantee
+    // special handling for selections: when the callee is a selection (e.g.,
+    // `x.M(...)`), we want to evaluate the base exactly once
+    let (mut value, extracted_from_type, method_receiver) = if let ExprNode::Selection(selection) =
+        &*node.func
     {
-        Some((selection, base_value))
-    } else {
-        None
-    };
+        let base_value = exprs::visit_single_expr(ctx, &selection.base);
+        let is_method_form = base_value.as_package_ref().is_none();
 
-    // if we detected a receiver, prefer extracting the invoked function value
-    // based on type information, since typed dispatch is necessarily correct
-    let (mut value, extracted_from_type) = if let Some((selection, base_value)) =
-        method_receiver.as_ref()
-        && let Some(callee) = try_extract_typed_selection_callee(ctx, selection, base_value)
-    {
-        (callee, true)
+        let extracted = if is_method_form {
+            // if we detected a receiver, prefer extracting the invoked function
+            // value based on type information, since typed dispatch is
+            // necessarily correct
+
+            try_extract_typed_selection_callee(ctx, selection, &base_value)
+        } else {
+            None
+        };
+
+        let extracted_from_type = extracted.is_some();
+
+        let value = extracted.unwrap_or_else(|| {
+            // typed dispatch didn't apply or didn't conclusively resolve, so we
+            // visit the callee normally, but using `exprs::visit_single_expr`
+            // would lead to the base being visited again (which we want to
+            // avoid, to prevent side-effects), so instead we plug directly into
+            // `visit_selection_with_base` (after all, we know this is a
+            // selection, and we already visited the base)
+            exprs::visit_selection_with_base(ctx, selection, &base_value).extract_collapsed_single()
+        });
+
+        let method_receiver = is_method_form.then_some((selection, base_value));
+
+        (value, extracted_from_type, method_receiver)
     } else {
-        // nope, special handling failed, so just visit the callee normally
-        (exprs::visit_single_expr(ctx, &node.func), false)
+        // not a selection, so just visit normally
+
+        (exprs::visit_single_expr(ctx, &node.func), false, None)
     };
 
     // can't call this `func` right away because later we need to manually call

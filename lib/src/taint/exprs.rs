@@ -17,6 +17,8 @@ use crate::{
 mod component;
 mod literals;
 
+pub use component::visit_selection_with_base;
+
 pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec<ValueRef<'a>> {
     let single = match node {
         ExprNode::Name(name) => visit_operand_name(ctx, *name, None),

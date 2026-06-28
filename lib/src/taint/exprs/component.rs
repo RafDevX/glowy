@@ -18,6 +18,14 @@ pub fn visit_selection<'a>(
 ) -> ValueRef<'a> {
     let base = super::visit_single_expr(ctx, &node.base);
 
+    visit_selection_with_base(ctx, node, &base)
+}
+
+pub fn visit_selection_with_base<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &SelectionNode<'a>,
+    base: &ValueRef<'a>,
+) -> ValueRef<'a> {
     if let Some(pkg) = base.as_package_ref() {
         // this is not actually a selection, it's just a qualified operand name
         return super::visit_operand_name(ctx, node.selector, Some(pkg.qualifier()));
@@ -36,7 +44,7 @@ pub fn visit_selection<'a>(
 
     if let Some(r#type) = base.declared_type().cloned() {
         if let Some(method) = r#type.lookup_promoted_method(selector) {
-            return funcs::nest_receiver_backtrace(method.borrow().value().get(), &base, location);
+            return funcs::nest_receiver_backtrace(method.borrow().value().get(), base, location);
         }
 
         // note we only call `as_struct` after we know this is actually supposed
@@ -65,7 +73,7 @@ pub fn visit_selection<'a>(
         .symtab()
         .lookup_unique_method_in_current_package(selector)
     {
-        return funcs::nest_receiver_backtrace(method.borrow().value().get(), &base, location);
+        return funcs::nest_receiver_backtrace(method.borrow().value().get(), base, location);
     }
 
     // ----------
