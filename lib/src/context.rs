@@ -1,6 +1,9 @@
-use std::{fmt, path::Path};
+use std::{fmt, mem, path::Path};
 
-use parser::{Location, Span, ast::FunctionParamDeclNode};
+use parser::{
+    Location, Span,
+    ast::{CallNode, FunctionParamDeclNode},
+};
 
 use crate::{
     FullPackagePath, Pinned, SinkDescriptor,
@@ -9,7 +12,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
-    taint::{BlanketDirective, BlanketDirectives},
+    taint::{BlanketDirective, BlanketDirectives, ResolvedCall},
     types::TypeRegistry,
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -28,6 +31,8 @@ pub struct AnalysisContext<'a> {
 
     /// Current stack of functions being declared.
     funcs: Vec<ValueRef<'a>>,
+    // Current stack of stacks awaiting deferred execution (from `defer`).
+    deferred_calls: Vec<Vec<DeferredCall<'a>>>,
 
     /// Stack of (independent but always a child of previous) branch backtraces.
     branch_backtraces: Vec<LabelBacktrace<'a>>,
@@ -89,6 +94,7 @@ impl<'a> AnalysisContext<'a> {
             current_file: None,
             errors: Vec::new(),
             funcs: Vec::new(),
+            deferred_calls: Vec::new(),
             branch_backtraces: Vec::new(),
             deferred_branch_backtraces: Vec::new(),
             current_calculated_branch_backtrace: None,
@@ -170,10 +176,37 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn push_function(&mut self, func: ValueRef<'a>) {
         self.funcs.push(func);
+
+        self.deferred_calls.push(Vec::new());
     }
 
     pub fn pop_function(&mut self) {
         self.funcs.pop();
+
+        // supposedly all already handled before `pop_function` is called
+        self.deferred_calls.pop();
+    }
+
+    pub fn register_deferred_call(&mut self, node: CallNode<'a>, resolved: ResolvedCall<'a>) {
+        // capture before the mutable borrow below; cheap if there's no backtrace
+        let captured_branch_backtrace = self.branch_backtrace().cloned();
+
+        let Some(top) = self.deferred_calls.last_mut() else {
+            return;
+        };
+
+        top.push(DeferredCall {
+            node,
+            resolved,
+            captured_branch_backtrace,
+        });
+    }
+
+    pub fn take_deferred_calls(&mut self) -> Vec<DeferredCall<'a>> {
+        self.deferred_calls
+            .last_mut()
+            .map(mem::take)
+            .unwrap_or_default()
     }
 
     pub fn is_function_in_call_stack(&self, r#ref: &FunctionRef<'a>) -> bool {
@@ -463,6 +496,12 @@ impl AnalysisStage {
     pub fn is_first(&self) -> bool {
         matches!(self, Self::RecordDeclarations)
     }
+}
+
+pub struct DeferredCall<'a> {
+    pub node: CallNode<'a>,
+    pub resolved: ResolvedCall<'a>,
+    pub captured_branch_backtrace: Option<LabelBacktrace<'a>>,
 }
 
 #[derive(Clone)]

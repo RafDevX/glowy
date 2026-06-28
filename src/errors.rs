@@ -428,9 +428,20 @@ pub fn get_structured_error_info<'a>(
             ],
             help: Some("check whether the specified expression is a function call"),
         },
+        AnalysisErrorKind::DeferNotCall { location } => StructuredErrorInfo {
+            title: "illegal `defer` statement with a non-call expression".into(),
+            code: "G023".into(),
+            snippets: vec![
+                builder.snippet().annotate(
+                    StructuredAnnotation::primary(location.clone())
+                        .label("this expression cannot be resolved to a function call"),
+                ),
+            ],
+            help: Some("check whether the specified expression is a function call"),
+        },
         AnalysisErrorKind::IllegalSelectCase { location } => StructuredErrorInfo {
             title: "illegal case in `select` statement".into(),
-            code: "G023".into(),
+            code: "G024".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -441,7 +452,7 @@ pub fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedFallthrough { location } => StructuredErrorInfo {
             title: "unexpected fallthrough statement".into(),
-            code: "G024".into(),
+            code: "G025".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -452,7 +463,7 @@ pub fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::DuplicateStructFieldName { duplicate } => StructuredErrorInfo {
             title: "duplicate field name in struct literal expression".into(),
-            code: "G025".into(),
+            code: "G026".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(duplicate.location().clone())
@@ -463,7 +474,7 @@ pub fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedVoidExpression { location } => StructuredErrorInfo {
             title: "invalid void expression when a single value was expected".into(),
-            code: "G026".into(),
+            code: "G027".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())
@@ -474,7 +485,7 @@ pub fn get_structured_error_info<'a>(
         },
         AnalysisErrorKind::UnexpectedMultiValueExpression { location } => StructuredErrorInfo {
             title: "invalid multi-value expression when a single value was expected".into(),
-            code: "G027".into(),
+            code: "G028".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(
                     "this expression yields multiple values, but only one value was expected",
@@ -494,8 +505,8 @@ pub fn get_structured_error_info<'a>(
             ],
             help: Some("this analyzer version does not support `goto` statements"),
         },
-        AnalysisErrorKind::DeferNotDeferred { location } => StructuredErrorInfo {
-            title: "unsupported `defer` statement was not deferred".into(),
+        AnalysisErrorKind::DeferInInitNotDeferred { location } => StructuredErrorInfo {
+            title: "unsupported `defer` statement in `init` function not deferred".into(),
             code: "U002".into(),
             snippets: vec![
                 builder.snippet().annotate(
@@ -503,7 +514,9 @@ pub fn get_structured_error_info<'a>(
                         .label("this expression was considered to execute immediately"),
                 ),
             ],
-            help: Some("this analyzer version does not support `defer` statements"),
+            help: Some(
+                "this analyzer version does not support `defer` statements in `init` functions",
+            ),
         },
         AnalysisErrorKind::UnsoundFunctionMergingAssignment { location } => StructuredErrorInfo {
             title: "unsupported unsound assignment of non-portable function value".into(),

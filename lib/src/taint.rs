@@ -23,6 +23,8 @@ mod funcs;
 mod implicit;
 mod mutation;
 
+pub use funcs::ResolvedCall;
+
 /// Structured information representing a declared sink.
 ///
 /// This is a lightweight descriptor capturing the essential details of an
@@ -304,20 +306,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                 });
             }
         }
-        StatementNode::Defer { expr, location } => {
-            // FIXME: defer statements are currently not supported (the
-            // expression is just visited normally instead of later), since
-            // there is currently a very tight coupling between 'pre-processing'
-            // a call (e.g., visiting function value and arguments, checking if
-            // everything is valid, determining when a built-in was called) and
-            // actually committing the call (realizing the outcome according to
-            // the provided arguments)
-            ctx.report_error(AnalysisErrorKind::DeferNotDeferred {
-                location: location.clone(),
-            });
-
-            exprs::visit_expr(ctx, expr);
-        }
+        StatementNode::Defer { expr, location } => funcs::visit_defer(ctx, expr, location),
     }
 }
 

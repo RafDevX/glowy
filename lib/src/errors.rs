@@ -311,6 +311,11 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
+    /// Illegal `defer` statement with a non-call expression.
+    DeferNotCall {
+        /// Where the statement was found.
+        location: Location,
+    },
     /// Invalid or unsupported communications case in `select` statement.
     ///
     /// If specified (i.e., not `default`), a case within a `select` may only
@@ -355,13 +360,16 @@ pub enum AnalysisErrorKind<'a> {
         /// Where the statement was found.
         location: Location,
     },
-    /// Unsupported `defer` statement executed immediately.
+    /// Unsupported `defer` statement in `init` function.
     ///
-    /// This analyzer version does not support `defer` statements and so just
-    /// considers the provided function call as executing immediately (rather
-    /// than at the end of the current function), which can have unexpected
-    /// implications regarding its side-effects.
-    DeferNotDeferred {
+    /// This analyzer version does not support `defer` statements in `init`
+    /// functions and so just considers the provided function call as executing
+    /// immediately (rather than at the end of the current function), which can
+    /// have unexpected implications regarding its side-effects.
+    ///
+    /// Special treatment is given to `init` functions, so they do not allow for
+    /// all possible constructs, even if otherwise permitted in normal Go.
+    DeferInInitNotDeferred {
         /// Where the statement was found.
         location: Location,
     },
@@ -414,13 +422,14 @@ impl AnalysisErrorKind<'_> {
             | Self::InvalidSlicingBase { .. }
             | Self::InvalidReceiveOperand { .. }
             | Self::GoNotCall { .. }
+            | Self::DeferNotCall { .. }
             | Self::IllegalSelectCase { .. }
             | Self::UnexpectedFallthrough { .. }
             | Self::DuplicateStructFieldName { .. }
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
             Self::GotoNotSupported { .. }
-            | Self::DeferNotDeferred { .. }
+            | Self::DeferInInitNotDeferred { .. }
             | Self::UnsoundFunctionMergingAssignment { .. } => AnalysisErrorCategory::UnsupportedGo,
             Self::DuplicateVirtualFilePath | Self::TooManyBuildTagDimensions { .. } => {
                 AnalysisErrorCategory::Misconfiguration

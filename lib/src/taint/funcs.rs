@@ -10,7 +10,7 @@ use parser::{
 
 use crate::{
     Pinned,
-    context::{AnalysisContext, DeferTarget},
+    context::{AnalysisContext, DeferTarget, DeferredCall},
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::Symbol,
@@ -195,6 +195,8 @@ fn visit_function_def<'a>(
 
     super::visit_statements(ctx, body);
 
+    apply_deferred_calls(ctx); // from `defer` statements
+
     captures::record_closure_capture_fallbacks(ctx, &mut value);
 
     ctx.decrease_branch_scope_depth();
@@ -344,6 +346,68 @@ pub fn visit_function_literal<'a>(
     visit_function_def(ctx, &r#ref, None, signature, None, Some(body), annotation)
 }
 
+pub fn visit_defer<'a>(ctx: &mut AnalysisContext<'a>, expr: &ExprNode<'a>, location: &Location) {
+    if ctx.current_function().is_none() {
+        // there is no active function, probably because we are inside an `init`
+        // function, so just fallback to evaluating immediately (we still want
+        // to trigger side effects and enforcement checks inside the function)
+
+        ctx.report_error(AnalysisErrorKind::DeferInInitNotDeferred {
+            location: location.clone(),
+        });
+
+        exprs::visit_expr(ctx, expr);
+
+        return;
+    }
+
+    let ExprNode::Call(call) = expr else {
+        // invalid Go, but visit the expression anyway for side effects
+
+        ctx.report_error(AnalysisErrorKind::DeferNotCall {
+            location: location.clone(),
+        });
+
+        exprs::visit_expr(ctx, expr);
+
+        return;
+    };
+
+    match resolve_call(ctx, call) {
+        CallResolution::Final(_) => {} // nothing left to do
+        CallResolution::PendingApply(resolved) => {
+            ctx.register_deferred_call(call.clone(), resolved);
+        }
+    }
+}
+
+fn apply_deferred_calls(ctx: &mut AnalysisContext<'_>) {
+    // taking ownership detaches from `ctx` so we can re-borrow it mutably for
+    // each replay (and naturally handles nested `defer` inside a deferred
+    // function literal, since its own deferred calls live on the inner frame)
+
+    // deferred calls are applied in reverse order of registration, hence `rev`
+
+    for pending in ctx.take_deferred_calls().into_iter().rev() {
+        let DeferredCall {
+            node,
+            resolved,
+            captured_branch_backtrace,
+        } = pending;
+
+        let installed = captured_branch_backtrace.is_some();
+        if let Some(bt) = captured_branch_backtrace {
+            ctx.push_branch_backtrace(bt);
+        }
+
+        apply_call(ctx, &node, resolved);
+
+        if installed {
+            ctx.pop_branch_backtrace();
+        }
+    }
+}
+
 pub fn visit_return<'a>(
     ctx: &mut AnalysisContext<'a>,
     exprs: &[ExprNode<'a>],
@@ -480,7 +544,7 @@ enum CallResolution<'a> {
 }
 
 // preprocessed state snapshot of everything necessary to apply a function call
-struct ResolvedCall<'a> {
+pub struct ResolvedCall<'a> {
     callee: ValueRef<'a>,
     arg_values: Vec<ValueRef<'a>>,
     blackbox_replacement: Option<Box<FunctionValue<'a>>>,
