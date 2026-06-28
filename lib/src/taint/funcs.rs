@@ -517,7 +517,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // sound: blackbox folds all input taint, Möbius accepts any cardinality
     let blackbox_replacement = if !extracted_from_type
         && let Some((selection, _)) = method_receiver.as_ref()
-        && is_incompatible_arity_method(ctx, selection, node.args.len())
+        && is_incompatible_arity_method(ctx, selection, &value_func, node.args.len())
     {
         Some(FunctionValue::new_unknown(
             // we keep only the overall access backtrace
@@ -1005,6 +1005,7 @@ fn tag_results_with_declared_types<'a>(
 fn is_incompatible_arity_method<'a>(
     ctx: &AnalysisContext<'a>,
     selection: &SelectionNode<'a>,
+    candidate: &FunctionValue<'a>,
     args_len: usize,
 ) -> bool {
     let Some(method) = ctx
@@ -1018,9 +1019,22 @@ fn is_incompatible_arity_method<'a>(
     let Some(func) = func_value.as_function() else {
         return false;
     };
+
     let Some(signature) = func.signature() else {
         return false;
     };
+
+    // if the method candidate that the invoker holds is not the same as the one
+    // we are checking in this function, then this entire check is irrelevant,
+    // so the analyzer has a bug (we assumed that the lookup above is what
+    // `visit_selection` used to pick up the method that eventually propagated
+    // to become the invoker's candidate, but apparently that assumption was
+    // wrong and so our implied invariant has been broken; this is a bug!)
+    assert_eq!(
+        candidate.r#ref(),
+        func.r#ref(),
+        "Assumption invariant failed on method pickup strategy"
+    );
 
     let arity = signature.count_inputs();
     let variadic = signature.params.last().is_some_and(|param| param.variadic);
