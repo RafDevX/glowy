@@ -159,6 +159,8 @@ fn visit_function_def<'a>(
         }
     }
 
+    bind_named_result_locals(ctx, &signature.result);
+
     captures::register_closure_captures(ctx, r#ref, signature, receiver, body, &mut value);
 
     // it is necessary for sinks and other enforcement mechanisms inside this
@@ -290,6 +292,30 @@ fn build_function_value<'a>(
 
     // function value is now fully constructed, so just return it
     func_val
+}
+
+// allows for naked returns
+fn bind_named_result_locals<'a>(ctx: &mut AnalysisContext<'a>, result: &FunctionResultNode<'a>) {
+    let FunctionResultNode::Params(params) = result else {
+        // FunctionResultNode::Single is always unnamed; None has no results
+        return;
+    };
+
+    for param in params {
+        let r#type = ctx.types().resolve(ctx.symtab(), &param.r#type);
+
+        for &id in &param.ids {
+            if id.content() == "_" {
+                // blank identifier
+                continue;
+            }
+
+            let pinned = ctx.pin(id);
+            let value = ValueRef::new_bottom(pinned.pinned_location(), r#type.clone());
+
+            ctx.declare_new_symbol(Symbol::new_ref(pinned, true, value));
+        }
+    }
 }
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
