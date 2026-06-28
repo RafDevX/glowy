@@ -69,9 +69,20 @@ fn visit_function_def<'a>(
     );
 
     if let Some(name) = decl_symbol {
-        let symbol = Symbol::new_ref(name, false, value.clone());
+        if let Some(existing) = ctx.symtab().get_symbol_by_declaration(name) {
+            // this was already declared by a previous analysis iteration/phase,
+            // so we should mutate the entry in place rather than allocate a
+            // fresh Symbol so that existing SymbolRef owners (i.e., other
+            // structures holding an Rc, such as TypeInfo::methods) can observe
+            // the body through the same handle, otherwise e.g. typed dispatch
+            // would keep dereferencing the stale Bottom-valued symbol
 
-        ctx.declare_function_or_method(receiver, symbol);
+            existing.borrow_mut().set_value(value.clone());
+        } else {
+            let symbol = Symbol::new_ref(name, false, value.clone());
+
+            ctx.declare_function_or_method(receiver, symbol);
+        }
     }
 
     let Some(body) = body else {
