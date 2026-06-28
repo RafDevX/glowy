@@ -999,7 +999,11 @@ fn tag_results_with_declared_types<'a>(
     let type_iter: Box<dyn Iterator<Item = &TypeNode<'a>>> = match &signature.result {
         FunctionResultNode::None => Box::new(iter::empty()),
         FunctionResultNode::Single(r#type) => Box::new(iter::once(r#type)),
-        FunctionResultNode::Params(params) => Box::new(params.iter().map(|param| &param.r#type)),
+        FunctionResultNode::Params(params) => Box::new(
+            params
+                .iter()
+                .flat_map(|param| iter::repeat_n(&param.r#type, param.ids.len().max(1))),
+        ),
     };
 
     for (result, type_node) in results.iter_mut().zip(type_iter) {

@@ -206,7 +206,7 @@ impl FunctionResultNode<'_> {
         match self {
             Self::None => 0,
             Self::Single(_) => 1,
-            Self::Params(vec) => vec.len(),
+            Self::Params(vec) => vec.iter().map(|param| cmp::max(1, param.ids.len())).sum(),
         }
     }
 
