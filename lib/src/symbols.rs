@@ -423,7 +423,16 @@ impl<'a> SymbolTable<'a> {
         // last component of the path (e.g., `net/http` -> `http`)
         // [evidently, this is not a foolproof heuristic, but it should
         // work for the overwhelming majority of cases, including stdlib]
-        components.next().unwrap().to_owned()
+        let native_name = components.next().unwrap();
+
+        // final consideration: many packages have their github.com/etc.
+        // repository name with a `go-`/`-go` tag around what is actually their
+        // native package name, so strip that from our native name candidate
+        native_name
+            .strip_prefix("go-")
+            .or_else(|| native_name.strip_suffix("-go"))
+            .unwrap_or(native_name)
+            .to_owned()
     }
 
     pub fn qualifier_exists(&self, qualifier: &str) -> bool {
