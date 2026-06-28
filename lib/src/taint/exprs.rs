@@ -116,14 +116,16 @@ pub fn visit_operand_name<'a>(
 ) -> ValueRef<'a> {
     let location = ctx.pin(name.location());
 
-    if qualifier.is_none() && ctx.symtab().qualifier_exists(name.content()) {
-        // FIXME: this is wrong because it means an existing qualifier will
-        // always have precedence over a declared symbol with the same name,
-        // but that is *not* the expected behavior -- however, this is _much_
-        // simpler to handle since putting this after resolve_operand_name would
-        // not prevent an unknown symbol error from being reported even when
-        // a qualifier is valid
-
+    // a declared identifier in scope shadows an imported package qualifier of
+    // the same name, so we *must* check for a symbol before committing to a
+    // PackageRefValue (even if a bit costly) -- we do this lookup through
+    // `get_symbol` directly to avoid incorrectly surfacing any UnknownSymbol
+    // errors when we know there is a valid qualifier, as `resolve_operand_name`
+    // would, and that latter method is used instead only for unknown qualifiers
+    if qualifier.is_none()
+        && ctx.symtab().qualifier_exists(name.content())
+        && ctx.symtab().get_symbol(name.content()).is_none()
+    {
         return ValueRef::new(
             Value::PackageRef(PackageRefValue::new(name)),
             location,
