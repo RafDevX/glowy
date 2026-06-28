@@ -533,10 +533,18 @@ impl<'a> TypeRegistry<'a> {
 
                     let resolved = self.resolve_name(symtab, &embedded.r#type);
 
+                    let mut declared_type = TypeNode::Name(embedded.r#type.clone());
+
+                    if embedded.pointer {
+                        declared_type = TypeNode::Pointer {
+                            base: Box::new(declared_type),
+                        };
+                    }
+
                     result.push(FieldInfo::new(
                         embedded.r#type.id.content(),
                         resolved,
-                        TypeNode::Name(embedded.r#type.clone()),
+                        declared_type,
                         true,
                     ));
                 }
