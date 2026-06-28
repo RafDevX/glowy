@@ -4,7 +4,12 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::LabelBacktraceKind,
-    values::{ExpandableValue, SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef},
+    taint::funcs,
+    types::TypeKind,
+    values::{
+        ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
+        ValueRef,
+    },
 };
 
 pub fn visit_selection<'a>(
@@ -15,62 +20,96 @@ pub fn visit_selection<'a>(
 
     if let Some(pkg) = base.as_package_ref() {
         // this is not actually a selection, it's just a qualified operand name
-
         return super::visit_operand_name(ctx, node.selector, Some(pkg.qualifier()));
     }
+
+    // we employ multiple strategies to determine whether this selection
+    // represents a method access or a field access, as well as to fetch all
+    // the necessary details associated with either of them
 
     let location = ctx.pin(node.location.clone());
     let selector = node.selector.content();
 
-    // try method dispatch (current package only) before struct-field lookup.
-    // the order matters: `as_struct` would upgrade a Simple/Bottom base into
-    // an empty struct, after which `get_const(selector)` unconditionally
-    // returns Bottom and masks the method. Go's spec forbids a method and a
-    // field sharing a name on the same defined type, so dispatching the
-    // method first is correct for any well-typed access.
-    //
-    // we nest the base's backtrace into the returned method value so taint
-    // flows soundly whether the result is invoked (`x.M()`) or read as a
-    // method value (`f := x.M`). for an immediate call, the receiver's taint
-    // *also* propagates through `SyntheticSlot::Receiver` realization in
-    // `visit_call`; the union is idempotent.
-    //
-    // unresolved selections (all sound, all later degrade to standard blackbox
-    // handling in `visit_call`):
-    // - cross-package: `x.M` where `x` is not the current package -- we don't track
-    //   `x`'s static type, so we can't know it's a method
-    // - locally ambiguous: two receiver types in the current package both declare
-    //   the same `selector` identifier as a method
-    // - interface dispatch: method-set resolution is not modeled
+    // Strategy A - Typed Dispatch: when the base has a known declared type, use
+    // it to look up the method or struct field by name. this is the best case
+    // scenario and guaranteed to be correct, including cross-package
+
+    if let Some(r#type) = base.declared_type().cloned() {
+        if let Some(method) = r#type.get_method(selector) {
+            return funcs::nest_receiver_backtrace(method.borrow().value().get(), &base, location);
+        }
+
+        // note we only call `as_struct` after we know this is actually supposed
+        // to be a struct, as otherwise an unwanted upgrade would trigger
+
+        if let TypeKind::Struct { fields } = r#type.underlying()
+            && let Some(field) = fields.iter().find(|f| f.name() == selector)
+            && let Some(r#struct) = base.as_struct()
+        {
+            return r#struct
+                .get_const(&selector.to_owned(), location)
+                .into_with_declared_type(field.resolved_type());
+        }
+        // typed lookup didn't conclusively resolve; fall through to the
+        // name-only heuristic + the final blackbox-softening leaf below
+    }
+
+    // ----------
+
+    // Strategy B - Heuristic Dispatch: use just the name to try to find the
+    // method if it was declared in the current package (cross-package not
+    // supported), and only if it was the only one with that name in the current
+    // package
+
     if let Some(method) = ctx
         .symtab()
         .lookup_unique_method_in_current_package(selector)
     {
-        let value = method.borrow().value().get();
-
-        return match base.backtrace() {
-            Some(base_bt) => value.nest_backtrace(
-                LabelBacktraceKind::MethodReceiver,
-                None,
-                location,
-                [base_bt],
-            ),
-            None => {
-                // receiver is Bottom so we can skip all the nesting complexity
-                value
-            }
-        };
+        return funcs::nest_receiver_backtrace(method.borrow().value().get(), &base, location);
     }
 
-    let Some(r#struct) = base.as_struct() else {
-        ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
-            location: node.location.clone(),
-        });
+    // ----------
 
-        return ValueRef::new_bottom(location, None);
-    };
+    // Strategy C - Attempted Upgrade: assume that this is a field access on a
+    // struct, and so try to access/upgrade the base into one so that we can
+    // treat this as a constant field access
 
-    r#struct.get_const(&selector.to_owned(), location)
+    if let Some(r#struct) = base.as_struct() {
+        return r#struct.get_const(&selector.to_owned(), location);
+    }
+
+    // ----------
+
+    // Strategy D - Blackbox Softening: if the selector at least _plausibly_
+    // names a method (i.e., if the selector is the name of at least one method
+    // we are aware of, anywhere), assume this selection is method-related
+    // (especially since `as_struct` above failed) and just return a blackbox
+    // method value
+
+    // note that this check would, own its own, have very low probative value of
+    // this actually being method-related, but `visit_selection` by definition
+    // only applies for syntactic selections (which can only be field accesses
+    // or method accesses), all strategies above failed, and especially it was
+    // deemed impossible to upgrade the base to support field accesses, so this
+    // is our last resort to make some sense of the selection before just giving
+    // up and reporting an error, meaning that the bar is very low and there are
+    // very few possible situations for being in this narrow possibility space
+
+    if ctx.types().any_method_named(selector) {
+        let blackbox = FunctionValue::new_unknown(base.backtrace(), true);
+
+        return ValueRef::new(Value::Function(Box::new(blackbox)), location, None);
+    }
+
+    // ----------
+
+    // we really don't know what this is, so just surface the error
+
+    ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
+        location: node.location.clone(),
+    });
+
+    ValueRef::new_bottom(location, None)
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {

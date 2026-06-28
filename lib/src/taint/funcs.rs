@@ -830,7 +830,7 @@ fn try_extract_typed_selection_callee<'a>(
     None
 }
 
-fn nest_receiver_backtrace<'a>(
+pub fn nest_receiver_backtrace<'a>(
     method_value: ValueRef<'a>,
     receiver: &ValueRef<'a>,
     at_location: Pinned<'a, Location>,

@@ -15,7 +15,12 @@
 //! same type as its target). Identity comparison is therefore cheap (uses
 //! [`Rc::ptr_eq`]).
 
-use std::{cell::RefCell, collections::HashMap, fmt, mem, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    fmt, mem,
+    rc::Rc,
+};
 
 use parser::ast::{FieldDeclNode, TypeNameNode, TypeNode};
 
@@ -191,6 +196,9 @@ pub struct TypeRegistry<'a> {
     /// Deferred type-registry resolution retries.
     deferred: DeferredQueues<'a>,
 
+    /// Set of every method name observed across the entire analyzed corpus.
+    global_method_names: HashSet<&'a str>,
+
     /// Snapshot of the current file's import state.
     ///
     /// We use an [`Rc`] so that the snapshot can be reused and re-referenced
@@ -203,6 +211,7 @@ impl<'a> TypeRegistry<'a> {
         Self {
             types: HashMap::new(),
             deferred: DeferredQueues::default(),
+            global_method_names: HashSet::new(),
             current_file_imports_snapshot: None,
         }
     }
@@ -418,6 +427,14 @@ impl<'a> TypeRegistry<'a> {
         }
 
         result
+    }
+
+    pub fn record_method_name(&mut self, name: &'a str) {
+        self.global_method_names.insert(name);
+    }
+
+    pub fn any_method_named(&self, name: &str) -> bool {
+        self.global_method_names.contains(name)
     }
 
     pub fn queue_pending_alias(

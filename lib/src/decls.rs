@@ -206,6 +206,11 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
         && let Some(receiver_type_name) = receiver_base_type_name(&receiver.r#type)
         && let Some(package) = ctx.symtab().current_package_path().cloned()
     {
+        // remember this name unconditionally, so `InvalidSelectionBase` can
+        // soften any later unresolved `s.X` into a sound blackbox-method
+        // fallback whenever `X` is plausibly a method anywhere in the corpus
+        ctx.types_mut().record_method_name(node.name.content());
+
         if let Some(r#type) = ctx.types().lookup(&package, receiver_type_name) {
             // receiver type was successfully resolved, so we can register the
             // method directly
