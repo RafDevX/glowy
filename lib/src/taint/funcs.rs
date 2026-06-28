@@ -535,8 +535,8 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // extracted from type information, fallback to a weaker name-only heuristic
     // to determine whether the inferred method we decided to assume (from
     // `visit_selection`) is actually obviously wrong and should be discarded:
-    // if there is exactly one in-package method by that name and it has an
-    // arity incompatible with this call site, the heuristic pickup is
+    // if there is exactly one in-package method by that name and it has a
+    // cardinality incompatible with this call site, the heuristic pickup is
     // conclusively wrong (the receiver must actually be of an unrelated type
     // whose real `M` we never saw, because the input compiles). enforcing the
     // inferred method's signature would cascade into spurious errors, so we
@@ -544,7 +544,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // sound: blackbox folds all input taint, Möbius accepts any cardinality
     let blackbox_replacement = if !extracted_from_type
         && let Some((selection, _)) = method_receiver.as_ref()
-        && is_incompatible_arity_method(ctx, selection, &value_func, node.args.len())
+        && is_incompatible_cardinality_method(ctx, selection, &value_func, node.args.len())
     {
         Some(FunctionValue::new_unknown(
             // we keep only the overall access backtrace
@@ -1039,7 +1039,7 @@ fn tag_results_with_declared_types<'a>(
 // note: we assume the invoker already ruled out the case where this selection
 // is `a.b` and `a` is a valid package import qualifier; invoker must be
 // confident that this is a method, just not this specific method candidate
-fn is_incompatible_arity_method<'a>(
+fn is_incompatible_cardinality_method<'a>(
     ctx: &AnalysisContext<'a>,
     selection: &SelectionNode<'a>,
     candidate: &FunctionValue<'a>,
@@ -1073,12 +1073,12 @@ fn is_incompatible_arity_method<'a>(
         "Assumption invariant failed on method pickup strategy"
     );
 
-    let arity = signature.count_inputs();
+    let cardinality = signature.count_inputs();
     let variadic = signature.params.last().is_some_and(|param| param.variadic);
 
     // exact match is plausible; an excess of args is fine iff the last param is
     // variadic (it soaks up the rest); any other shape is conclusively wrong
-    args_len != arity && !(variadic && args_len >= arity.saturating_sub(1))
+    args_len != cardinality && !(variadic && args_len >= cardinality.saturating_sub(1))
 }
 
 fn handle_deferred_checks<'a>(
