@@ -408,36 +408,45 @@ fn calculate_outcome<'a>(
         return visit_call(ctx, call);
     }
 
-    let mut outcome = vec![];
-
-    let exprs = if exprs.is_empty()
-        && let Some(FunctionResultNode::Params(result)) = signature.map(|sig| &sig.result)
+    let raw_values: Vec<ValueRef<'a>> = if exprs.is_empty()
+        && let Some(sig) = signature
+        && let FunctionResultNode::Params(result) = &sig.result
     {
         // naked returns
 
         result
             .iter()
-            .flat_map(|p| p.ids.clone())
-            .map(ExprNode::Name)
+            .flat_map(|param| &param.ids)
+            .map(|id| {
+                if id.content() == "_" {
+                    // still takes up a position, we can't just skip it
+                    ValueRef::new_bottom(ctx.pin(id.location()), None)
+                } else {
+                    exprs::visit_single_expr(ctx, &ExprNode::Name(*id))
+                }
+            })
             .collect()
     } else {
-        Vec::from(exprs)
+        exprs
+            .iter()
+            .map(|expr| exprs::visit_single_expr(ctx, expr))
+            .collect()
     };
 
-    for expr in &exprs {
-        let expr_value = exprs::visit_single_expr(ctx, expr);
+    let pinned_location = ctx.pin(location.clone());
+    let branch_backtrace = ctx.branch_backtrace();
 
-        let backtrace = expr_value.nest_backtrace(
-            LabelBacktraceKind::Return,
-            None,
-            ctx.pin(location.clone()),
-            ctx.branch_backtrace().into_iter().cloned(),
-        );
-
-        outcome.push(backtrace);
-    }
-
-    outcome
+    raw_values
+        .into_iter()
+        .map(|value| {
+            value.nest_backtrace(
+                LabelBacktraceKind::Return,
+                None,
+                pinned_location.clone(),
+                branch_backtrace.cloned(),
+            )
+        })
+        .collect()
 }
 
 fn merge_outcomes<'a>(
