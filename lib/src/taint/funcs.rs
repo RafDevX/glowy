@@ -474,11 +474,27 @@ fn merge_outcomes<'a>(
     merged
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Very tight coupling means it would become more confusing if split up"
-)]
+enum CallResolution<'a> {
+    Final(Vec<ValueRef<'a>>),
+    PendingApply(ResolvedCall<'a>),
+}
+
+// preprocessed state snapshot of everything necessary to apply a function call
+struct ResolvedCall<'a> {
+    callee: ValueRef<'a>,
+    arg_values: Vec<ValueRef<'a>>,
+    blackbox_replacement: Option<Box<FunctionValue<'a>>>,
+    method_receiver_value: Option<ValueRef<'a>>,
+}
+
 pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec<ValueRef<'a>> {
+    match resolve_call(ctx, node) {
+        CallResolution::Final(values) => values,
+        CallResolution::PendingApply(resolved) => apply_call(ctx, node, resolved),
+    }
+}
+
+fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> CallResolution<'a> {
     // we treat some built-in functions specially, not as function calls but as
     // independent quasi-types of expressions. if they don't look like a real
     // function call (e.g., take a type instead of a value as input, like make)
@@ -487,19 +503,22 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // trigger their special handling, aborting function call handling on match
     if let ExprNode::Name(id) = &*node.func {
         match id.content() {
-            "append" => return vec![builtins::visit_append(ctx, node)],
-            "copy" => return vec![builtins::visit_copy(ctx, node)],
+            "append" => return CallResolution::Final(vec![builtins::visit_append(ctx, node)]),
+            "copy" => return CallResolution::Final(vec![builtins::visit_copy(ctx, node)]),
             "clear" => {
                 builtins::visit_clear(ctx, node);
-                return vec![];
+
+                return CallResolution::Final(vec![]);
             }
             "close" => {
                 builtins::visit_close(ctx, node);
-                return vec![];
+
+                return CallResolution::Final(vec![]);
             }
             "delete" => {
                 builtins::visit_delete(ctx, node);
-                return vec![];
+
+                return CallResolution::Final(vec![]);
             }
             _ => {} // nothing to do, it's a real function call
         }
@@ -508,7 +527,7 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // this looks a bit strange and convoluted, but it is necessary to guarantee
     // special handling for selections: when the callee is a selection (e.g.,
     // `x.M(...)`), we want to evaluate the base exactly once
-    let (mut value, extracted_from_type, method_receiver) = if let ExprNode::Selection(selection) =
+    let (value, extracted_from_type, method_receiver) = if let ExprNode::Selection(selection) =
         &*node.func
     {
         let base_value = exprs::visit_single_expr(ctx, &selection.base);
@@ -552,18 +571,18 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
             location: node.location.clone(),
         });
 
-        return vec![];
+        return CallResolution::Final(vec![]);
     };
 
     if value_func.is_type_constructor() {
         // treating this as a blackbox would be too punishing: we want to
         // preserve the existing value shape, so we use special handling
 
-        return vec![visit_type_conversion(
+        return CallResolution::Final(vec![visit_type_conversion(
             ctx,
             node,
             value_func.target_type().cloned(),
-        )];
+        )]);
     }
 
     // when this was detected as a method-form call but the callee could not be
@@ -581,85 +600,93 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         && let Some((selection, _)) = method_receiver.as_ref()
         && is_incompatible_cardinality_method(ctx, selection, &value_func, node.args.len())
     {
-        Some(FunctionValue::new_unknown(
+        Some(Box::new(FunctionValue::new_unknown(
             // we keep only the overall access backtrace
             value_func.backtrace().cloned(),
             // we don't know the type of the receiver, but we know it exists
             true,
-        ))
+        )))
     } else {
         None
     };
 
-    let func: &FunctionValue<'a> = blackbox_replacement.as_ref().unwrap_or(&value_func);
+    let func: &FunctionValue<'a> = blackbox_replacement.as_deref().unwrap_or(&value_func);
 
-    // note that f(a, b int) actually has 1 parameter with 2 identifiers, so
-    // we can't compare args.len() with params.len() directly; we need to
-    // process them first
+    // can only check for correct cardinality if we have a signature, otherwise
+    // we just assume everything is fine (would be wrong to error)
+    if let Some(signature) = func.signature() {
+        let count = signature.count_inputs();
 
-    // vvv cannot actually do this because if/else would have diff types,
-    // vvv so we must create it manually instead...
-    //
-    // let iter = params
-    //     .iter()
-    //     .flat_map(|param| {
-    //         if param.ids.is_empty() {
-    //             iter::once((param.variadic, None))
-    //         } else {
-    //             param.ids.iter().map(|id| (param.variadic, Some(id)))
-    //         }
-    //     })
-    //     .enumerate();
+        if node.args.len() != count {
+            let variadic = signature.params.last().is_some_and(|param| param.variadic);
 
-    let ids = if let Some(signature) = func.signature() {
-        let mut ids = vec![];
+            // if the last parameter is variadic, then it does not count for our
+            // expected cardinality, so we subtract one. we then use >= because
+            // 0 or more arguments can be folded into the variadic parameter
+            let expected = count.saturating_sub(1);
 
-        for param in &signature.params {
-            if param.ids.is_empty() {
-                ids.push((None, param.variadic, &param.r#type));
-            } else {
-                let iter = param
-                    .ids
-                    .iter()
-                    .map(|id| (Some(id), param.variadic, &param.r#type));
+            if !(variadic && node.args.len() >= expected) {
+                ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+                    expected,
+                    found: node.args.len(),
+                    location: node.location.clone(),
+                });
 
-                ids.extend(iter);
+                return CallResolution::Final(vec![]);
             }
         }
-
-        Some(ids)
-    } else {
-        None
-    };
-
-    // can only check for correct cardinality if we have a signature,
-    // otherwise we just assume everything is fine (would be wrong to error)
-    if let Some(ids) = &ids
-        && node.args.len() != ids.len()
-    {
-        let variadic = ids.last().is_some_and(|(_, variadic, _)| *variadic);
-
-        // if the last parameter is variadic, then it does not count for our
-        // expected cardinality, so we subtract one. we then use >= because 0 or
-        // more arguments can be folded into the variadic parameter
-        let expected = ids.len().saturating_sub(1);
-
-        if !(variadic && node.args.len() >= expected) {
-            ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                expected,
-                found: node.args.len(),
-                location: node.location.clone(),
-            });
-
-            return vec![];
-        }
     }
+
+    // drop the immutable borrow of `value` (held via `value_func`/`func`)
+    // before moving `value` into the resolved struct
+    drop(value_func);
+
+    // the selection ref captured alongside `base_value` was only needed for
+    // the blackbox-replacement decision above; from here on, only the base
+    // value matters (its taint flows in via SyntheticSlot::Receiver)
+    let method_receiver_value = method_receiver.map(|(_, base)| base);
 
     let arg_values: Vec<_> = node
         .args
         .iter()
         .map(|arg| exprs::visit_single_expr(ctx, arg))
         .collect();
+
+    CallResolution::PendingApply(ResolvedCall {
+        callee: value,
+        arg_values,
+        blackbox_replacement,
+        method_receiver_value,
+    })
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "Tight coupling between the sub-stages would make further splitting more confusing"
+)]
+fn apply_call<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    resolved: ResolvedCall<'a>,
+) -> Vec<ValueRef<'a>> {
+    let ResolvedCall {
+        callee: mut value,
+        blackbox_replacement,
+        method_receiver_value,
+        arg_values,
+    } = resolved;
+
+    // re-borrow the callee's FunctionValue; `resolve_call` already validated
+    // that this returns `Some` (and produced an error otherwise), so the
+    // expect upholds that invariant
+    let value_func = value
+        .as_function()
+        .expect("resolve_call ensures callee is a function value");
+
+    // reconstruct now that we have callee borrowed again
+    let func: &FunctionValue<'a> = blackbox_replacement.as_deref().unwrap_or(&value_func);
+
+    let ids = func.signature().map(collect_param_id_slots);
 
     let with_backtraces: Vec<_> = arg_values.iter().map(|v| (v, v.backtrace())).collect();
 
@@ -794,10 +821,10 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
     // will never panic if all assumptions hold
     let ids = ids.unwrap();
 
-    let receiver = match &method_receiver {
+    let receiver = match &method_receiver_value {
         // method-form call: reuse the receiver value we already evaluated up
         // top, taint and all
-        Some((_, base)) => Some(base.backtrace()),
+        Some(base) => Some(base.backtrace()),
         // this is a method called via a non-selection expression (e.g. in the
         // form `f := obj.M; f()`); we don't have a `selection.base` to read the
         // bound receiver from here, but its taint was already nested into
@@ -864,6 +891,27 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
 
     // TODO: test calling variadic fn, like `f(string, ...int)` with
     // `f("hello", 1, 2, 3)`
+}
+
+fn collect_param_id_slots<'sig, 'a>(
+    signature: &'sig FunctionSignatureNode<'a>,
+) -> Vec<(Option<&'sig Span<'a>>, bool, &'sig TypeNode<'a>)> {
+    let mut ids = vec![];
+
+    for param in &signature.params {
+        if param.ids.is_empty() {
+            ids.push((None, param.variadic, &param.r#type));
+        } else {
+            let iter = param
+                .ids
+                .iter()
+                .map(|id| (Some(id), param.variadic, &param.r#type));
+
+            ids.extend(iter);
+        }
+    }
+
+    ids
 }
 
 fn try_extract_typed_selection_callee<'a>(
