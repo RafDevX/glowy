@@ -1,10 +1,10 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 
 use parser::{
     Location,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, FieldDeclNode,
-        LiteralNode, StructLiteralFieldsNode, TypeNameNode, TypeNode,
+        LiteralNode, StructLiteralFieldsNode, TypeNode,
     },
 };
 
@@ -13,8 +13,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
-    symbols::QualifiedSymbolResolutionResult,
-    taint::funcs,
+    taint::{funcs, types},
     values::{BacktraceContainer, CompositeValue, SimpleConstValue, Value, ValueRef},
 };
 
@@ -104,7 +103,7 @@ fn visit_unknown_composite_literal<'a>(
 ) -> ValueRef<'a> {
     let location = ctx.pin(location);
 
-    let underlying = try_resolve_named_type_underlying(ctx, r#type);
+    let underlying = types::resolve_named_underlying(ctx, r#type);
 
     let value = match &underlying {
         Some(TypeNode::Array { .. }) => Value::Array(visit_integer_keyed_composite_literal(
@@ -138,56 +137,6 @@ fn visit_unknown_composite_literal<'a>(
     };
 
     ValueRef::new(value, location, ctx.types().resolve(ctx.symtab(), r#type))
-}
-
-fn try_resolve_named_type_underlying<'a>(
-    ctx: &AnalysisContext<'a>,
-    r#type: &TypeNode<'a>,
-) -> Option<TypeNode<'a>> {
-    let TypeNode::Name(name) = r#type else {
-        // if the input is not a Name, it is its own underlying type
-        return Some(r#type.clone());
-    };
-
-    let mut name = Cow::Borrowed(name);
-
-    // this always converges since Go does not allow cyclic type defs
-    loop {
-        let TypeNameNode { package, id, .. } = *name;
-
-        let symbol = match package {
-            None => ctx.symtab().get_symbol(id.content())?,
-            Some(pkg) => match ctx
-                .symtab()
-                .get_qualified_symbol(pkg.content(), id.content())
-            {
-                QualifiedSymbolResolutionResult::Success(symbol) => symbol,
-                QualifiedSymbolResolutionResult::UnknownQualifier
-                | QualifiedSymbolResolutionResult::UnknownSymbol
-                | QualifiedSymbolResolutionResult::PendingAnalysis => return None,
-            },
-        };
-
-        // cloning is necessary because of AssumedImmutable with as_function
-        let value = symbol.borrow().value().get().clone_inner();
-        let func = value.as_function()?; // might coerce, so might mutate
-
-        if !func.is_type_constructor() {
-            // cannot resolve further
-            return None;
-        }
-
-        match func.known_underlying_type() {
-            Some(TypeNode::Name(next)) => {
-                name = Cow::Owned(next.clone()); // make borrow checker happy
-            }
-            // anything other than another indirection (Name) is a success!
-            concrete => return concrete.cloned(),
-        }
-
-        drop(func);
-        symbol.borrow_mut().set_value(value); // apply potential mutation
-    }
 }
 
 // mirrors parser logic

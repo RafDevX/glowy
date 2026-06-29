@@ -19,7 +19,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    taint::{exprs, mutation::LeftValue},
+    taint::{exprs, mutation::LeftValue, types},
     values::{
         BacktraceContainer, ChannelValue, CompositeValue, CompositeValueAdapter,
         SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
@@ -27,11 +27,17 @@ use crate::{
 };
 
 pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> ValueRef<'a> {
+    // the first argument is any type whose *underlying* type must be a slice,
+    // map, or channel. so for `make(SomeNamedType, ...)` we need to traverse
+    // the known defined-type/alias indirections to figure out the actual root
+    // underlying type (resolution failure ends up on the wildcard arm; sound)
+    let resolved = types::resolve_named_underlying(ctx, &node.r#type);
+
     #[expect(
         clippy::wildcard_enum_match_arm,
         reason = "We explicitly only support these types (per Go spec)"
     )]
-    match &node.r#type {
+    match resolved.as_ref().unwrap_or(&node.r#type) {
         TypeNode::Slice { .. } => {
             let n = node
                 .n

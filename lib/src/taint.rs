@@ -22,6 +22,7 @@ mod exprs;
 mod funcs;
 mod implicit;
 mod mutation;
+mod types;
 
 pub use funcs::ResolvedCall;
 
