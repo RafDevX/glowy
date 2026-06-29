@@ -145,6 +145,10 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Simple(_))
     }
 
+    pub fn is_mobius(&self) -> bool {
+        matches!(*self.value.borrow(), Value::Mobius(_))
+    }
+
     pub fn is_channel(&self) -> bool {
         matches!(*self.value.borrow(), Value::Channel(_))
     }

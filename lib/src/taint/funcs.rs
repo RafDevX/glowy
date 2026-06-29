@@ -469,7 +469,18 @@ fn calculate_outcome<'a>(
     // below applies and that function call's outcome is the final outcome
     // (case 2 from https://go.dev/ref/spec#Return_statements)
     if let [ExprNode::Call(call)] = exprs {
-        return visit_call(ctx, call);
+        let raw = visit_call(ctx, call);
+
+        return if let Some(sig) = signature
+            && let [single] = raw.as_slice()
+            && single.is_mobius()
+        {
+            // expand Möbius to the correct cardinality expected for a call to
+            // this current outer function, adapting what the inner one returned
+            single.try_expand_to(sig.result.len()).unwrap_or(raw)
+        } else {
+            raw
+        };
     }
 
     let raw_values: Vec<ValueRef<'a>> = if exprs.is_empty()
