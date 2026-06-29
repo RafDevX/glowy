@@ -96,11 +96,11 @@ impl BlanketDirective {
         }
     }
 
-    pub(crate) fn kind(&self) -> BlanketDirectiveKind {
+    pub fn kind(&self) -> BlanketDirectiveKind {
         self.kind
     }
 
-    pub(crate) fn label(&self) -> Label<'_> {
+    pub fn label(&self) -> Label<'_> {
         self.label.as_label()
     }
 }

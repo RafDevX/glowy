@@ -236,7 +236,7 @@ impl<'a> FunctionValue<'a> {
     // try to absorb body-derived analysis state from another function, usually
     // useful only when this value "shadows" or replaces in some way the other
     #[must_use = "if false, caller should report a soundness limitation"]
-    pub(crate) fn try_absorb_body_state_from(&mut self, other: &Self) -> bool {
+    pub fn try_absorb_body_state_from(&mut self, other: &Self) -> bool {
         if other.deferred_checks.is_empty() {
             // nothing to lose, so trivially sound (nothing to do)
             return true;

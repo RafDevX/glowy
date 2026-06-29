@@ -11,7 +11,10 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{Symbol, SymbolRef},
-    values::{CaptureBinding, FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
+    values::{
+        CaptureBinding, FunctionRef, FunctionValue, Mergeable, SelfAwareBacktraceContainer,
+        ValueRef,
+    },
 };
 
 mod collector;
@@ -39,7 +42,7 @@ pub fn register_closure_captures<'a>(
             continue;
         };
 
-        let outer_decl = {
+        let (outer_decl, outer_value) = {
             let borrowed = symbol.borrow();
 
             if !borrowed.mutable() {
@@ -50,7 +53,7 @@ pub fn register_closure_captures<'a>(
                 continue;
             }
 
-            borrowed.declared_name()
+            (borrowed.declared_name(), borrowed.value())
         };
 
         let Some(mut func) = value.as_function_mut() else {
@@ -80,11 +83,13 @@ pub fn register_closure_captures<'a>(
         )
         .unwrap(); // safe because we know label is not Bottom
 
-        ctx.declare_new_symbol(Symbol::new_ref(
-            local_decl,
-            true,
-            ValueRef::from(capture_backtrace),
-        ));
+        // mirror the outer's top-level shape so that shape-discriminating
+        // operations inside the closure body (e.g. `m[k] = v`, `ch <- v`,
+        // `delete(m, k)`) see the correct shape instead of coercing into an
+        // arbitrary default, but retain the synthetic as the sole backtrace
+        let local_value = outer_value.get().copy_shape(capture_backtrace);
+
+        ctx.declare_new_symbol(Symbol::new_ref(local_decl, true, local_value));
     }
 }
 
@@ -217,16 +222,32 @@ pub fn apply_capture_mutations<'a>(
             continue;
         }
 
-        if ctx.was_symbol_declared_within_active_split(&outer_symbol) == Some(false) {
-            realized = Cow::Owned(realized.nest_backtrace(
-                LabelBacktraceKind::Assignment,
-                Some(outer_decl.content()),
-                outer_value.location().clone(),
-                outer_value.backtrace(),
-            ));
-        }
+        let final_value =
+            if ctx.was_symbol_declared_within_active_split(&outer_symbol) == Some(false) {
+                // outer was declared outside the active split, so its prior
+                // state must survive the closure call alongside whatever the
+                // closure produced. merging via Mergeable preserves per-key
+                // labels on composites (vs. flattening them all into r#dyn,
+                // which feeding outer_value.backtrace() into `extra_children`
+                // would do)
 
-        outer_symbol.borrow_mut().set_value(realized.into_owned());
+                outer_value
+                    .merge_with(
+                        &realized,
+                        LabelBacktraceKind::Assignment,
+                        Cow::Borrowed(outer_value.location()),
+                    )
+                    .nest_backtrace(
+                        LabelBacktraceKind::Assignment,
+                        Some(outer_decl.content()),
+                        outer_value.location().clone(),
+                        [],
+                    )
+            } else {
+                realized.into_owned()
+            };
+
+        outer_symbol.borrow_mut().set_value(final_value);
     }
 }
 

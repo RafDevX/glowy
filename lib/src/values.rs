@@ -165,6 +165,12 @@ impl<'a> ValueRef<'a> {
         Self::from_backtrace_or_bottom_at(self.backtrace(), location_if_bottom)
     }
 
+    pub fn copy_shape(&self, backtrace: LabelBacktrace<'a>) -> Self {
+        let inner = self.value.borrow().copy_shape(backtrace);
+
+        Self::new(inner, self.location.clone(), self.declared_type.clone())
+    }
+
     /// Coerce a [`Value::Simple`] to take a complex shape when first used.
     fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
         // a Möbius wrapping a Simple represents a single value of unknown
