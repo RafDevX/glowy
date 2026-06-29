@@ -33,6 +33,10 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
     // underlying type (resolution failure ends up on the wildcard arm; sound)
     let resolved = types::resolve_named_underlying(ctx, &node.r#type);
 
+    // result's declared type is the user-written type (a named alias preserves
+    // its identity even though we dispatch on its underlying shape below)
+    let declared_type = ctx.types().resolve(ctx.symtab(), &node.r#type);
+
     #[expect(
         clippy::wildcard_enum_match_arm,
         reason = "We explicitly only support these types (per Go spec)"
@@ -57,7 +61,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 location.clone(),
             );
 
-            ValueRef::new(Value::Slice(composite), location, None)
+            ValueRef::new(Value::Slice(composite), location, declared_type)
         }
         TypeNode::Map { .. } => {
             if let Some(m) = &node.m {
@@ -81,7 +85,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
             ValueRef::new(
                 Value::Map(CompositeValue::empty(None)),
                 ctx.pin(node.location.clone()),
-                None,
+                declared_type,
             )
         }
         TypeNode::Channel { .. } => {
@@ -108,7 +112,11 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 .as_ref()
                 .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
 
-            ValueRef::new(Value::Channel(ChannelValue::new(initial)), location, None)
+            ValueRef::new(
+                Value::Channel(ChannelValue::new(initial)),
+                location,
+                declared_type,
+            )
         }
         _ => {
             // we don't know what this is, so there's nothing we can do...
@@ -135,6 +143,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
             );
 
             ValueRef::from_backtrace_or_bottom_at(backtrace, || location)
+                .into_with_declared_type(declared_type)
         }
     }
 }
@@ -265,7 +274,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
         &node.location,
     );
 
-    // return concerns the number of elements copied, which is tainted
+    // `copy`'s return value is the number of elements copied, which is tainted
     ValueRef::from_backtrace_or_bottom_at(combined, || location)
 }
 

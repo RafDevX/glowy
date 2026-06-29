@@ -235,5 +235,14 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         .flatten(),
     );
 
+    // slicing preserves the slice type per Go spec; for arrays the result is
+    // anonymous `[]E` (no named type), and string slicing degrades to `string`
+    // (untyped) so we can only propagate when base is itself a slice
+    let declared_type = base
+        .declared_type()
+        .filter(|t| matches!(t.underlying(), TypeKind::Slice))
+        .cloned();
+
     ValueRef::from_backtrace_or_bottom_at(result, || location)
+        .into_with_declared_type(declared_type)
 }
