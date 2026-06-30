@@ -2,8 +2,8 @@ use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode, SlicingNode, TypeAssertionNode,
-        TypeInstantiationNode, TypeNode,
+        AmbiguousBracketAccessNode, CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode,
+        SlicingNode, TypeAssertionNode, TypeInstantiationNode, TypeNode,
     },
     parser::{BacktrackingContext, PResult, expect, of_kind, types::parse_type},
     token::TokenKind,
@@ -147,7 +147,7 @@ fn parse_slicing<'a>(
     })
 }
 
-// indexing, slicing, or type instantiation
+// indexing, slicing, or type instantiation (or ambiguous bracket access)
 fn parse_bracket_expr<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
@@ -158,6 +158,8 @@ fn parse_bracket_expr<'a>(
         return parse_slicing(s, base, None).map(Into::into);
     }
 
+    let mut type_probe = s.clone(); // needed for later
+
     // try to parse an expression (either index or the first part of slicing)
     let mut context = BacktrackingContext::new(s);
     let b = context.stream();
@@ -165,14 +167,14 @@ fn parse_bracket_expr<'a>(
     let disposition = match parse_expression(b, true) {
         Ok(expr) => match b.peek().cloned().transpose()? {
             Some(of_kind!(TokenKind::Colon)) => BracketExprDisposition::Slicing(expr),
-            Some(of_kind!(TokenKind::SquareR)) => BracketExprDisposition::Indexing(expr),
+            Some(of_kind!(TokenKind::SquareR)) => BracketExprDisposition::Indexable(expr),
             Some(of_kind!(TokenKind::Comma))
                 if b.next().is_some() // advance
                     && matches!(b.peek(), Some(Ok(of_kind!(TokenKind::SquareR)))) =>
             {
-                // this was just a trailing comma, so it's still indexing
+                // just a trailing comma after the single expression
 
-                BracketExprDisposition::Indexing(expr)
+                BracketExprDisposition::Indexable(expr)
             }
             // this was probably not actually an expression, just part of a type
             // that resembles an expression but would then be followed by trash
@@ -183,19 +185,40 @@ fn parse_bracket_expr<'a>(
     };
 
     let node = match disposition {
-        BracketExprDisposition::Indexing(index) => {
-            context.commit()?; // we got it right
+        BracketExprDisposition::Indexable(index) => {
+            // we got it right
+            context.commit()?;
 
-            expect(s, TokenKind::SquareR, Some("indexing expression"))?;
+            let closing = expect(s, TokenKind::SquareR, Some("bracket expression"))?;
 
             let location = s.location_starting_at(base.location().start);
 
-            IndexingNode {
-                base: Box::new(base),
-                index: Box::new(index),
-                location,
+            // this is probably an indexing expression, but it could also still
+            // be a type instantiation with a single argument shaped so that it
+            // parses both as a type and as an expression (e.g., `f[int]` is not
+            // syntactically distinguishable from `arr[i]` at parse-time), so we
+            // need to check if we have such ambiguity by trying to parse the
+            // same tokens as a type and checking for `]` in the same place
+            let type_args = parse_type_instantiation_args(&mut type_probe)
+                .ok()
+                .filter(|_| type_probe.peek() == Some(&Ok(closing)));
+
+            if let Some(type_args_if_instantiation) = type_args {
+                AmbiguousBracketAccessNode {
+                    base: Box::new(base),
+                    index_if_indexing: Box::new(index),
+                    type_args_if_instantiation,
+                    location,
+                }
+                .into()
+            } else {
+                IndexingNode {
+                    base: Box::new(base),
+                    index: Box::new(index),
+                    location,
+                }
+                .into()
             }
-            .into()
         }
         BracketExprDisposition::Slicing(first) => {
             context.commit()?; // we got it right
@@ -225,7 +248,7 @@ fn parse_bracket_expr<'a>(
 }
 
 enum BracketExprDisposition<'a> {
-    Indexing(ExprNode<'a>),
+    Indexable(ExprNode<'a>),
     Slicing(ExprNode<'a>),
     TypeInstantiation,
 }

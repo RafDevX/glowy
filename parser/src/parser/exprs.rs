@@ -3,8 +3,9 @@ use super::{PResult, expect};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode, ExprNode,
-        IndexingNode, LiteralNode, OrderedF64, SelectionNode, StructLiteralFieldsNode,
+        AmbiguousBracketAccessNode, CompositeLiteralElementListNode, CompositeLiteralElementNode,
+        ConversionNode, ExprNode, IndexingNode, LiteralNode, OrderedF64, SelectionNode,
+        StructLiteralFieldsNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -416,15 +417,18 @@ pub fn parse_primary_expression<'a>(
         ExprNode::Selection(SelectionNode { base, .. }) => {
             matches!(&**base, ExprNode::Name(_))
         }
-        ExprNode::Indexing(IndexingNode { base, .. }) => match &**base {
-            ExprNode::Name(_) => true,
-            ExprNode::Selection(SelectionNode {
-                base: inner_base, ..
-            }) => {
-                matches!(&**inner_base, ExprNode::Name(_))
+        ExprNode::Indexing(IndexingNode { base, .. })
+        | ExprNode::AmbiguousBracketAccess(AmbiguousBracketAccessNode { base, .. }) => {
+            match &**base {
+                ExprNode::Name(_) => true,
+                ExprNode::Selection(SelectionNode {
+                    base: inner_base, ..
+                }) => {
+                    matches!(&**inner_base, ExprNode::Name(_))
+                }
+                _ => false,
             }
-            _ => false,
-        },
+        }
         _ => false,
     };
 
