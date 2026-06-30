@@ -257,6 +257,11 @@ pub enum ExprNode<'a> {
     Slicing(SlicingNode<'a>),
     Conversion(ConversionNode<'a>),
     TypeAssertion(TypeAssertionNode<'a>),
+    // instantiation is not described/listed by the Go spec as a true kind of
+    // expression, but it exists as a semantic concept that requires some form
+    // of syntactic representation, and it behaves like an expression in all
+    // relevant regards (e.g., `inst := myGenericFunc[int]; inst(2)` is valid)
+    TypeInstantiation(TypeInstantiationNode<'a>),
     UnaryOp {
         kind: UnaryOpKind,
         operand: Box<ExprNode<'a>>,
@@ -297,6 +302,7 @@ impl ExprNode<'_> {
             ExprNode::Slicing(slicing) => &slicing.location,
             ExprNode::Conversion(conversion) => &conversion.location,
             ExprNode::TypeAssertion(assertion) => &assertion.location,
+            ExprNode::TypeInstantiation(instantiation) => &instantiation.location,
         };
 
         Cow::Borrowed(r#ref)
@@ -390,6 +396,13 @@ impl<'a> From<TypeAssertionNode<'a>> for ExprNode<'a> {
     #[inline]
     fn from(node: TypeAssertionNode<'a>) -> Self {
         Self::TypeAssertion(node)
+    }
+}
+
+impl<'a> From<TypeInstantiationNode<'a>> for ExprNode<'a> {
+    #[inline]
+    fn from(node: TypeInstantiationNode<'a>) -> Self {
+        Self::TypeInstantiation(node)
     }
 }
 
@@ -514,6 +527,9 @@ pub struct SelectionNode<'a> {
     pub location: Location, // for better error messages
 }
 
+// note that there may be cases where single-arg type instantiation and indexing
+// are syntactically identical, in which case an IndexingNode is returned (vs. a
+// TypeInstantiationNode) and it is up to the AST consumer to disambiguate them
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexingNode<'a> {
     pub base: Box<ExprNode<'a>>,
@@ -541,6 +557,16 @@ pub struct ConversionNode<'a> {
 pub struct TypeAssertionNode<'a> {
     pub expr: Box<ExprNode<'a>>,
     pub r#type: TypeNode<'a>,
+    pub location: Location, // for better error messages
+}
+
+// note that there may be cases where single-arg type instantiation and indexing
+// are syntactically identical, in which case an IndexingNode is returned (vs. a
+// TypeInstantiationNode) and it is up to the AST consumer to disambiguate them
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeInstantiationNode<'a> {
+    pub base: Box<ExprNode<'a>>,
+    pub type_args: Vec<TypeNode<'a>>,
     pub location: Location, // for better error messages
 }
 

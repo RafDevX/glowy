@@ -3,6 +3,7 @@ use crate::{
     ParsingError, TokenStream,
     ast::{
         CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode, SlicingNode, TypeAssertionNode,
+        TypeInstantiationNode, TypeNode,
     },
     parser::{BacktrackingContext, PResult, expect, of_kind, types::parse_type},
     token::TokenKind,
@@ -146,38 +147,104 @@ fn parse_slicing<'a>(
     })
 }
 
-fn parse_indexing_or_slice<'a>(
+// indexing, slicing, or type instantiation
+fn parse_bracket_expr<'a>(
     s: &mut TokenStream<'a>,
     base: ExprNode<'a>,
 ) -> PResult<'a, ExprNode<'a>> {
-    expect(s, TokenKind::SquareL, Some("indexing/slicing expression"))?;
+    expect(s, TokenKind::SquareL, Some("bracket expression"))?;
 
     if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
         return parse_slicing(s, base, None).map(Into::into);
     }
 
-    let index = parse_expression(s, true)?;
+    // try to parse an expression (either index or the first part of slicing)
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
 
-    if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
-        return parse_slicing(s, base, Some(index)).map(Into::into);
-    }
+    let disposition = match parse_expression(b, true) {
+        Ok(expr) => match b.peek().cloned().transpose()? {
+            Some(of_kind!(TokenKind::Colon)) => BracketExprDisposition::Slicing(expr),
+            Some(of_kind!(TokenKind::SquareR)) => BracketExprDisposition::Indexing(expr),
+            Some(of_kind!(TokenKind::Comma))
+                if b.next().is_some() // advance
+                    && matches!(b.peek(), Some(Ok(of_kind!(TokenKind::SquareR)))) =>
+            {
+                // this was just a trailing comma, so it's still indexing
 
-    // optional trailing comma
-    if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
-        s.next(); // advance
-    }
-
-    expect(s, TokenKind::SquareR, Some("indexing expression"))?;
-
-    let location = s.location_starting_at(base.location().start);
-
-    let indexing = IndexingNode {
-        base: Box::new(base),
-        index: Box::new(index),
-        location,
+                BracketExprDisposition::Indexing(expr)
+            }
+            // this was probably not actually an expression, just part of a type
+            // that resembles an expression but would then be followed by trash
+            _ => BracketExprDisposition::TypeInstantiation,
+        },
+        // we couldn't parse an expression, so it must be a type
+        Err(_) => BracketExprDisposition::TypeInstantiation,
     };
 
-    Ok(indexing.into())
+    let node = match disposition {
+        BracketExprDisposition::Indexing(index) => {
+            context.commit()?; // we got it right
+
+            expect(s, TokenKind::SquareR, Some("indexing expression"))?;
+
+            let location = s.location_starting_at(base.location().start);
+
+            IndexingNode {
+                base: Box::new(base),
+                index: Box::new(index),
+                location,
+            }
+            .into()
+        }
+        BracketExprDisposition::Slicing(first) => {
+            context.commit()?; // we got it right
+
+            parse_slicing(s, base, Some(first))?.into()
+        }
+        BracketExprDisposition::TypeInstantiation => {
+            // we need to rollback, since any "expression" we may have parsed is
+            // not actually correct and needs to be re-parsed as a type
+
+            let type_args = parse_type_instantiation_args(s)?;
+
+            expect(s, TokenKind::SquareR, Some("type instantiation"))?;
+
+            let location = s.location_starting_at(base.location().start);
+
+            TypeInstantiationNode {
+                base: Box::new(base),
+                type_args,
+                location,
+            }
+            .into()
+        }
+    };
+
+    Ok(node)
+}
+
+enum BracketExprDisposition<'a> {
+    Indexing(ExprNode<'a>),
+    Slicing(ExprNode<'a>),
+    TypeInstantiation,
+}
+
+fn parse_type_instantiation_args<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Vec<TypeNode<'a>>> {
+    let mut args = vec![parse_type(s)?];
+
+    while let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
+        s.next(); // advance
+
+        if matches!(s.peek(), Some(Ok(of_kind!(TokenKind::SquareR)))) {
+            // this was actually just an optional trailing comma
+            break;
+        }
+
+        args.push(parse_type(s)?);
+    }
+
+    Ok(args)
 }
 
 fn parse_type_assertion<'a>(
@@ -209,7 +276,7 @@ pub fn parse_postfix_if_exists<'a>(
 ) -> PResult<'a, ExprNode<'a>> {
     let expr = match s.peek().cloned().transpose()? {
         Some(of_kind!(TokenKind::ParenL)) => parse_call(s, operand)?,
-        Some(of_kind!(TokenKind::SquareL)) => parse_indexing_or_slice(s, operand)?,
+        Some(of_kind!(TokenKind::SquareL)) => parse_bracket_expr(s, operand)?,
         Some(of_kind!(TokenKind::Period)) => {
             // this might be a postfix (selection/type assertion), but we cannot
             // know for sure at this point since it depends on the token(s)
