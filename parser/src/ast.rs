@@ -553,7 +553,7 @@ impl<'a> From<AmbiguousBracketAccessNode<'a>> for IndexingNode<'a> {
         let AmbiguousBracketAccessNode {
             base,
             index_if_indexing: index,
-            type_args_if_instantiation: _,
+            type_arg_if_instantiation: _,
             location,
         } = ambiguous;
 
@@ -601,13 +601,13 @@ impl<'a> From<AmbiguousBracketAccessNode<'a>> for TypeInstantiationNode<'a> {
         let AmbiguousBracketAccessNode {
             base,
             index_if_indexing: _,
-            type_args_if_instantiation: type_args,
+            type_arg_if_instantiation,
             location,
         } = ambiguous;
 
         Self {
             base,
-            type_args,
+            type_args: vec![type_arg_if_instantiation],
             location,
         }
     }
@@ -617,7 +617,8 @@ impl<'a> From<AmbiguousBracketAccessNode<'a>> for TypeInstantiationNode<'a> {
 pub struct AmbiguousBracketAccessNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub index_if_indexing: Box<ExprNode<'a>>,
-    pub type_args_if_instantiation: Vec<TypeNode<'a>>,
+    // if there were multiple args, there'd be no ambiguity
+    pub type_arg_if_instantiation: TypeNode<'a>,
     pub location: Location, // for better error messages
 }
 

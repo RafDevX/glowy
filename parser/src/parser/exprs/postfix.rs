@@ -199,15 +199,19 @@ fn parse_bracket_expr<'a>(
             // syntactically distinguishable from `arr[i]` at parse-time), so we
             // need to check if we have such ambiguity by trying to parse the
             // same tokens as a type and checking for `]` in the same place
-            let type_args = parse_type_instantiation_args(&mut type_probe)
+            let type_arg = parse_type_instantiation_args(&mut type_probe)
                 .ok()
-                .filter(|_| type_probe.peek() == Some(&Ok(closing)));
+                .filter(|_| type_probe.peek() == Some(&Ok(closing)))
+                .filter(|args| args.len() == 1)
+                .map(Vec::into_iter)
+                .as_mut()
+                .and_then(Iterator::next);
 
-            if let Some(type_args_if_instantiation) = type_args {
+            if let Some(type_arg_if_instantiation) = type_arg {
                 AmbiguousBracketAccessNode {
                     base: Box::new(base),
                     index_if_indexing: Box::new(index),
-                    type_args_if_instantiation,
+                    type_arg_if_instantiation,
                     location,
                 }
                 .into()
