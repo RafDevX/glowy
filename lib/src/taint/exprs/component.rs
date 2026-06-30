@@ -1,4 +1,7 @@
-use parser::ast::{IndexingNode, SelectionNode, SlicingNode};
+use parser::{
+    Location,
+    ast::{ExprNode, IndexingNode, SelectionNode, SlicingNode},
+};
 
 use crate::{
     context::AnalysisContext,
@@ -123,29 +126,39 @@ pub fn visit_selection_with_base<'a>(
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
     let base = super::visit_single_expr(ctx, &node.base);
 
-    let location = ctx.pin(node.location.clone());
+    visit_indexing_with(ctx, &base, &node.index, &node.location)
+}
+
+pub fn visit_indexing_with<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    base: &ValueRef<'a>,
+    index: &ExprNode<'a>,
+    location: &Location,
+) -> ValueRef<'a> {
+    let pinned = ctx.pin(location.clone());
 
     let Some(composite) = base.as_composite() else {
         ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
-            location: node.location.clone(),
+            location: location.clone(),
         });
 
-        return ValueRef::new_bottom(location, None);
+        return ValueRef::new_bottom(pinned, None);
     };
 
-    let index = SimpleConstValue::try_resolve_from_expr(&node.index);
+    let index = SimpleConstValue::try_resolve_from_expr(index);
 
-    let result = composite.get_at_key(index.as_ref(), location.clone());
+    let result = composite.get_at_key(index.as_ref(), pinned.clone());
+
 
     if base.is_map() {
         // indexing a map returns a second value corresponding to whether the
         // key was or not present in the map. here, we assume that this presence
         // value has the same label as the actual returned value
-        let presence = result.downgrade(|| location.clone());
+        let presence = result.downgrade(|| pinned.clone());
 
         let expandable = ExpandableValue::new(result, vec![presence]);
 
-        ValueRef::new(Value::Expandable(expandable), location, None)
+        ValueRef::new(Value::Expandable(expandable), pinned, None)
     } else {
         result
     }

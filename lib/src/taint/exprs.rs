@@ -2,7 +2,9 @@ use std::borrow::Cow;
 
 use parser::{
     Span,
-    ast::{ExprNode, TypeAssertionNode, UnaryOpKind},
+    ast::{
+        AmbiguousBracketAccessNode, ExprNode, TypeAssertionNode, TypeInstantiationNode, UnaryOpKind,
+    },
 };
 
 use super::{channels, funcs};
@@ -30,6 +32,15 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         ExprNode::Slicing(slicing) => component::visit_slicing(ctx, slicing),
         ExprNode::Conversion(conversion) => visit_single_expr(ctx, &conversion.expr),
         ExprNode::TypeAssertion(assertion) => visit_type_assertion(ctx, assertion),
+        ExprNode::TypeInstantiation(instantiation) => {
+            // we don't do anything with these type args, so just visit the base
+
+            visit_single_expr(ctx, &instantiation.base)
+                .with_location(ctx.pin(instantiation.location.clone()))
+        }
+        ExprNode::AmbiguousBracketAccess(ambiguous) => {
+            visit_ambiguous_bracket_access(ctx, ambiguous)
+        }
         ExprNode::UnaryOp {
             kind: UnaryOpKind::Receive,
             operand,
@@ -207,4 +218,35 @@ fn visit_type_assertion<'a>(
     let expandable = ExpandableValue::new(value, vec![secondary]);
 
     ValueRef::new(Value::Expandable(expandable), location, None)
+}
+
+fn visit_ambiguous_bracket_access<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &AmbiguousBracketAccessNode<'a>,
+) -> ValueRef<'a> {
+    if ctx
+        .types()
+        .resolve(ctx.symtab(), &node.type_arg_if_instantiation)
+        .is_some()
+    {
+        // if the type is known here, it's a type instantiation
+        return visit_single_expr(ctx, &TypeInstantiationNode::from(node.clone()).into());
+    }
+
+    let base = visit_single_expr(ctx, &node.base);
+
+    if base.is_function() {
+        // functions cannot be indexed, so it has to be a type instantiation
+        // (we replicate the visitor implementation here since it's so simple,
+        // and re-creating a TypeInstantiationNode for this visit would lead to
+        // the base being visited multiple times; bad for e.g. side-effects)
+
+        return base.with_location(ctx.pin(node.location.clone()));
+    }
+
+    // if we got here, we assume it's an indexing expression, but we cannot
+    // convert our node into an IndexingNode since it'd lead to base being
+    // visited multiple times (which would be bad for, e.g., side-effects)
+
+    component::visit_indexing_with(ctx, &base, &node.index_if_indexing, &node.location)
 }

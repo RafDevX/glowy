@@ -3,14 +3,14 @@ use std::collections::HashSet;
 use parser::{
     Span,
     ast::{
-        AssignmentKind, AssignmentNode, BindingDeclSpecNode, BlockNode, CallNode,
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode, DeclNode,
-        ElseNode, ExprNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode, ForHeaderNode,
-        ForNode, ForRangeNode, FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode,
-        FunctionSignatureNode, IfNode, IndexingNode, LiteralNode, MakeNode, SelectClauseNode,
-        SelectNode, SelectionNode, SendNode, ShortVarDeclNode, SlicingNode, StatementNode,
-        StructLiteralFieldsNode, SwitchNode, TypeAssertionNode, TypeSwitchCaseClause,
-        TypeSwitchNode,
+        AmbiguousBracketAccessNode, AssignmentKind, AssignmentNode, BindingDeclSpecNode, BlockNode,
+        CallNode, CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode,
+        DeclNode, ElseNode, ExprNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode,
+        ForHeaderNode, ForNode, ForRangeNode, FunctionDeclNode, FunctionParamDeclNode,
+        FunctionResultNode, FunctionSignatureNode, IfNode, IndexingNode, LiteralNode, MakeNode,
+        SelectClauseNode, SelectNode, SelectionNode, SendNode, ShortVarDeclNode, SlicingNode,
+        StatementNode, StructLiteralFieldsNode, SwitchNode, TypeAssertionNode,
+        TypeInstantiationNode, TypeSwitchCaseClause, TypeSwitchNode,
     },
 };
 
@@ -487,6 +487,8 @@ impl<'a> SymbolCaptureCollector<'a> for ExprNode<'a> {
             ExprNode::Selection(selection) => selection,
             ExprNode::Indexing(indexing) => indexing,
             ExprNode::Slicing(slicing) => slicing,
+            ExprNode::TypeInstantiation(instantiation) => instantiation,
+            ExprNode::AmbiguousBracketAccess(ambiguous) => ambiguous,
             ExprNode::Conversion(conversion) => conversion,
             ExprNode::TypeAssertion(assertion) => assertion,
             ExprNode::UnaryOp { operand, .. } => &**operand,
@@ -673,6 +675,31 @@ impl<'a> SymbolCaptureCollector<'a> for SlicingNode<'a> {
         }
 
         self.base.collect_captured_symbols(captured, declared);
+    }
+}
+
+impl<'a> SymbolCaptureCollector<'a> for TypeInstantiationNode<'a> {
+    fn collect_captured_symbols(
+        &self,
+        captured: &mut HashSet<&'a str>,
+        declared: &mut HashSet<&'a str>,
+    ) {
+        // type arguments live in the type namespace, not the value namespace,
+        // so they capture no value-level symbols
+        self.base.collect_captured_symbols(captured, declared);
+    }
+}
+
+impl<'a> SymbolCaptureCollector<'a> for AmbiguousBracketAccessNode<'a> {
+    fn collect_captured_symbols(
+        &self,
+        captured: &mut HashSet<&'a str>,
+        declared: &mut HashSet<&'a str>,
+    ) {
+        // we don't know which interpretation will be chosen, so we have to be
+        // conservative and consider both possible cases
+        IndexingNode::from(self.clone()).collect_captured_symbols(captured, declared);
+        TypeInstantiationNode::from(self.clone()).collect_captured_symbols(captured, declared);
     }
 }
 

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use parser::{
     Location, Span,
-    ast::{ExprNode, IndexingNode, SelectionNode, UnaryOpKind},
+    ast::{AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, UnaryOpKind},
 };
 
 use crate::{
@@ -72,6 +72,7 @@ fn as_valid_left_value<'a, 'b>(
     let inner: &'b dyn LeftValue = match expr {
         ExprNode::Name(name) => name,
         ExprNode::Indexing(indexing) => indexing,
+        ExprNode::AmbiguousBracketAccess(ambiguous) => ambiguous,
         ExprNode::Selection(selection) => selection,
 
         // Glowy does not model heap addresses, so `&x` and `*p` are treated as
@@ -100,6 +101,7 @@ fn as_valid_left_value<'a, 'b>(
         | ExprNode::Slicing(_)
         | ExprNode::Conversion(_)
         | ExprNode::TypeAssertion(_)
+        | ExprNode::TypeInstantiation(_)
         | ExprNode::UnaryOp { .. }
         | ExprNode::BinaryOp { .. } => {
             if let Some(ctx) = ctx {
@@ -385,6 +387,51 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                 drop(composite);
                 Some(target)
             });
+    }
+}
+
+// an AmbiguousBracketAccessNode used as a left-value can only ever be an
+// indexing, since type instantiation is not a valid left-value, so this impl
+// just forwards everything to IndexingNode's own implementation
+impl<'a> LeftValue<'a> for AmbiguousBracketAccessNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        backtrace_kind: LabelBacktraceKind,
+        rhs: ValueRef<'a>,
+        simple: bool,
+        explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        subtract: &Label<'a>,
+        location: &Location,
+    ) {
+        let indexing = IndexingNode::from(self.clone());
+
+        indexing.assign(
+            ctx,
+            backtrace_kind,
+            rhs,
+            simple,
+            explicit_backtrace,
+            subtract,
+            location,
+        );
+    }
+
+    fn root_operand(&self) -> Option<Span<'a>> {
+        let indexing = IndexingNode::from(self.clone());
+
+        indexing.root_operand()
+    }
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    ) {
+        let indexing = IndexingNode::from(self.clone());
+
+        indexing.mutate_target(ctx, assignment_location, mutator);
     }
 }
 
