@@ -695,7 +695,6 @@ mod tests {
                         stmt: Some(Box::new(StatementNode::Expr {
                             expr: ExprNode::Call(CallNode {
                                 func: Box::new(ExprNode::Name(Span::new("y", 202, 7))),
-                                type_arg: None,
                                 args: vec![],
                                 variadic: false,
                                 location: 202..205,
@@ -766,7 +765,6 @@ mod tests {
                             body: vec![StatementNode::Expr {
                                 expr: ExprNode::Call(CallNode {
                                     func: Box::new(ExprNode::Name(Span::new("f", 141, 5))),
-                                    type_arg: None,
                                     args: vec![],
                                     variadic: false,
                                     location: 141..144,
@@ -793,7 +791,6 @@ mod tests {
                             body: vec![StatementNode::Expr {
                                 expr: ExprNode::Call(CallNode {
                                     func: Box::new(ExprNode::Name(Span::new("g", 187, 6))),
-                                    type_arg: None,
                                     args: vec![],
                                     variadic: false,
                                     location: 187..190,
@@ -810,7 +807,6 @@ mod tests {
                         ids: vec![Span::new("x", 249, 9)],
                         exprs: vec![ExprNode::Call(CallNode {
                             func: Box::new(ExprNode::Name(Span::new("f", 254, 9))),
-                            type_arg: None,
                             args: vec![],
                             variadic: false,
                             location: 254..257,
@@ -865,7 +861,6 @@ mod tests {
                                 StatementNode::Expr {
                                     expr: ExprNode::Call(CallNode {
                                         func: Box::new(ExprNode::Name(Span::new("f", 489, 16))),
-                                        type_arg: None,
                                         args: vec![],
                                         variadic: false,
                                         location: 489..492,
@@ -891,7 +886,6 @@ mod tests {
                             body: vec![StatementNode::Expr {
                                 expr: ExprNode::Call(CallNode {
                                     func: Box::new(ExprNode::Name(Span::new("g", 644, 20))),
-                                    type_arg: None,
                                     args: vec![],
                                     variadic: false,
                                     location: 644..647,
@@ -990,7 +984,6 @@ mod tests {
                                 StatementNode::Expr {
                                     expr: ExprNode::Call(CallNode {
                                         func: Box::new(ExprNode::Name(Span::new("f", 244, 7))),
-                                        type_arg: None,
                                         args: vec![],
                                         variadic: false,
                                         location: 244..247,
@@ -1023,7 +1016,6 @@ mod tests {
                     decl: None,
                     expr: ExprNode::Call(CallNode {
                         func: Box::new(ExprNode::Name(Span::new("f", 358, 11))),
-                        type_arg: None,
                         args: vec![ExprNode::Literal(LiteralNode::Int {
                             value: 7,
                             location: 360..361
@@ -1041,7 +1033,6 @@ mod tests {
                         body: vec![StatementNode::Expr {
                             expr: ExprNode::Call(CallNode {
                                 func: Box::new(ExprNode::Name(Span::new("g", 414, 12))),
-                                type_arg: None,
                                 args: vec![ExprNode::Name(Span::new("z", 416, 12))],
                                 variadic: false,
                                 location: 414..418,

@@ -490,7 +490,6 @@ pub enum CompositeLiteralElementNode<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallNode<'a> {
     pub func: Box<ExprNode<'a>>,
-    pub type_arg: Option<TypeNode<'a>>,
     pub args: Vec<ExprNode<'a>>,
     pub variadic: bool,     // whether the last argument is "x..."
     pub location: Location, // for better error messages
