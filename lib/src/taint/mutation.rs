@@ -10,6 +10,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    symbols::{QualifiedSymbolResolutionResult, SymbolRef},
     taint::exprs,
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
@@ -55,6 +56,17 @@ pub trait LeftValue<'a> {
         let Some(root) = self.root_operand() else {
             return false;
         };
+
+        // a root operand that names a package qualifier (not shadowed by a
+        // local symbol) is necessarily a write to a cross-package symbol,
+        // which by construction was *not* declared inside our active split.
+        // resolve_operand_name would emit a spurious UnknownSymbol here, so
+        // short-circuit silently with the safe (non-override) answer
+        if ctx.symtab().qualifier_exists(root.content())
+            && ctx.symtab().get_symbol(root.content()).is_none()
+        {
+            return false;
+        }
 
         let Some(symbol) = exprs::resolve_operand_name(ctx, root, None) else {
             return false;
@@ -290,23 +302,31 @@ impl<'a> LeftValue<'a> for Span<'a> {
             return;
         };
 
-        if !symbol.borrow().mutable() {
-            ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: *self });
-
-            return;
-        }
-
-        // we need to clone_inner to ensure compliance with the AssumedImmutable
-        // restrictions (cannot directly mutate a Symbol's value)
-        // See: Symbol::value
-        let value = symbol.borrow().value().get().clone_inner();
-
-        let Some(mutated) = mutator(ctx, value) else {
-            return;
-        };
-
-        symbol.borrow_mut().set_value(mutated);
+        mutate_through_symbol(ctx, &symbol, *self, mutator);
     }
+}
+
+fn mutate_through_symbol<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    symbol: &SymbolRef<'a>,
+    name: Span<'a>,
+    mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+) {
+    if !symbol.borrow().mutable() {
+        ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: name });
+
+        return;
+    }
+
+    // we need to clone_inner to ensure compliance with the AssumedImmutable
+    // restrictions (cannot directly mutate a Symbol's value)
+    let value = symbol.borrow().value().get().clone_inner();
+
+    let Some(mutated) = mutator(ctx, value) else {
+        return;
+    };
+
+    symbol.borrow_mut().set_value(mutated);
 }
 
 impl<'a> LeftValue<'a> for IndexingNode<'a> {
@@ -488,6 +508,45 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         assignment_location: &Location,
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
     ) {
+        // while in most cases mutating a selection means changing some field in
+        // some struct, technically it is possible that this is actually the
+        // mutation of an exported binding in another package, since qualified
+        // operand names are parsed as selections too, and `pkg.X = ...` is not
+        // distinguishable from `obj.X = ...` without additional checks.
+        // in particular, we need to know if the base is a known qualifier that
+        // has not been shadowed by any local symbol
+        if let ExprNode::Name(qualifier) = &*self.base
+            && ctx.symtab().qualifier_exists(qualifier.content())
+            && ctx.symtab().get_symbol(qualifier.content()).is_none()
+        {
+            match ctx
+                .symtab()
+                .get_qualified_symbol(qualifier.content(), self.selector.content())
+            {
+                QualifiedSymbolResolutionResult::Success(symbol) => {
+                    mutate_through_symbol(ctx, &symbol, self.selector, mutator);
+                }
+                // package source is unavailable (blackbox) or has not yet been
+                // analyzed in this pass -- the write target is invisible to us,
+                // so we silently drop the write. rhs side effects and
+                // sink/assert annotations are handled at the assignment site,
+                // before `mutate_target` runs, so soundness is preserved
+                // (mirrors the read-side softening in `resolve_operand_name`)
+                QualifiedSymbolResolutionResult::PendingAnalysis => {}
+                // we already checked above with `qualifier_exists`
+                QualifiedSymbolResolutionResult::UnknownQualifier => unreachable!(),
+                QualifiedSymbolResolutionResult::UnknownSymbol => {
+                    // the package *is* analyzed and has no such symbol
+
+                    ctx.report_error(AnalysisErrorKind::UnknownSymbol {
+                        found: self.selector,
+                    });
+                }
+            }
+
+            return;
+        }
+
         #[expect(
             clippy::shadow_unrelated,
             reason = "Same context, just threaded through closures"
