@@ -20,11 +20,13 @@ mod enforcement;
 mod explicit;
 mod exprs;
 mod funcs;
+mod goto;
 mod implicit;
 mod mutation;
 mod types;
 
 pub use funcs::ResolvedCall;
+pub use goto::GotoConvergenceState;
 
 /// Structured information representing a declared sink.
 ///
@@ -210,14 +212,26 @@ fn visit_block<'a>(ctx: &mut AnalysisContext<'a>, node: &BlockNode<'a>) {
 
 fn visit_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
     let mut disallow_further = false;
+    let mut already_reported_unreachable = false; // prevent duplicates
 
     for statement in statements {
-        if disallow_further {
+        if let StatementNode::Labeled { label, .. } = statement
+            && goto::is_label_targeted(ctx, label.content())
+        {
+            // a labeled statement that is targeted by a `goto` statement is
+            // always reachable, so reset the unreachable reporting state
+            disallow_further = false;
+            already_reported_unreachable = false;
+        }
+
+        if disallow_further && !already_reported_unreachable {
             ctx.report_error(AnalysisErrorKind::Unreachable {
                 location: statement.location().into_owned(),
             });
 
-            break;
+            already_reported_unreachable = true;
+
+            continue;
         }
 
         visit_statement(ctx, statement);
@@ -265,6 +279,9 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Assignment(assignment) => explicit::visit_assignment(ctx, assignment),
         StatementNode::ShortVarDecl(decl) => explicit::visit_short_var_decl(ctx, decl),
         StatementNode::Labeled { label, inner } => {
+            // handle the case where we know a `goto` stmt targets this label
+            goto::visit_label_in_goto_context(ctx, *label);
+
             visit_statement(ctx, inner);
 
             if let StatementNode::For(_) = inner.as_ref() {
@@ -288,14 +305,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             implicit::visit_continue_break(ctx, *label, location);
         }
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
-        StatementNode::Goto { location, .. } => {
-            // FIXME: goto statements are currently not supported since they can
-            // almost completely break the control flow and are extremely rare
-            // in real-life Go programs (hopefully)
-            ctx.report_error(AnalysisErrorKind::GotoNotSupported {
-                location: location.clone(),
-            });
-        }
+        StatementNode::Goto { label, location } => goto::visit_goto(ctx, *label, location),
         StatementNode::Go { expr, location } => {
             if let ExprNode::Call(call) = expr {
                 // for our purposes, a `go` statement is functionally equivalent
@@ -315,7 +325,8 @@ fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
     match node {
         StatementNode::Continue { .. }
         | StatementNode::Break { .. }
-        | StatementNode::Return { .. } => true,
+        | StatementNode::Return { .. }
+        | StatementNode::Goto { .. } => true,
         StatementNode::Block(statements) => statements
             .last()
             .is_some_and(disallows_subsequent_statements),
@@ -336,7 +347,6 @@ fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
         | StatementNode::Switch(_)
         | StatementNode::Select(_)
         | StatementNode::Fallthrough { .. }
-        | StatementNode::Goto { .. }
         | StatementNode::Go { .. }
         | StatementNode::Defer { .. } => false,
     }

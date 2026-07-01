@@ -12,7 +12,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
-    taint::{BlanketDirective, BlanketDirectives, ResolvedCall},
+    taint::{BlanketDirective, BlanketDirectives, GotoConvergenceState, ResolvedCall},
     types::TypeRegistry,
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -79,8 +79,11 @@ pub struct AnalysisContext<'a> {
     /// for soundness reasons (e.g., the inner fix-point over a `for range`
     /// body) without producing duplicate diagnostics for assertions/sinks.
     error_suppression_depth: u8,
+    /// Stack of per-function `goto` convergence loop context state.
+    goto_states: Vec<GotoConvergenceState<'a>>,
     /// Locations of currently active split control-flow regions.
     split_control_flow_regions: Vec<Pinned<'a, Location>>,
+
     /// Universally-applicable directives registered for specific functions.
     blanket_directives: &'a BlanketDirectives,
 }
@@ -101,6 +104,7 @@ impl<'a> AnalysisContext<'a> {
             current_branch_scope_depth: 0,
             error_suppression_depth: 0,
             split_control_flow_regions: Vec::new(),
+            goto_states: Vec::new(),
             blanket_directives,
         }
     }
@@ -319,6 +323,22 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn pop_error_suppression(&mut self) {
         self.error_suppression_depth -= 1;
+    }
+
+    pub fn push_goto_context(&mut self, state: GotoConvergenceState<'a>) {
+        self.goto_states.push(state);
+    }
+
+    pub fn pop_goto_context(&mut self) -> Option<GotoConvergenceState<'a>> {
+        self.goto_states.pop()
+    }
+
+    pub fn current_goto_context(&self) -> Option<&GotoConvergenceState<'a>> {
+        self.goto_states.last()
+    }
+
+    pub fn current_goto_context_mut(&mut self) -> Option<&mut GotoConvergenceState<'a>> {
+        self.goto_states.last_mut()
     }
 
     pub fn push_split_control_flow(&mut self, location: Location) {

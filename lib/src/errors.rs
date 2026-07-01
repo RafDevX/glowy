@@ -350,16 +350,6 @@ pub enum AnalysisErrorKind<'a> {
         location: Location,
     },
 
-    /// Unsupported usage of a `goto` statement.
-    ///
-    /// This analyzer version does not support `goto` statement and so simply
-    /// ignores them completely, which in most cases should be a rather
-    /// unreasonable assumption and so undoubtedly puts into question the
-    /// analysis result's credibility.
-    GotoNotSupported {
-        /// Where the statement was found.
-        location: Location,
-    },
     /// Unsupported `defer` statement in `init` function.
     ///
     /// This analyzer version does not support `defer` statements in `init`
@@ -428,16 +418,21 @@ impl AnalysisErrorKind<'_> {
             | Self::DuplicateStructFieldName { .. }
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
-            Self::GotoNotSupported { .. }
-            | Self::DeferInInitNotDeferred { .. }
-            | Self::UnsoundFunctionMergingAssignment { .. } => AnalysisErrorCategory::UnsupportedGo,
+
+            Self::DeferInInitNotDeferred { .. } | Self::UnsoundFunctionMergingAssignment { .. } => {
+                AnalysisErrorCategory::UnsupportedGo
+            }
+
             Self::DuplicateVirtualFilePath | Self::TooManyBuildTagDimensions { .. } => {
                 AnalysisErrorCategory::Misconfiguration
             }
+
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
+
             Self::NoRegisteredFiles | Self::InvalidDeclassificationSemantics { .. } => {
                 AnalysisErrorCategory::Suspicious
             }
+
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation
             }

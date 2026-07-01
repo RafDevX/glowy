@@ -211,10 +211,22 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn rewind_child_scope_cursor(&mut self) {
-        if let Some(cursor) = self.current_cursor.last_mut()
-            && *cursor > 0
-        {
-            *cursor -= 1;
+        if let Some(cursor) = self.current_cursor.last_mut() {
+            *cursor = cursor.saturating_sub(1);
+        }
+    }
+
+    #[must_use]
+    pub fn current_child_scope_cursor(&self) -> usize {
+        self.current_cursor
+            .last()
+            .copied()
+            .expect("must be inside a scope")
+    }
+
+    pub fn set_child_scope_cursor(&mut self, value: usize) {
+        if let Some(cursor) = self.current_cursor.last_mut() {
+            *cursor = value;
         }
     }
 

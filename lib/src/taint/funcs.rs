@@ -16,7 +16,7 @@ use crate::{
     symbols::Symbol,
     taint::{
         BlanketDirective, BlanketDirectiveKind, SinkDescriptor, SinkKind, annotations, enforcement,
-        exprs,
+        exprs, goto,
     },
     types::{TypeInfo, TypeKind},
     values::{
@@ -193,7 +193,7 @@ fn visit_function_def<'a>(
     ctx.push_function(value.clone());
     ctx.increase_branch_scope_depth();
 
-    super::visit_statements(ctx, body);
+    visit_function_body(ctx, body);
 
     apply_deferred_calls(ctx); // from `defer` statements
 
@@ -296,7 +296,7 @@ fn build_function_value<'a>(
     func_val
 }
 
-// allows for naked returns
+// sets up plumbing to allow for naked returns
 fn bind_named_result_locals<'a>(ctx: &mut AnalysisContext<'a>, result: &FunctionResultNode<'a>) {
     let FunctionResultNode::Params(params) = result else {
         // FunctionResultNode::Single is always unnamed; None has no results
@@ -318,6 +318,58 @@ fn bind_named_result_locals<'a>(ctx: &mut AnalysisContext<'a>, result: &Function
             ctx.declare_new_symbol(Symbol::new_ref(pinned, true, value));
         }
     }
+}
+
+fn visit_function_body<'a>(ctx: &mut AnalysisContext<'a>, body: &BlockNode<'a>) {
+    if !goto::block_contains_goto(body) {
+        // this matches the vast majority of functions and collapses into simply
+        // visiting the statement block as normal
+
+        super::visit_statements(ctx, body);
+
+        return;
+    }
+
+    // otherwise, we know there are one or more `goto` statements in this
+    // function's body, so we need to run repeated speculative visits with error
+    // reporting suppressed until everything converges, since `goto` statements
+    // might point to past statements (labels we have already seen but did not
+    // know at the same the full taint context implied from the `goto` location)
+
+    goto::push_goto_convergence_context(ctx);
+
+    // checkpoint the function scope's child-scope cursor and deferred state so
+    // each speculative iteration re-enters the same child scopes (rather than
+    // sibling scopes) and starts from a clean deferred-backtrace baseline
+    let initial_cursor = ctx.symtab().current_child_scope_cursor();
+    let pre_body_deferred = ctx.checkpoint_deferred_state();
+
+    // termination: labels form a finite lattice and per-label state only ever
+    // grows monotonically across iterations (taint can be added, but never
+    // removed), so convergence is guaranteed to be eventually reached
+    let mut stable = false;
+    while !stable {
+        ctx.push_error_suppression(); // this is a speculative visit
+
+        super::visit_statements(ctx, body);
+
+        ctx.pop_error_suppression();
+
+        goto::pop_goto_branch_backtraces(ctx);
+
+        stable = goto::advance_goto_convergence_iteration(ctx);
+
+        // restore state from checkpoint, since this was a speculative visit
+        ctx.symtab_mut().set_child_scope_cursor(initial_cursor);
+        ctx.restore_deferred_state(pre_body_deferred.clone());
+    }
+
+    // final pass with errors enabled, now that the state is stable
+    super::visit_statements(ctx, body);
+
+    goto::pop_goto_branch_backtraces(ctx);
+
+    goto::pop_goto_convergence_context(ctx);
 }
 
 pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
