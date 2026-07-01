@@ -542,13 +542,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self
                 .deferred_checks
                 .snapshot_aware_eq(&other.deferred_checks)
-            && self.captures.len() == other.captures.len()
-            && self.captures.iter().all(|(decl, binding)| {
-                other
-                    .captures
-                    .get(decl)
-                    .is_some_and(|other_binding| binding.snapshot_aware_eq(other_binding))
-            })
+            && self.captures.snapshot_aware_eq(&other.captures)
             && self.yield_param == other.yield_param
             && self.yield_acc.snapshot_aware_eq(&other.yield_acc)
         // intentionally ignoring call count

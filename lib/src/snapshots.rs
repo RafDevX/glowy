@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::HashMap, hash, rc::Rc};
 
 use crate::{labels::LabelBacktrace, values::ValueRef};
 
@@ -139,5 +139,14 @@ impl<T: SnapshotAware> SnapshotAware for Vec<T> {
         self.iter()
             .zip(other.iter())
             .all(|(a, b)| a.snapshot_aware_eq(b))
+    }
+}
+
+impl<K: Eq + hash::Hash, V: SnapshotAware> SnapshotAware for HashMap<K, V> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.len() == other.len()
+            && self
+                .iter()
+                .all(|(key, value)| other.get(key).snapshot_aware_eq(&Some(value)))
     }
 }
