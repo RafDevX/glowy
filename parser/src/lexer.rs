@@ -253,9 +253,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn accumulate_while<F, S>(&mut self, initial: S, func: F) -> (Span<'a>, S)
+    fn accumulate_while<F, S>(&mut self, initial: S, mut func: F) -> (Span<'a>, S)
     where
-        F: Fn(char, &mut S, &mut Self) -> bool, // FIXME: rewrite using FnMut?
+        F: FnMut(char, &mut S, &mut Self) -> bool,
     {
         let (original_offset, original_line) = (self.offset, self.line);
 
@@ -275,9 +275,9 @@ impl<'a> Lexer<'a> {
         (span, state)
     }
 
-    fn read_while<F>(&mut self, cond: F) -> Span<'a>
+    fn read_while<F>(&mut self, mut cond: F) -> Span<'a>
     where
-        F: Fn(char) -> bool,
+        F: FnMut(char) -> bool,
     {
         self.accumulate_while((), |ch, (), _| cond(ch)).0
     }
