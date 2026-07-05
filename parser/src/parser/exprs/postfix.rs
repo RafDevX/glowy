@@ -20,8 +20,9 @@ fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, Ex
     expect(s, TokenKind::ParenL, Some("function call"))?;
     let annotation = s.take_last_annotation();
 
-    // TODO: support trailing comma
-
+    // note that this will already allow for a trailing comma, BUT that also
+    // means that it'll allow e.g. `f(1, arr, ...)`, which is wrong but not so
+    // big of a problem (parses the same as `f(1, arr...)`)
     let args = parse_expressions_list_while(
         s,
         |token| !matches!(token.kind, TokenKind::Ellipsis | TokenKind::ParenR),
@@ -31,6 +32,11 @@ fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, Ex
 
     let variadic = if let Some(Ok(of_kind!(TokenKind::Ellipsis))) = s.peek() {
         s.next(); // advance
+
+        // an optional trailing comma is allowed after the ellipsis
+        if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
+            s.next(); // advance
+        }
 
         true
     } else {
