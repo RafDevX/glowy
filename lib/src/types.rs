@@ -22,6 +22,7 @@ use std::{
     rc::Rc,
 };
 
+use indexmap::IndexMap;
 use parser::ast::{FieldDeclNode, TypeNameNode, TypeNode};
 
 use crate::{
@@ -127,7 +128,7 @@ impl<'a> TypeInfo<'a> {
         let mut at_this_depth = PromotionFrontier::None;
         let mut descend_into = Vec::new();
 
-        for field in fields {
+        for field in fields.values() {
             if !field.is_embedded() {
                 // we only care about embedded fields
                 continue;
@@ -241,7 +242,10 @@ pub enum TypeKind<'a> {
     // built-in types (`int`, `string`, ...), defined-type chain
     // (`type Wrapper Other`), or otherwise anything opaque to analysis
     Opaque,
-    Struct { fields: Vec<FieldInfo<'a>> },
+    Struct {
+        // IndexMap preserves declaration order upon iteration
+        fields: IndexMap<&'a str, StructFieldInfo<'a>>,
+    },
     Map,
     Slice,
     Array,
@@ -252,8 +256,7 @@ pub enum TypeKind<'a> {
 }
 
 #[derive(Debug)]
-pub struct FieldInfo<'a> {
-    name: &'a str,
+pub struct StructFieldInfo<'a> {
     // we need interior mutability (via RefCell) since sometimes a field's
     // declared type may live in a sibling file or another package not yet seen
     // at the this struct's type declaration is first found
@@ -262,23 +265,17 @@ pub struct FieldInfo<'a> {
     declared_type_node: TypeNode<'a>,
 }
 
-impl<'a> FieldInfo<'a> {
+impl<'a> StructFieldInfo<'a> {
     pub fn new(
-        name: &'a str,
         r#type: Option<Rc<TypeInfo<'a>>>,
         declared_type_node: TypeNode<'a>,
         embedded: bool,
     ) -> Self {
         Self {
-            name,
             r#type: RefCell::new(r#type),
             embedded,
             declared_type_node,
         }
-    }
-
-    pub fn name(&self) -> &'a str {
-        self.name
     }
 
     pub fn resolved_type(&self) -> Option<Rc<TypeInfo<'a>>> {
@@ -514,8 +511,8 @@ impl<'a> TypeRegistry<'a> {
         &self,
         symtab: &SymbolTable<'a>,
         fields: &[FieldDeclNode<'a>],
-    ) -> Vec<FieldInfo<'a>> {
-        let mut result = Vec::new();
+    ) -> IndexMap<&'a str, StructFieldInfo<'a>> {
+        let mut result = IndexMap::new();
 
         for decl in fields {
             match decl {
@@ -528,12 +525,10 @@ impl<'a> TypeRegistry<'a> {
                             continue;
                         };
 
-                        result.push(FieldInfo::new(
+                        result.insert(
                             name.content(),
-                            resolved.clone(),
-                            explicit.r#type.clone(),
-                            false,
-                        ));
+                            StructFieldInfo::new(resolved.clone(), explicit.r#type.clone(), false),
+                        );
                     }
                 }
                 FieldDeclNode::Embedded(embedded) => {
@@ -549,12 +544,10 @@ impl<'a> TypeRegistry<'a> {
                         };
                     }
 
-                    result.push(FieldInfo::new(
+                    result.insert(
                         embedded.r#type.id.content(),
-                        resolved,
-                        declared_type,
-                        true,
-                    ));
+                        StructFieldInfo::new(resolved, declared_type, true),
+                    );
                 }
             }
         }
@@ -616,7 +609,7 @@ impl<'a> TypeRegistry<'a> {
             return;
         };
 
-        if fields.iter().all(FieldInfo::is_resolved) {
+        if fields.values().all(StructFieldInfo::is_resolved) {
             return;
         }
 
@@ -704,7 +697,7 @@ impl<'a> TypeRegistry<'a> {
 
             let mut any_unresolved = false;
 
-            for field in fields {
+            for field in fields.values() {
                 if field.is_resolved() {
                     continue;
                 }

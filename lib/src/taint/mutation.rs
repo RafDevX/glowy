@@ -635,7 +635,7 @@ impl FieldShapeHint {
             return None;
         };
 
-        let field = fields.iter().find(|f| f.name() == field_name)?;
+        let field = fields.get(field_name)?;
 
         // prefer the resolved TypeInfo (for named types), and fall back to the
         // syntactic TypeNode for anonymous field types that never enter the

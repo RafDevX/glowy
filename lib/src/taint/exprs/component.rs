@@ -54,7 +54,7 @@ pub fn visit_selection_with_base<'a>(
         // to be a struct, as otherwise an unwanted upgrade would trigger
 
         if let TypeKind::Struct { fields } = r#type.underlying()
-            && let Some(field) = fields.iter().find(|f| f.name() == selector)
+            && let Some(field) = fields.get(selector)
             && let Some(r#struct) = base.as_struct()
         {
             return r#struct
