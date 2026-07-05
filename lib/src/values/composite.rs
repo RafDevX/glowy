@@ -101,6 +101,21 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     }
 }
 
+impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
+    pub fn copy_shape(&self, backtrace: LabelBacktrace<'a>) -> Self {
+        let r#const = self
+            .r#const
+            .iter()
+            .map(|(k, v)| (k.clone(), v.copy_shape(backtrace.clone())))
+            .collect();
+
+        Self {
+            r#const,
+            r#dyn: Some(backtrace),
+        }
+    }
+}
+
 impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
     pub fn slice_const(
         &self,

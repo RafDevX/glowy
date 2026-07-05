@@ -41,10 +41,13 @@ impl<'a> Value<'a> {
     pub(super) fn copy_shape(&self, backtrace: LabelBacktrace<'a>) -> Self {
         match self {
             Self::Channel(_) => Self::Channel(ChannelValue::new(Some(backtrace))),
-            Self::Map(_) => Self::Map(CompositeValue::empty(Some(backtrace))),
-            Self::Slice(_) => Self::Slice(CompositeValue::empty(Some(backtrace))),
-            Self::Array(_) => Self::Array(CompositeValue::empty(Some(backtrace))),
-            Self::Struct(_) => Self::Struct(CompositeValue::empty(Some(backtrace))),
+            // composites recurse into their known entries so shape-sensitive
+            // operations targeting nested fields still find the correct shape
+            // (e.g., `s.ch <- v` on a captured struct with a channel field)
+            Self::Map(composite) => Self::Map(composite.copy_shape(backtrace)),
+            Self::Slice(composite) => Self::Slice(composite.copy_shape(backtrace)),
+            Self::Array(composite) => Self::Array(composite.copy_shape(backtrace)),
+            Self::Struct(composite) => Self::Struct(composite.copy_shape(backtrace)),
             Self::Simple(_)
             | Self::Function(_)
             | Self::PackageRef(_)
