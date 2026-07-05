@@ -241,9 +241,9 @@ fn parse_composite_literal_element_list<'a>(
 
         if optional_keys && let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
             // no key, just nested
-            let value = parse_composite_literal_element_list(s, optional_keys)?;
+            let value = parse_nested_composite_literal(s, optional_keys)?;
 
-            values.push((None, CompositeLiteralElementNode::Nested(value)));
+            values.push((None, value));
 
             continue;
         }
@@ -260,10 +260,7 @@ fn parse_composite_literal_element_list<'a>(
 
             // parse the actual value
             let value = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
-                CompositeLiteralElementNode::Nested(parse_composite_literal_element_list(
-                    s,
-                    optional_keys,
-                )?)
+                parse_nested_composite_literal(s, optional_keys)?
             } else {
                 CompositeLiteralElementNode::Expr(parse_expression(s, true)?)
             };
@@ -287,6 +284,19 @@ fn parse_composite_literal_element_list<'a>(
     expect(s, TokenKind::CurlyR, Some("composite literal"))?;
 
     Ok(values)
+}
+
+fn parse_nested_composite_literal<'a>(
+    s: &mut TokenStream<'a>,
+    optional_keys: bool,
+) -> PResult<'a, CompositeLiteralElementNode<'a>> {
+    let beginning = s.peek().cloned().transpose()?;
+
+    let elements = parse_composite_literal_element_list(s, optional_keys)?;
+
+    let location = s.location_since(&beginning.unwrap());
+
+    Ok(CompositeLiteralElementNode::Nested { elements, location })
 }
 
 fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'a>> {
