@@ -284,13 +284,15 @@ pub fn parse_statements_until<'a>(
 }
 
 pub fn parse_block<'a>(s: &mut TokenStream<'a>) -> PResult<'a, BlockNode<'a>> {
-    expect(s, TokenKind::CurlyL, Some("block"))?;
+    let opening = expect(s, TokenKind::CurlyL, Some("block"))?;
 
     let stmts = parse_statements_until(s, |t| t.kind == TokenKind::CurlyR)?;
 
     expect(s, TokenKind::CurlyR, Some("block"))?;
 
-    Ok(stmts)
+    let location = s.location_since(&opening);
+
+    Ok(BlockNode { stmts, location })
 }
 
 // may terminate a statement
@@ -340,10 +342,10 @@ mod tests {
         lexer::Lexer,
     };
 
-    fn parse(input: &str) -> PResult<'_, BlockNode<'_>> {
+    fn parse(input: &str) -> PResult<'_, Vec<StatementNode<'_>>> {
         let mut stream = TokenStream::new(Lexer::new(input));
 
-        parse_block(&mut stream)
+        Ok(parse_block(&mut stream)?.stmts)
     }
 
     #[test]

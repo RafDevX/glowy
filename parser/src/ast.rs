@@ -648,7 +648,11 @@ pub struct AmbiguousBracketAccessNode<'a> {
     pub location: Location, // for better error messages
 }
 
-pub type BlockNode<'a> = Vec<StatementNode<'a>>;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockNode<'a> {
+    pub stmts: Vec<StatementNode<'a>>,
+    pub location: Location, // for better error messages
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatementNode<'a> {
@@ -718,6 +722,7 @@ impl StatementNode<'_> {
     pub fn location(&self) -> Cow<'_, Location> {
         let r#ref = match self {
             StatementNode::Empty { location }
+            | StatementNode::Block(BlockNode { location, .. })
             | StatementNode::Send(SendNode { location, .. })
             | StatementNode::Inc { location, .. }
             | StatementNode::Dec { location, .. }
@@ -748,19 +753,6 @@ impl StatementNode<'_> {
                 let loc = inner.location();
 
                 return Cow::Owned(label.location().start..loc.end);
-            }
-            StatementNode::Block(stmts) => {
-                if let Some(first) = stmts.first()
-                    && let Some(last) = stmts.last()
-                {
-                    let first_loc = first.location();
-                    let last_loc = last.location();
-
-                    return Cow::Owned(first_loc.start..last_loc.end);
-                }
-
-                return Cow::Owned(0..usize::MAX);
-                // FIXME: ^ can't have location information for an empty block
             }
         };
 

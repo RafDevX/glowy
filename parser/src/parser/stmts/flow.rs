@@ -545,10 +545,10 @@ mod tests {
         parser::stmts::parse_block,
     };
 
-    fn parse(input: &str) -> PResult<'_, BlockNode<'_>> {
+    fn parse(input: &str) -> PResult<'_, Vec<StatementNode<'_>>> {
         let mut stream = TokenStream::new(Lexer::new(input));
 
-        parse_block(&mut stream)
+        Ok(parse_block(&mut stream)?.stmts)
     }
 
     #[test]
@@ -574,19 +574,22 @@ mod tests {
                     })),
                     location: 50..59,
                 },
-                then: vec![
-                    StatementNode::Empty { location: 90..91 },
-                    StatementNode::Assignment(AssignmentNode {
-                        kind: AssignmentKind::Simple,
-                        lhs: vec![ExprNode::Name(Span::new("a", 120, 5))],
-                        rhs: vec![ExprNode::Literal(LiteralNode::Int {
-                            value: 4,
-                            location: 124..125
-                        })],
-                        location: 120..125,
-                        annotation: None,
-                    })
-                ],
+                then: BlockNode {
+                    stmts: vec![
+                        StatementNode::Empty { location: 90..91 },
+                        StatementNode::Assignment(AssignmentNode {
+                            kind: AssignmentKind::Simple,
+                            lhs: vec![ExprNode::Name(Span::new("a", 120, 5))],
+                            rhs: vec![ExprNode::Literal(LiteralNode::Int {
+                                value: 4,
+                                location: 124..125
+                            })],
+                            location: 120..125,
+                            annotation: None,
+                        })
+                    ],
+                    location: 60..152,
+                },
                 otherwise: Some(ElseNode::If(Box::new(IfNode {
                     stmt: None,
                     cond: ExprNode::UnaryOp {
@@ -601,45 +604,54 @@ mod tests {
                         }),
                         location: 161..166,
                     },
-                    then: vec![StatementNode::ShortVarDecl(ShortVarDeclNode {
-                        ids: vec![Span::new("k", 197, 7)],
-                        exprs: vec![ExprNode::Literal(LiteralNode::Int {
-                            value: 3,
-                            location: 202..203
+                    then: BlockNode {
+                        stmts: vec![StatementNode::ShortVarDecl(ShortVarDeclNode {
+                            ids: vec![Span::new("k", 197, 7)],
+                            exprs: vec![ExprNode::Literal(LiteralNode::Int {
+                                value: 3,
+                                location: 202..203
+                            })],
+                            location: 197..203,
+                            annotation: None
                         })],
-                        location: 197..203,
-                        annotation: None
-                    })],
-                    otherwise: Some(ElseNode::Block(vec![
-                        StatementNode::Block(vec![]),
-                        StatementNode::Dec {
-                            operand: ExprNode::Name(Span::new("m", 298, 10),),
-                            location: 298..301,
-                        },
-                        StatementNode::Assignment(AssignmentNode {
-                            kind: AssignmentKind::BitClear,
-                            lhs: vec![
-                                ExprNode::Name(Span::new("k", 331, 11)),
-                                ExprNode::Selection(SelectionNode {
-                                    base: Box::new(ExprNode::Name(Span::new("m", 334, 11))),
-                                    selector: Span::new("r", 336, 11),
-                                    location: 334..337
-                                }),
-                            ],
-                            rhs: vec![
-                                ExprNode::Literal(LiteralNode::Int {
-                                    value: 3,
-                                    location: 342..343
-                                }),
-                                ExprNode::Literal(LiteralNode::Int {
-                                    value: 2,
-                                    location: 345..346
-                                }),
-                            ],
-                            location: 331..346,
-                            annotation: None,
-                        })
-                    ])),
+                        location: 167..230,
+                    },
+                    otherwise: Some(ElseNode::Block(BlockNode {
+                        stmts: vec![
+                            StatementNode::Block(BlockNode {
+                                stmts: vec![],
+                                location: 266..268,
+                            }),
+                            StatementNode::Dec {
+                                operand: ExprNode::Name(Span::new("m", 298, 10),),
+                                location: 298..301,
+                            },
+                            StatementNode::Assignment(AssignmentNode {
+                                kind: AssignmentKind::BitClear,
+                                lhs: vec![
+                                    ExprNode::Name(Span::new("k", 331, 11)),
+                                    ExprNode::Selection(SelectionNode {
+                                        base: Box::new(ExprNode::Name(Span::new("m", 334, 11))),
+                                        selector: Span::new("r", 336, 11),
+                                        location: 334..337
+                                    }),
+                                ],
+                                rhs: vec![
+                                    ExprNode::Literal(LiteralNode::Int {
+                                        value: 3,
+                                        location: 342..343
+                                    }),
+                                    ExprNode::Literal(LiteralNode::Int {
+                                        value: 2,
+                                        location: 345..346
+                                    }),
+                                ],
+                                location: 331..346,
+                                annotation: None,
+                            })
+                        ],
+                        location: 236..373,
+                    })),
                     location: 158..373,
                 }))),
                 location: 47..373,
@@ -686,11 +698,17 @@ mod tests {
                     })),
                     location: 58..63
                 },
-                then: vec![StatementNode::Empty { location: 94..95 }],
+                then: BlockNode {
+                    stmts: vec![StatementNode::Empty { location: 94..95 }],
+                    location: 64..121,
+                },
                 otherwise: Some(ElseNode::If(Box::new(IfNode {
                     stmt: None,
                     cond: ExprNode::Name(Span::new("false", 130, 5)),
-                    then: vec![StatementNode::Empty { location: 166..167 }],
+                    then: BlockNode {
+                        stmts: vec![StatementNode::Empty { location: 166..167 }],
+                        location: 136..193,
+                    },
                     otherwise: Some(ElseNode::If(Box::new(IfNode {
                         stmt: Some(Box::new(StatementNode::Expr {
                             expr: ExprNode::Call(CallNode {
@@ -703,7 +721,13 @@ mod tests {
                             annotation: None
                         })),
                         cond: ExprNode::Name(Span::new("true", 207, 7)),
-                        then: vec![StatementNode::Block(vec![])],
+                        then: BlockNode {
+                            stmts: vec![StatementNode::Block(BlockNode {
+                                stmts: vec![],
+                                location: 242..244,
+                            })],
+                            location: 212..270,
+                        },
                         otherwise: None,
                         location: 199..270
                     }))),
@@ -1096,7 +1120,10 @@ mod tests {
                         }))
                     }),
                     header_location: 47..69,
-                    body: vec![StatementNode::Empty { location: 100..101 }],
+                    body: BlockNode {
+                        stmts: vec![StatementNode::Empty { location: 100..101 }],
+                        location: 70..127,
+                    },
                     location: 47..127
                 }),
                 StatementNode::For(ForNode {
@@ -1123,7 +1150,10 @@ mod tests {
                         }))
                     }),
                     header_location: 153..169,
-                    body: vec![StatementNode::Empty { location: 200..201 }],
+                    body: BlockNode {
+                        stmts: vec![StatementNode::Empty { location: 200..201 }],
+                        location: 170..227,
+                    },
                     location: 153..227,
                 }),
                 StatementNode::For(ForNode {
@@ -1144,7 +1174,10 @@ mod tests {
                         post: None
                     }),
                     header_location: 253..263,
-                    body: vec![StatementNode::Empty { location: 294..295 }],
+                    body: BlockNode {
+                        stmts: vec![StatementNode::Empty { location: 294..295 }],
+                        location: 264..321,
+                    },
                     location: 253..321,
                 }),
                 StatementNode::For(ForNode {
@@ -1154,7 +1187,10 @@ mod tests {
                         post: None
                     }),
                     header_location: 347..350,
-                    body: vec![],
+                    body: BlockNode {
+                        stmts: vec![],
+                        location: 351..354,
+                    },
                     location: 347..354,
                 })
             ],
@@ -1192,7 +1228,10 @@ mod tests {
                         range_expr: ExprNode::Name(Span::new("arr", 68, 3))
                     }),
                     header_location: 47..71,
-                    body: vec![StatementNode::Empty { location: 102..103 }],
+                    body: BlockNode {
+                        stmts: vec![StatementNode::Empty { location: 102..103 }],
+                        location: 72..129,
+                    },
                     location: 47..129,
                 }),
                 StatementNode::For(ForNode {
@@ -1201,7 +1240,10 @@ mod tests {
                         range_expr: ExprNode::Name(Span::new("arr", 169, 7))
                     }),
                     header_location: 155..172,
-                    body: vec![StatementNode::Empty { location: 203..204 }],
+                    body: BlockNode {
+                        stmts: vec![StatementNode::Empty { location: 203..204 }],
+                        location: 173..230,
+                    },
                     location: 155..230,
                 }),
                 StatementNode::For(ForNode {
@@ -1209,7 +1251,10 @@ mod tests {
                         range_expr: ExprNode::Name(Span::new("ch", 266, 11))
                     }),
                     header_location: 256..268,
-                    body: vec![],
+                    body: BlockNode {
+                        stmts: vec![],
+                        location: 269..271,
+                    },
                     location: 256..271,
                 })
             ],
@@ -1244,85 +1289,100 @@ mod tests {
                         range_expr: ExprNode::Name(Span::new("arr", 75, 3))
                     }),
                     header_location: 54..78,
-                    body: vec![StatementNode::If(IfNode {
-                        stmt: None,
-                        cond: ExprNode::BinaryOp {
-                            kind: BinaryOpKind::Eq,
-                            left: Box::new(ExprNode::BinaryOp {
-                                kind: BinaryOpKind::Remainder,
-                                left: Box::new(ExprNode::Name(Span::new("i", 112, 4))),
-                                right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                    value: 2,
-                                    location: 116..117
-                                })),
-                                location: 112..117
-                            }),
-                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                value: 0,
-                                location: 121..122
-                            })),
-                            location: 112..122
-                        },
-                        then: vec![StatementNode::Continue {
-                            label: None,
-                            location: 157..165
-                        }],
-                        otherwise: Some(ElseNode::If(Box::new(IfNode {
+                    body: BlockNode {
+                        stmts: vec![StatementNode::If(IfNode {
                             stmt: None,
                             cond: ExprNode::BinaryOp {
                                 kind: BinaryOpKind::Eq,
                                 left: Box::new(ExprNode::BinaryOp {
                                     kind: BinaryOpKind::Remainder,
-                                    left: Box::new(ExprNode::Name(Span::new("i", 204, 6))),
+                                    left: Box::new(ExprNode::Name(Span::new("i", 112, 4))),
                                     right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                        value: 3,
-                                        location: 208..209
+                                        value: 2,
+                                        location: 116..117,
                                     })),
-                                    location: 204..209
+                                    location: 112..117,
                                 }),
                                 right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                     value: 0,
-                                    location: 213..214
+                                    location: 121..122,
                                 })),
-                                location: 204..214
+                                location: 112..122,
                             },
-                            then: vec![StatementNode::Continue {
-                                label: Some(Span::new("Label", 258, 7)),
-                                location: 249..263
-                            }],
+                            then: BlockNode {
+                                stmts: vec![StatementNode::Continue {
+                                    label: None,
+                                    location: 157..165,
+                                }],
+                                location: 123..195,
+                            },
                             otherwise: Some(ElseNode::If(Box::new(IfNode {
                                 stmt: None,
                                 cond: ExprNode::BinaryOp {
                                     kind: BinaryOpKind::Eq,
                                     left: Box::new(ExprNode::BinaryOp {
                                         kind: BinaryOpKind::Remainder,
-                                        left: Box::new(ExprNode::Name(Span::new("i", 302, 8))),
+                                        left: Box::new(ExprNode::Name(Span::new("i", 204, 6))),
                                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
-                                            value: 5,
-                                            location: 306..307
+                                            value: 3,
+                                            location: 208..209,
                                         })),
-                                        location: 302..307
+                                        location: 204..209,
                                     }),
                                     right: Box::new(ExprNode::Literal(LiteralNode::Int {
                                         value: 0,
-                                        location: 311..312
+                                        location: 213..214,
                                     })),
-                                    location: 302..312
+                                    location: 204..214,
                                 },
-                                then: vec![StatementNode::Break {
-                                    label: Some(Span::new("Label", 353, 9)),
-                                    location: 347..358
-                                }],
-                                otherwise: Some(ElseNode::Block(vec![StatementNode::Break {
-                                    label: None,
-                                    location: 428..433
-                                }])),
-                                location: 299..463,
+                                then: BlockNode {
+                                    stmts: vec![StatementNode::Continue {
+                                        label: Some(Span::new("Label", 258, 7)),
+                                        location: 249..263
+                                    }],
+                                    location: 215..293,
+                                },
+                                otherwise: Some(ElseNode::If(Box::new(IfNode {
+                                    stmt: None,
+                                    cond: ExprNode::BinaryOp {
+                                        kind: BinaryOpKind::Eq,
+                                        left: Box::new(ExprNode::BinaryOp {
+                                            kind: BinaryOpKind::Remainder,
+                                            left: Box::new(ExprNode::Name(Span::new("i", 302, 8))),
+                                            right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                                value: 5,
+                                                location: 306..307
+                                            })),
+                                            location: 302..307
+                                        }),
+                                        right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                                            value: 0,
+                                            location: 311..312
+                                        })),
+                                        location: 302..312
+                                    },
+                                    then: BlockNode {
+                                        stmts: vec![StatementNode::Break {
+                                            label: Some(Span::new("Label", 353, 9)),
+                                            location: 347..358
+                                        }],
+                                        location: 313..388,
+                                    },
+                                    otherwise: Some(ElseNode::Block(BlockNode {
+                                        stmts: vec![StatementNode::Break {
+                                            label: None,
+                                            location: 428..433,
+                                        }],
+                                        location: 394..463,
+                                    },)),
+                                    location: 299..463,
+                                }))),
+                                location: 201..463,
                             }))),
-                            location: 201..463,
-                        }))),
-                        location: 109..463,
-                    })],
+                            location: 109..463,
+                        })],
+                        location: 79..489,
+                    },
                     location: 54..489,
                 }))
             }],
