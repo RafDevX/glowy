@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, cell::Cell};
 
 use parser::{
     Location,
@@ -22,12 +22,53 @@ pub fn visit_receive<'a>(
     operand: &ExprNode<'a>,
     location: &Location,
 ) -> ValueRef<'a> {
-    // TODO: must update channel's label to match branch label, because
-    // otherwise "has a value been read" or "has the channel been depleted" can
-    // be used to exfiltrate information
+    let pinned = ctx.pin(location.clone());
+
+    // a receive inside a secret-dependent branch is externally observable:
+    // any other holder of the same channel can determine that the receive
+    // happened by observing subsequent channel state, so we need to fold the
+    // current branch backtrace into the channel's own label. this is only
+    // relevant when the operand is a mutable channel that we can reach through
+    // a symbol; for example, a temporary value like `<-foo()` has no visible
+    // aliases to leak through, so the plain-receive path below is enough
+    if ctx.branch_backtrace().is_some() && operand.root_operand().is_some() {
+        let received = Cell::new(None);
+
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through the transformer"
+        )]
+        operand.assign_with(
+            ctx,
+            LabelBacktraceKind::Receive,
+            location,
+            &|ctx, operand| {
+                let Some(channel) = operand.as_channel() else {
+                    ctx.report_error(AnalysisErrorKind::InvalidReceiveOperand {
+                        location: location.clone(),
+                    });
+
+                    return None; // abort mutation
+                };
+
+                received.set(Some(channel.receive(pinned.clone())));
+
+                drop(channel);
+
+                // note that we don't actually have to change operand (besides
+                // perhaps upgrading it to a channel), since what we actually
+                // care about is the boilerplate handled by `assign_with` which
+                // folds the current branch backtrace into the value
+                Some(operand)
+            },
+        );
+
+        return received
+            .into_inner()
+            .unwrap_or_else(|| ValueRef::new_bottom(pinned, None));
+    }
 
     let value = exprs::visit_single_expr(ctx, operand);
-    let pinned = ctx.pin(location.clone());
 
     let Some(channel) = value.as_channel() else {
         ctx.report_error(AnalysisErrorKind::InvalidReceiveOperand {

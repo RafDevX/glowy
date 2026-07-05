@@ -233,7 +233,7 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
 
     // captured from inside the transformer so we can build `copy`'s return
     // value (the tainted element count) after the mutation completes
-    let combined: Cell<Option<LabelBacktrace<'a>>> = Cell::new(None);
+    let combined = Cell::new(None);
 
     #[expect(
         clippy::shadow_unrelated,
