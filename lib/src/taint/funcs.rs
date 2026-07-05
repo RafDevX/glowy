@@ -325,7 +325,7 @@ fn visit_function_body<'a>(ctx: &mut AnalysisContext<'a>, body: &BlockNode<'a>) 
         // this matches the vast majority of functions and collapses into simply
         // visiting the statement block as normal
 
-        super::visit_statements(ctx, body);
+        super::visit_statements(ctx, &body.stmts);
 
         return;
     }
@@ -351,7 +351,7 @@ fn visit_function_body<'a>(ctx: &mut AnalysisContext<'a>, body: &BlockNode<'a>) 
     while !stable {
         ctx.push_error_suppression(); // this is a speculative visit
 
-        super::visit_statements(ctx, body);
+        super::visit_statements(ctx, &body.stmts);
 
         ctx.pop_error_suppression();
 
@@ -365,7 +365,7 @@ fn visit_function_body<'a>(ctx: &mut AnalysisContext<'a>, body: &BlockNode<'a>) 
     }
 
     // final pass with errors enabled, now that the state is stable
-    super::visit_statements(ctx, body);
+    super::visit_statements(ctx, &body.stmts);
 
     goto::pop_goto_branch_backtraces(ctx);
 

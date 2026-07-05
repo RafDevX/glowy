@@ -557,16 +557,16 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         }
 
         let body = if let Some(StatementNode::Fallthrough { .. }) = clause.body.last() {
-            // statement visitor will reject any fallthrough statement as out of
-            // place, so we omit it here before passing on the block
-            Cow::Owned(clause.body[..clause.body.len() - 1].to_vec())
+            // statement visitor will reject any fallthrough statement as
+            // out of place, so we omit it here before passing on the block
+            &clause.body[..clause.body.len() - 1]
         } else {
-            Cow::Borrowed(&clause.body)
+            &clause.body
         };
 
         // vvv this will create another scope for the clause body,
         // which is (probably?) intended? spec unclear at first glance
-        super::visit_block(ctx, &body);
+        super::visit_scoped_statements(ctx, body);
     }
 
     for _ in 0..n_pushes {
@@ -605,7 +605,7 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
 
         // vvv this will create another scope for the clause body,
         // which is (probably?) intended? spec unclear at first glance
-        super::visit_block(ctx, &clause.body);
+        super::visit_scoped_statements(ctx, &clause.body);
     }
 
     if pushed {

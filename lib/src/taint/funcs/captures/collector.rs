@@ -71,6 +71,16 @@ impl<'a> SymbolCaptureCollector<'a> for BlockNode<'a> {
         captured: &mut HashSet<&'a str>,
         declared: &mut HashSet<&'a str>,
     ) {
+        self.stmts.collect_captured_symbols(captured, declared);
+    }
+}
+
+impl<'a> SymbolCaptureCollector<'a> for Vec<StatementNode<'a>> {
+    fn collect_captured_symbols(
+        &self,
+        captured: &mut HashSet<&'a str>,
+        declared: &mut HashSet<&'a str>,
+    ) {
         let mut declared = declared.clone();
 
         for statement in self {

@@ -202,10 +202,13 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
 }
 
 fn visit_block<'a>(ctx: &mut AnalysisContext<'a>, node: &BlockNode<'a>) {
+    visit_scoped_statements(ctx, &node.stmts);
+}
+
+fn visit_scoped_statements<'a>(ctx: &mut AnalysisContext<'a>, statements: &[StatementNode<'a>]) {
     ctx.symtab_mut().select_next_child_scope(); // push
 
-    // (BlockNode is just a type alias for Vec, so we can pass it directly)
-    visit_statements(ctx, node);
+    visit_statements(ctx, statements);
 
     ctx.symtab_mut().select_parent_scope(); // pop
 }
@@ -327,7 +330,8 @@ fn disallows_subsequent_statements(node: &StatementNode<'_>) -> bool {
         | StatementNode::Break { .. }
         | StatementNode::Return { .. }
         | StatementNode::Goto { .. } => true,
-        StatementNode::Block(statements) => statements
+        StatementNode::Block(block) => block
+            .stmts
             .last()
             .is_some_and(disallows_subsequent_statements),
 

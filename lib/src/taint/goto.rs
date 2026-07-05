@@ -43,7 +43,11 @@ impl GotoConvergenceState<'_> {
 }
 
 pub fn block_contains_goto(block: &BlockNode<'_>) -> bool {
-    block.iter().any(statement_contains_goto)
+    statements_contain_goto(&block.stmts)
+}
+
+fn statements_contain_goto(statements: &[StatementNode<'_>]) -> bool {
+    statements.iter().any(statement_contains_goto)
 }
 
 fn statement_contains_goto(statement: &StatementNode<'_>) -> bool {
@@ -58,20 +62,20 @@ fn statement_contains_goto(statement: &StatementNode<'_>) -> bool {
         StatementNode::Select(select) => select
             .clauses
             .iter()
-            .any(|clause| block_contains_goto(&clause.body)),
+            .any(|clause| statements_contain_goto(&clause.body)),
         StatementNode::Switch(SwitchNode::Expr(switch)) => {
             switch.stmt.as_deref().is_some_and(statement_contains_goto)
                 || switch
                     .clauses
                     .iter()
-                    .any(|clause| block_contains_goto(&clause.body))
+                    .any(|clause| statements_contain_goto(&clause.body))
         }
         StatementNode::Switch(SwitchNode::Type(switch)) => {
             switch.stmt.as_deref().is_some_and(statement_contains_goto)
                 || switch
                     .clauses
                     .iter()
-                    .any(|clause| block_contains_goto(&clause.body))
+                    .any(|clause| statements_contain_goto(&clause.body))
         }
 
         StatementNode::Empty { .. }
