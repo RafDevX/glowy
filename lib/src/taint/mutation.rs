@@ -679,13 +679,24 @@ fn merge_assigned_target_value<'a>(
     merge_location: &Pinned<'a, Location>,
 ) -> ValueRef<'a> {
     if overwrite {
-        assigned.clone()
-    } else {
-        assigned.nest_backtrace(
+        // nothing to merge
+        return assigned.clone();
+    }
+
+    // `merge_with` below would collapse (Function, Function) to Simple, which
+    // which would erase the function shape. to prevent that, we make use of
+    // `nest_backtrace` in that case, mirroring Span's LeftValue impl.
+    // we use `is_function` (vs. `as_function`) so an unrelated Simple is not
+    // accidentally upgraded to a blackbox function
+    if current.is_function() || assigned.is_function() {
+        return assigned.nest_backtrace(
             backtrace_kind,
             None,
             merge_location.clone(),
             current.backtrace(),
-        )
+        );
     }
+
+    // preserve value shape when possible
+    current.merge_with(assigned, backtrace_kind, Cow::Borrowed(merge_location))
 }
