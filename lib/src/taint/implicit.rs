@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter};
+use std::{borrow::Cow, cell::Cell, iter};
 
 use parser::{
     Location, Span,
@@ -15,7 +15,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::Symbol,
-    taint::{explicit, exprs},
+    taint::{explicit, exprs, mutation::LeftValue},
     values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -240,9 +240,6 @@ fn visit_for_range<'a>(
             );
         }
 
-        // TODO: `range ch` must update the channel's label wrt to the existing
-        // branch label, since it will be depleted only in that condition
-
         if !stable {
             ctx.push_error_suppression();
         }
@@ -277,8 +274,61 @@ fn get_for_range_values<'a>(
     range_expr: &ExprNode<'a>,
     location: Pinned<'a, Location>,
 ) -> Vec<ValueRef<'a>> {
-    // visit range_expr, even if just to trigger side effects
-    let value = exprs::visit_single_expr(ctx, range_expr);
+    // when there's an active branch backtrace and the operand is a mutable
+    // left-value, we need special handling so that if the value turns out to
+    // be a channel we can fold the current branch backtrace into the channel's
+    // own label in the SAME visit (we can't visit range_expr twice, or it can
+    // cause unsoundness if there are any side-effects).
+    // folding is necessary in the case described above because ranging over a
+    // channel depletes it, which is externally observable to any other holder.
+    // we thus need to perform folding behavior matching `visit_receive` for
+    // normal receive expressions.
+    // we need to do this here because the current branch backtrace is still the
+    // *outer* aggregate: `visit_for_range` only pushes the loop's own header
+    // backtrace after this call returns, so we avoid tainting the channel with
+    // its own label (complicating the tree).
+    // we intentionally exclude immutable roots (Go consts) because they can't
+    // be channels and `assign_with` would spuriously flag ImmutableLeftValue
+    let should_fold = ctx.branch_backtrace().is_some()
+        && range_expr.root_operand().is_some_and(|root| {
+            ctx.symtab()
+                .get_symbol(root.content())
+                .is_none_or(|sym| sym.borrow().mutable())
+        });
+
+    let value = if should_fold {
+        // we can only visit range_expr once, so we need to hijack the existing
+        // `assign_with` visit and extract the value it calculated so that we
+        // can use it later during the main part of this function
+        let extracted = Cell::new(None);
+
+        range_expr.assign_with(
+            ctx,
+            LabelBacktraceKind::Receive,
+            location.inner(),
+            &|_ctx, operand| {
+                extracted.set(Some(operand.clone()));
+
+                // note that we don't actually have to change `operand`, since
+                // what we actually care about is the boilerplate already
+                // handled transparently by `assign_with` which folds the
+                // current branch backtrace into the value
+
+                // fold only for values that turn out to actually be channels,
+                // per the rationale above: returning None aborts the entire
+                // mutation, which is exactly what we want if the operand is not
+                // actually a channel (which we could not have known in advance)
+                operand.is_channel().then_some(operand)
+            },
+        );
+
+        extracted
+            .into_inner()
+            .unwrap_or_else(|| ValueRef::new_bottom(location.clone(), None))
+    } else {
+        // just visit the expression normally, no special handling required
+        exprs::visit_single_expr(ctx, range_expr)
+    };
 
     // see https://go.dev/ref/spec#For_range for the per-type cardinality table;
     // the order below matches that table, with the trailing string/unknown
@@ -292,6 +342,7 @@ fn get_for_range_values<'a>(
     if value.is_channel()
         && let Some(channel) = value.as_channel()
     {
+        // the branch-folding was already applied above, if applicable
         return vec![channel.receive(location)];
     }
 

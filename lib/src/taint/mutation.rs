@@ -36,6 +36,7 @@ pub trait LeftValue<'a> {
 
     fn root_operand(&self) -> Option<Span<'a>>;
 
+    // lower level primitive; should not really be used outside this module
     fn mutate_target(
         &self,
         ctx: &mut AnalysisContext<'a>,
@@ -70,6 +71,7 @@ pub trait LeftValue<'a> {
         });
     }
 
+    // lower level primitive; should not really be used outside this module
     #[must_use]
     fn should_override(&self, ctx: &mut AnalysisContext<'a>, simple_assignment: bool) -> bool {
         // for complex assignments like `x += y` we need to keep x's
