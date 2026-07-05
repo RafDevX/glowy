@@ -968,9 +968,16 @@ fn apply_call<'a>(
 
     captures::apply_capture_mutations(ctx, func, &with_backtraces_ref, &node.location);
 
-    handle_deferred_checks(ctx, func, &ids, &with_backtraces_ref, &node.location);
-
     let receiver_ref = receiver.as_ref().map(Option::as_ref);
+
+    handle_deferred_checks(
+        ctx,
+        func,
+        receiver_ref,
+        &ids,
+        &with_backtraces_ref,
+        &node.location,
+    );
 
     let mut result = calculate_call_result(
         ctx,
@@ -1291,15 +1298,27 @@ fn is_incompatible_cardinality_method<'a>(
     args_len != cardinality && !(variadic && args_len >= cardinality.saturating_sub(1))
 }
 
+#[expect(
+    clippy::option_option,
+    reason = "Conveniently represent a receiver's presence/absence"
+)]
 fn handle_deferred_checks<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
+    receiver: Option<Option<&LabelBacktrace<'a>>>,
     ids: &[(Option<&Span<'a>>, bool, &TypeNode<'a>)],
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Location,
 ) {
     let mut deferred_checks = Vec::from(func.deferred_checks());
     let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
+
+    if let Some(receiver) = receiver {
+        deferred_checks = deferred_checks
+            .iter()
+            .filter_map(|check| check.realize(func.r#ref(), SyntheticSlot::Receiver, receiver))
+            .collect();
+    }
 
     for (index, (id, variadic, r#type)) in ids.iter().copied().enumerate() {
         #[rustfmt::skip]
