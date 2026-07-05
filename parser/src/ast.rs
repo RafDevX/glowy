@@ -107,6 +107,18 @@ pub enum TypeNode<'a> {
     },
 }
 
+impl TypeNode<'_> {
+    #[must_use]
+    #[inline]
+    pub fn strip_pointers(&self) -> &Self {
+        if let Self::Pointer { base } = self {
+            base
+        } else {
+            self
+        }
+    }
+}
+
 impl<'a> From<TypeNameNode<'a>> for TypeNode<'a> {
     #[inline]
     fn from(node: TypeNameNode<'a>) -> Self {

@@ -69,6 +69,14 @@ impl<'a> TypeInfo<'a> {
         &self.underlying
     }
 
+    pub fn strip_pointers(&self) -> &Self {
+        if let TypeKind::Pointer(inner) = self.underlying() {
+            inner.strip_pointers()
+        } else {
+            self
+        }
+    }
+
     fn get_method(&self, name: &str) -> Option<SymbolRef<'a>> {
         self.methods.borrow().get(name).cloned()
     }

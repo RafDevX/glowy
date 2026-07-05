@@ -2,7 +2,9 @@ use std::borrow::Cow;
 
 use parser::{
     Location, Span,
-    ast::{AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, UnaryOpKind},
+    ast::{
+        AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, TypeNode, UnaryOpKind,
+    },
 };
 
 use crate::{
@@ -12,8 +14,10 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::{QualifiedSymbolResolutionResult, SymbolRef},
     taint::exprs,
+    types::{TypeInfo, TypeKind},
     values::{
-        BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
+        BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, Value,
+        ValueRef,
     },
 };
 
@@ -555,6 +559,14 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
             .mutate_target(ctx, assignment_location, &|ctx, target| {
                 let selector = self.selector.content().to_owned();
 
+                // resolve the field's shape hint before `as_struct_mut` has the
+                // chance to upgrade `target`
+                let field_hint = FieldShapeHint::for_field(
+                    // provide the struct's type, not the field's directly
+                    target.declared_type().map(AsRef::as_ref),
+                    &selector,
+                );
+
                 let Some(mut r#struct) = target.as_struct_mut() else {
                     ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
                         location: self.location.clone(),
@@ -565,6 +577,10 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
 
                 let child = r#struct.get_const(&selector, ctx.pin(self.location.clone()));
 
+                if let Some(hint) = field_hint {
+                    hint.try_apply(&child);
+                }
+
                 let child = mutator(ctx, child)?;
 
                 r#struct.set_const(selector, child);
@@ -572,6 +588,86 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 drop(r#struct);
                 Some(target)
             });
+    }
+}
+
+// coarse-grained hint about the shape a struct field's declared type imposes
+#[derive(Clone, Copy)]
+enum FieldShapeHint {
+    Channel,
+    Array,
+    Slice,
+    Struct,
+}
+
+impl FieldShapeHint {
+    fn for_field(target: Option<&TypeInfo<'_>>, field_name: &str) -> Option<Self> {
+        let target = target?.strip_pointers();
+
+        let TypeKind::Struct { fields } = target.underlying() else {
+            // we only support providing hints for structs
+            return None;
+        };
+
+        let field = fields.iter().find(|f| f.name() == field_name)?;
+
+        // prefer the resolved TypeInfo (for named types), and fall back to the
+        // syntactic TypeNode for anonymous field types that never enter the
+        // type registry (such as `chan struct{}` or `map[k]v`)
+        field
+            .resolved_type()
+            .as_ref()
+            .and_then(|info| Self::from_type_info(info))
+            .or_else(|| Self::from_type_node(field.declared_type_node()))
+    }
+
+    fn from_type_info(info: &TypeInfo<'_>) -> Option<Self> {
+        let kind = info.strip_pointers().underlying();
+
+        // Map/Function upgrades need `&mut ValueRef` which the mutator
+        // doesn't hold; Opaque/Interface don't map to an aggregate shape.
+        match kind {
+            TypeKind::Channel => Some(Self::Channel),
+            TypeKind::Array => Some(Self::Array),
+            TypeKind::Slice => Some(Self::Slice),
+            TypeKind::Struct { .. } => Some(Self::Struct),
+            // Map/Function upgrades need more context than what is present here
+            // and Opaque/Interface cannot be mapped to a specific shape, so it
+            // is not possible for us to provide a hint
+            TypeKind::Map
+            | TypeKind::Function
+            | TypeKind::Opaque
+            | TypeKind::Interface
+            | TypeKind::Pointer(_) => None,
+        }
+    }
+
+    fn from_type_node(node: &TypeNode<'_>) -> Option<Self> {
+        let base = node.strip_pointers();
+
+        match base {
+            TypeNode::Channel { .. } => Some(Self::Channel),
+            TypeNode::Array { .. } => Some(Self::Array),
+            TypeNode::Slice { .. } => Some(Self::Slice),
+            TypeNode::Struct { .. } => Some(Self::Struct),
+            // Name is only possible here when its resolved TypeInfo was absent
+            // or when it reported an underlying type kind we do not provide
+            // hints for; the rest are shapes we intentionally skip
+            TypeNode::Name(_)
+            | TypeNode::Map { .. }
+            | TypeNode::Function { .. }
+            | TypeNode::Interface { .. }
+            | TypeNode::Pointer { .. } => None,
+        }
+    }
+
+    fn try_apply(self, value: &ValueRef<'_>) {
+        match self {
+            Self::Channel => value.try_upgrade_to(Value::Channel),
+            Self::Array => value.try_upgrade_to(Value::Array),
+            Self::Slice => value.try_upgrade_to(Value::Slice),
+            Self::Struct => value.try_upgrade_to(Value::Struct),
+        }
     }
 }
 
