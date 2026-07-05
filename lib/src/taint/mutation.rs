@@ -16,8 +16,7 @@ use crate::{
     taint::exprs,
     types::{TypeInfo, TypeKind},
     values::{
-        BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, Value,
-        ValueRef,
+        BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
     },
 };
 
@@ -690,10 +689,10 @@ impl FieldShapeHint {
 
     fn try_apply(self, value: &ValueRef<'_>) {
         match self {
-            Self::Channel => value.try_upgrade_to(Value::Channel),
-            Self::Array => value.try_upgrade_to(Value::Array),
-            Self::Slice => value.try_upgrade_to(Value::Slice),
-            Self::Struct => value.try_upgrade_to(Value::Struct),
+            Self::Channel => value.try_upgrade_to_channel(),
+            Self::Array => value.try_upgrade_to_array(),
+            Self::Slice => value.try_upgrade_to_slice(),
+            Self::Struct => value.try_upgrade_to_struct(),
         }
     }
 }

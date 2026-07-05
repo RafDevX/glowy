@@ -175,8 +175,24 @@ impl<'a> ValueRef<'a> {
         Self::new(inner, self.location.clone(), self.declared_type.clone())
     }
 
+    pub fn try_upgrade_to_channel(&self) {
+        self.try_upgrade_to(Value::Channel);
+    }
+
+    pub fn try_upgrade_to_array(&self) {
+        self.try_upgrade_to(Value::Array);
+    }
+
+    pub fn try_upgrade_to_slice(&self) {
+        self.try_upgrade_to(Value::Slice);
+    }
+
+    pub fn try_upgrade_to_struct(&self) {
+        self.try_upgrade_to(Value::Struct);
+    }
+
     /// Coerce a [`Value::Simple`] to take a complex shape when first used.
-    pub fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
+    fn try_upgrade_to<C: Upgrade<'a>>(&self, f: impl FnOnce(C) -> Value<'a>) {
         // a Möbius wrapping a Simple represents a single value of unknown
         // cardinality; shape coercion implies single-value treatment, so
         // collapse it first to expose the inner Simple to the upgrade below
