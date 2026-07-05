@@ -574,7 +574,7 @@ impl<'a> SymbolCaptureCollector<'a> for CompositeLiteralElementNode<'a> {
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
             CompositeLiteralElementNode::Expr(expr) => expr,
-            CompositeLiteralElementNode::Nested(items) => items,
+            CompositeLiteralElementNode::Nested { elements, .. } => elements,
         };
 
         sub.collect_captured_symbols(captured, declared);

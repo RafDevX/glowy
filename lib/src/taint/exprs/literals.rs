@@ -348,8 +348,8 @@ fn visit_array_literal_element<'a>(
 ) -> ValueRef<'a> {
     match &node {
         CompositeLiteralElementNode::Expr(expr) => super::visit_single_expr(ctx, expr),
-        CompositeLiteralElementNode::Nested(items) => {
-            let mut values: Vec<_> = items
+        CompositeLiteralElementNode::Nested { elements, .. } => {
+            let mut values: Vec<_> = elements
                 .iter()
                 .map(|(_, v)| v)
                 .map(|el| visit_array_literal_element(ctx, el, location))
