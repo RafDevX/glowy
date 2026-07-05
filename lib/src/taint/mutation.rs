@@ -44,6 +44,33 @@ pub trait LeftValue<'a> {
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
     );
 
+    // high-level helper to use in alternative to `assign` when it is necessary
+    // to transform a value in-place, instead of a visit + assign pattern which
+    // would lead the expression to be visited twice (unsound for side-effects)
+    fn assign_with(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        backtrace_kind: LabelBacktraceKind,
+        location: &Location,
+        transformer: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    ) {
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.mutate_target(ctx, location, &|ctx, target| {
+            let new_value = transformer(ctx, target)?;
+            let pinned = ctx.pin(location.clone());
+
+            Some(new_value.nest_backtrace(
+                backtrace_kind,
+                None,
+                pinned,
+                ctx.branch_backtrace().cloned(),
+            ))
+        });
+    }
+
     #[must_use]
     fn should_override(&self, ctx: &mut AnalysisContext<'a>, simple_assignment: bool) -> bool {
         // for complex assignments like `x += y` we need to keep x's

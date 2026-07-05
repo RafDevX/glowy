@@ -11,7 +11,7 @@
 //! treated as function calls by the parser, but rather as their own unique
 //! kinds of expressions that are then dispatched by the analyzer on visit.
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, cell::Cell, collections::HashMap};
 
 use parser::ast::{CallNode, MakeNode, TypeNode};
 
@@ -21,8 +21,8 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     taint::{exprs, mutation::LeftValue, types},
     values::{
-        BacktraceContainer, ChannelValue, CompositeValue, CompositeValueAdapter,
-        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
+        BacktraceContainer, ChannelValue, CompositeValue, CompositeValueAdapter, SimpleConstValue,
+        Value, ValueRef,
     },
 };
 
@@ -229,53 +229,47 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
         return ValueRef::new_bottom(location, None);
     };
 
-    let mut dst = exprs::visit_single_expr(ctx, dst_expr);
     let src = exprs::visit_single_expr(ctx, src_expr);
 
-    let combined = LabelBacktrace::combine_options(
-        dst.backtrace(),
-        src.backtrace(),
-        LabelBacktraceKind::Expression,
-        Cow::Borrowed(&location),
-    );
+    // captured from inside the transformer so we can build `copy`'s return
+    // value (the tainted element count) after the mutation completes
+    let combined: Cell<Option<LabelBacktrace<'a>>> = Cell::new(None);
 
-    let Some(mut slice) = dst.as_slice_mut() else {
-        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
-            location: node.location.clone(),
-        });
-
-        return ValueRef::new_bottom(location, None);
-    };
-
-    slice.clear(); // we don't want const info anymore
-    slice.set_dyn(&src, location.clone());
-
-    drop(slice);
-
-    let value = dst.nest_backtrace(
-        LabelBacktraceKind::SliceCopy,
-        None,
-        location.clone(),
-        combined.clone(),
-    );
-
-    // this is technically wrong and should be fixed because it'll lead to
-    // dst_expr being visited twice, which might have unintended side effects,
-    // but since left-values can only be very specific expressions (e.g. operand
-    // names or indexing) it should be ok, and there isn't an easier way to do
-    // this, at least for now the way the code is structured
-    dst_expr.assign(
+    #[expect(
+        clippy::shadow_unrelated,
+        reason = "Same context, just threaded through the transformer"
+    )]
+    dst_expr.assign_with(
         ctx,
         LabelBacktraceKind::SliceCopy,
-        value,
-        true,
-        None,
-        &Label::Bottom,
         &node.location,
+        &|ctx, mut dst| {
+            combined.set(LabelBacktrace::combine_options(
+                dst.backtrace(),
+                src.backtrace(),
+                LabelBacktraceKind::Expression,
+                Cow::Borrowed(&location),
+            ));
+
+            let Some(mut slice) = dst.as_slice_mut() else {
+                ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+                    location: node.location.clone(),
+                });
+
+                return None; // abort mutation
+            };
+
+            slice.clear(); // we don't want const info anymore
+            slice.set_dyn(&src, location.clone());
+
+            drop(slice);
+
+            Some(dst)
+        },
     );
 
     // `copy`'s return value is the number of elements copied, which is tainted
-    ValueRef::from_backtrace_or_bottom_at(combined, || location)
+    ValueRef::from_backtrace_or_bottom_at(combined.into_inner(), || location)
 }
 
 pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
@@ -297,57 +291,45 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         return;
     };
 
-    let mut current = exprs::visit_single_expr(ctx, arg);
-
     let location = ctx.pin(node.location.clone());
 
-    let new = if current.is_map() {
-        // overwrite to bottom
-        ValueRef::new_bottom(location, None)
-    } else {
-        // ideally we'd do `} else if let Some(mut slice) = ... {` with then
-        // another `} else { ctx.report_error(...); return; };` so it would be
-        // more clear that the error arises from current not being neither a map
-        // nor a slice, but of course doing that would make the borrow checker
-        // very upset because current _might_ be used in the else clause before
-        // Option<(slice)> from the if-let could be destructured, so we do this
-        // (sillier) version as a workaround
-
-        let backtrace = current.backtrace_at_location(location.clone());
-
-        let Some(mut slice) = current.as_slice_mut() else {
-            ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
-                location: node.location.clone(),
-            });
-
-            return;
-        };
-
-        slice.clear();
-
-        let backtrace_value = ValueRef::from_backtrace_or_bottom_at(backtrace, || location.clone());
-
-        slice.set_dyn(&backtrace_value, location);
-
-        drop(slice);
-
-        // just because we mutated it doesn't mean the variable has been updated
-        // since `current` is really the result of evaluating an expression and
-        // so already an independent instance of the value (due to backtrace
-        // nesting with access location)
-        current
-    };
-
-    // see above in `copy`: this is technically wrong because it means arg expr
-    // will be visited twice, but it's the best we can do for now
-    arg.assign(
+    #[expect(
+        clippy::shadow_unrelated,
+        reason = "Same context, just threaded through the transformer"
+    )]
+    arg.assign_with(
         ctx,
         LabelBacktraceKind::CollectionClear,
-        new,
-        true,
-        None,
-        &Label::Bottom,
         &node.location,
+        &|ctx, mut current| {
+            if current.is_map() {
+                // overwrite to bottom
+                return Some(ValueRef::new_bottom(location.clone(), None));
+            }
+
+            let backtrace = current.backtrace_at_location(location.clone());
+
+            let Some(mut slice) = current.as_slice_mut() else {
+                ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+                    location: node.location.clone(),
+                });
+
+                return None; // abort mutation
+            };
+
+            slice.clear();
+
+            let backtrace_value = ValueRef::from_backtrace_or_bottom_at(
+                backtrace, // current value's aggregate backtrace
+                || location.clone(),
+            );
+
+            slice.set_dyn(&backtrace_value, location.clone());
+
+            drop(slice);
+
+            Some(current)
+        },
     );
 }
 
@@ -395,34 +377,34 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
         return;
     };
 
-    let mut value = exprs::visit_single_expr(ctx, map);
-
-    let Some(mut composite) = value.as_map_mut() else {
-        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
-            location: node.location.clone(),
-        });
-
-        return;
-    };
-
-    let location = ctx.pin(node.location.clone());
-
-    composite.set_at_key(
-        SimpleConstValue::try_resolve_from_expr(key),
-        ValueRef::new_bottom(location.clone(), None),
-        location,
-    );
-
-    drop(composite);
-
-    // visiting twice, technically wrong but ok, see `copy` above
-    map.assign(
+    #[expect(
+        clippy::shadow_unrelated,
+        reason = "Same context, just threaded through the transformer"
+    )]
+    map.assign_with(
         ctx,
         LabelBacktraceKind::MapElementDelete,
-        value,
-        true,
-        None,
-        &Label::Bottom,
         &node.location,
+        &|ctx, mut value| {
+            let Some(mut composite) = value.as_map_mut() else {
+                ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+                    location: node.location.clone(),
+                });
+
+                return None;
+            };
+
+            let location = ctx.pin(node.location.clone());
+
+            composite.set_at_key(
+                SimpleConstValue::try_resolve_from_expr(key),
+                ValueRef::new_bottom(location.clone(), None),
+                location,
+            );
+
+            drop(composite);
+
+            Some(value)
+        },
     );
 }
