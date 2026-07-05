@@ -210,23 +210,60 @@ impl Analyzer {
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    #[expect(clippy::missing_panics_doc, reason = "Unwrap is guaranteed safe here")]
     #[inline]
     pub fn from_go_mod<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
         let file = fs::File::open(path)?;
         let reader = io::BufReader::new(file);
-        let lines = reader.lines();
+        let lines = reader.lines().map_while(Result::ok);
 
-        for line in lines.map_while(Result::ok) {
-            if let Some(base) = line.trim().strip_prefix("module ") {
-                let base = base.split("//").next().unwrap().trim();
+        let mut in_block = false;
 
-                // TODO: support alternative syntax per spec
-                // "(" newline ModulePath newline ")"
+        for line in lines {
+            let line = line
+                .split_once("//")
+                .map_or(line.as_str(), |(before, _)| before)
+                .trim();
 
-                if valid_module_path(base) {
-                    return Ok(Some(Self::new(base)));
+            // we accept either the simplified form `module ModulePath`,
+            // or the block form `module ( \n ModulePath \n )`
+
+            let candidate = if in_block {
+                match line {
+                    "" => continue, // skip empty line
+                    ")" => {
+                        // in normal circumstances this is usually unreachable,
+                        // since the module path will already have been caught
+                        // by the arm below in the previous line and this func
+                        // will have returned. this is fine, we already assume
+                        // that the input under analysis compiles, so it is ok
+                        // to not check for the closing `)`... this arm should
+                        // then only fire if somehow this go.mod is invalid or
+                        // somehow has a `module ( \n NotValidModulePath \n )`
+                        // block before the real `module ( \n ModulePath \n )`
+                        // block (in which case we just exit this one for now)
+                        in_block = false;
+
+                        continue;
+                    }
+                    base => base,
                 }
+            } else {
+                let Some(rest) = line.strip_prefix("module ").map(str::trim) else {
+                    // not the module line
+                    continue;
+                };
+
+                if rest == "(" {
+                    in_block = true;
+
+                    continue;
+                }
+
+                rest
+            };
+
+            if valid_module_path(candidate) {
+                return Ok(Some(Self::new(candidate)));
             }
         }
 
