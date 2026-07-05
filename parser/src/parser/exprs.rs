@@ -1,7 +1,7 @@
 use self::postfix::parse_postfix_if_exists;
 use super::{PResult, expect};
 use crate::{
-    ParsingError, TokenStream,
+    ParsingError, Span, TokenStream,
     ast::{
         AmbiguousBracketAccessNode, CompositeLiteralElementListNode, CompositeLiteralElementNode,
         ConversionNode, ExprNode, IndexingNode, LiteralNode, OrderedF64, SelectionNode,
@@ -13,6 +13,8 @@ use crate::{
 
 mod ops;
 mod postfix;
+
+const FAKE_SPAN_CONTENT: &str = "????????????????????????????????????????";
 
 fn parse_function_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>> {
     let annotation = s.take_last_annotation();
@@ -150,9 +152,25 @@ fn try_organize_struct_literal_fields(
 
         for (key, value) in list {
             let Some(key_expr) = key else {
+                // we cannot get an actual token for `found` here, but this
+                // function is the only case where we only have a location
+                // instead of a token, so to avoid penalizing the rest of the
+                // codebase (and restricting consumers' access to full token
+                // info for all other cases, providing them just a location) we
+                // just create a fake token as best we can, assuming that only
+                // its actual underlying location will be used (which will still
+                // be correct). FAKE_SPAN_CONTENT is needed because of 'static,
+                // since the Span will need to live for 'a, meaning we could not
+                // generate a fake string here; we can only slice as needed
+                let location = value.location();
+                let fake_bound = location.len().min(FAKE_SPAN_CONTENT.len());
+                let fake_content = &FAKE_SPAN_CONTENT[..fake_bound];
+                let fake_span = Span::new(fake_content, location.start, 0);
+                let fake_token = Token::new(TokenKind::Struct, fake_span);
+
                 return Err(ParsingError::UnexpectedConstruct {
                     expected: "all-keyed struct literal",
-                    found: None, // FIXME: report actual location instead of EOF
+                    found: Some(fake_token),
                 });
             };
 
@@ -164,9 +182,25 @@ fn try_organize_struct_literal_fields(
 
                 pairs.push((id, value));
             } else {
+                // we cannot get an actual token for `found` here, but this
+                // function is the only case where we only have a location
+                // instead of a token, so to avoid penalizing the rest of the
+                // codebase (and restricting consumers' access to full token
+                // info for all other cases, providing them just a location) we
+                // just create a fake token as best we can, assuming that only
+                // its actual underlying location will be used (which will still
+                // be correct). FAKE_SPAN_CONTENT is needed because of 'static,
+                // since the Span will need to live for 'a, meaning we could not
+                // generate a fake string here; we can only slice as needed
+                let location = key_expr.location();
+                let fake_bound = location.len().min(FAKE_SPAN_CONTENT.len());
+                let fake_content = &FAKE_SPAN_CONTENT[..fake_bound];
+                let fake_span = Span::new(fake_content, location.start, 0);
+                let fake_token = Token::new(TokenKind::Struct, fake_span);
+
                 return Err(ParsingError::UnexpectedConstruct {
                     expected: "a field name identifier",
-                    found: None, // FIXME: report actual location instead of EOF
+                    found: Some(fake_token),
                 });
             }
         }

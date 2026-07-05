@@ -102,7 +102,7 @@ impl<'a> Diagnostics<'a> for ParsingError<'a> {
                         .as_ref()
                         .map_or_else(|| s!("end-of-file"), |t| format!("{:?}", t.kind))
                 ),
-                context: found.clone().map(|t| t.span),
+                context: found.as_ref().map(|t| t.span),
             },
             Self::UnexpectedConstruct { expected, found } => ErrorDiagnosticInfo {
                 code: s!("P002"),

@@ -25,7 +25,7 @@ fn main() {
     }
 }
 
-fn show_error(path: &Option<String>, input: &str, info: ErrorDiagnosticInfo) {
+fn show_error(path: &Option<String>, input: &str, info: ErrorDiagnosticInfo<'_>) {
     let file = SimpleFile::new(path.as_deref().unwrap_or("<stdin>"), input);
 
     let location = if let Some(ctx) = info.context {
