@@ -126,12 +126,23 @@ pub enum AnalysisErrorKind<'a> {
     /// The file path associated with this error is irrelevant and should be
     /// ignored.
     NoSecurityPolicy,
+    /// Illegal Glowy integrity sink annotation with Bottom label.
+    ///
+    /// Any label will always have a Bottom intersection with Bottom, meaning
+    /// that all values passed to the sink in question will always necessarily
+    /// be accepted. This annotation is thus meaningless and redundant, probably
+    /// indicating incorrect usage of the analyzer, hence it being reported as
+    /// an error for enhanced clarity and visibility.
+    InvalidDenySinkSemantics {
+        /// The offending annotation's location.
+        location: Location,
+    },
     /// Illegal Glowy revocation annotation with Bottom label.
     ///
     /// Glowy interprets revocation as subtraction, not absolute overwriting,
     /// meaning that revoking Bottom (i.e., { }) is meaningless. This error
     /// probably indicates an incorrect usage of the revocation feature, hence
-    /// it being reported as an error for enhanced clarity.
+    /// it being reported as an error for enhanced clarity and visibility.
     ///
     /// This error is reported not only for invalid direct revocation
     /// annotations, but also for invalid deferred revocation as declared
@@ -447,6 +458,7 @@ impl AnalysisErrorKind<'_> {
 
             Self::NoRegisteredFiles
             | Self::NoSecurityPolicy
+            | Self::InvalidDenySinkSemantics { .. }
             | Self::InvalidRevocationSemantics { .. } => AnalysisErrorCategory::Suspicious,
 
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {

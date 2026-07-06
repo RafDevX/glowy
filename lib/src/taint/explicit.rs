@@ -189,7 +189,13 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         location.clone(), // spec, not annotation
                     );
 
-                    enforcement::trigger_sink(ctx, Cow::Owned(sink), rhs.backtrace());
+                    if let Some(sink) = sink {
+                        enforcement::trigger_sink(ctx, Cow::Owned(sink), rhs.backtrace());
+                    } else {
+                        ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
+                            location: annotation.location.clone(),
+                        });
+                    }
                 }
                 annotations::DeclDirective::Assert => {
                     enforcement::trigger_assertion(
@@ -348,8 +354,14 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     node.location.clone(),
                 );
 
-                for rhs in &rhs_values {
-                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), rhs.backtrace());
+                if let Some(sink) = sink {
+                    for rhs in &rhs_values {
+                        enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), rhs.backtrace());
+                    }
+                } else {
+                    ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
+                        location: annotation.location.clone(),
+                    });
                 }
             }
             annotations::AssignmentDirective::Assert => {

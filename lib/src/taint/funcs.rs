@@ -245,12 +245,18 @@ fn build_function_value<'a>(
             }
             annotations::FunctionDirective::AllowSink
             | annotations::FunctionDirective::DenySink => {
-                sink = Some(SinkDescriptor::new(
+                sink = SinkDescriptor::new(
                     SinkKind::Function,
                     directive == annotations::FunctionDirective::AllowSink,
                     &annotation.tags,
                     value_location.inner().clone(),
-                ));
+                );
+
+                if sink.is_none() {
+                    ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
+                        location: annotation.location.clone(),
+                    });
+                }
             }
         }
     }
@@ -870,8 +876,14 @@ fn apply_call<'a>(
                     node.location.clone(), // call, not annotation
                 );
 
-                for (_, arg_bt) in &with_backtraces {
-                    enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg_bt.clone());
+                if let Some(sink) = sink {
+                    for (_, arg_bt) in &with_backtraces {
+                        enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg_bt.clone());
+                    }
+                } else {
+                    ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
+                        location: annotation.location.clone(),
+                    });
                 }
             }
             annotations::CallDirective::Assert => {

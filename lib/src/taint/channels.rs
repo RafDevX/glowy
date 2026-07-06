@@ -114,9 +114,15 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                     node.location.clone(), // statement, not annotation
                 );
 
-                let backtrace = base.backtrace();
+                if let Some(sink) = sink {
+                    let backtrace = base.backtrace();
 
-                enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
+                    enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
+                } else {
+                    ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
+                        location: annotation.location.clone(),
+                    });
+                }
             }
             annotations::SendDirective::Assert => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);

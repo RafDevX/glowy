@@ -45,15 +45,20 @@ pub struct SinkDescriptor<'a> {
 }
 
 impl<'a> SinkDescriptor<'a> {
-    fn new(kind: SinkKind, allow: bool, tags: &[&'a str], location: Location) -> Self {
+    fn new(kind: SinkKind, allow: bool, tags: &[&'a str], location: Location) -> Option<Self> {
+        if !allow && tags.is_empty() {
+            // a `deny` sink with Bottom label makes no sense
+            return None;
+        }
+
         let label = Label::from_tags(tags);
 
-        Self {
+        Some(Self {
             kind,
             allow,
             label,
             location,
-        }
+        })
     }
 
     fn accepts(&self, label: &Label<'a>) -> bool {
