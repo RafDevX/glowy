@@ -729,7 +729,19 @@ pub struct LabelBacktrace<'a> {
     /// What operation caused this label attribution.
     kind: LabelBacktraceKind,
     /// The final label associated with some information.
-    label: Label<'a>,
+    ///
+    /// A reference-counting [`Arc`] is used to store the label (vs. just
+    /// holding a [`Label`] directly) so that cloning a [`LabelBacktrace`] (even
+    /// if changing one of its other fields, usually [`LabelBacktrace::kind`])
+    /// does not need to allocate a new [`Label`]. This is crucial for efficient
+    /// "nothing to do" paths that just return `self.clone()`, among other very
+    /// hot paths. This is sound because nothing ever mutates `label`.
+    ///
+    /// Note that we use [`Arc`] instead of [`Rc`](std::rc::Rc) because
+    /// [`LabelBacktrace`] must be [`Send`], as otherwise
+    /// [`AnalysisError`](crate::errors::AnalysisError) also would not be
+    /// [`Send`], which would prevent parallelism between analysis runs.
+    label: Arc<Label<'a>>,
     /// Name of symbol with this label, if any/applicable.
     symbol: Option<&'a str>,
     /// Where this operation took place.
@@ -739,9 +751,9 @@ pub struct LabelBacktrace<'a> {
     /// A reference-counted slice is used to store children (vs. a [`Vec`]) so
     /// that cloning a [`LabelBacktrace`] does not recursively deep-clone the
     /// entire propagation tree. This is crucial for efficient "nothing to do"
-    /// paths that just return `self.clone()`, among other many hot paths.
+    /// paths that just return `self.clone()`, among other very hot paths.
     ///
-    /// This is sound because nothing ever mutates children, since there is no
+    /// This is sound because nothing ever mutates `children`, since there is no
     /// way to get a mutable reference to a child (i.e., [`Arc::get_mut`] is
     /// never invoked).
     ///
@@ -770,7 +782,7 @@ impl<'a> LabelBacktrace<'a> {
         } else {
             Some(Self {
                 kind,
-                label,
+                label: Arc::from(label),
                 symbol,
                 location,
                 children: Arc::from([]),
@@ -805,7 +817,7 @@ impl<'a> LabelBacktrace<'a> {
 
         // if there is only one child
         if let [child] = &*children
-            && child.label == label
+            && *child.label == label
             && child.location == location
             && child.symbol == symbol
         {
@@ -818,6 +830,8 @@ impl<'a> LabelBacktrace<'a> {
             // we just want ExplicitAnnotation and not also Assignment another level up
             return Some(child.clone());
         }
+
+        let label = Arc::from(label);
 
         Some(Self {
             kind,
@@ -885,7 +899,7 @@ impl<'a> LabelBacktrace<'a> {
         // label isn't Bottom + cannot be compacted further because self exists
         Self {
             kind: parent_kind,
-            label: self.label.clone(),
+            label: Arc::clone(&self.label),
             symbol: parent_symbol,
             location: parent_location,
             children: Arc::from([self]),
@@ -1043,7 +1057,7 @@ impl<'a> LabelBacktrace<'a> {
 
         Some(Self {
             kind: self.kind,
-            label: new_label,
+            label: Arc::from(new_label),
             symbol: self.symbol,
             location: self.location.clone(),
             children: self
@@ -1117,14 +1131,6 @@ impl<'a> LabelBacktrace<'a> {
     #[inline]
     pub fn children(&self) -> &[Self] {
         &self.children
-    }
-}
-
-// allow consuming backtrace to convert it to its label without cloning
-impl<'a> From<LabelBacktrace<'a>> for Label<'a> {
-    #[inline]
-    fn from(backtrace: LabelBacktrace<'a>) -> Self {
-        backtrace.label
     }
 }
 
