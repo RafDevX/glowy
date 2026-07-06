@@ -528,10 +528,10 @@ pub fn get_structured_error_info<'a>(
 
 pub fn error_category_to_level(
     category: AnalysisErrorCategory,
+    strict: bool,
 ) -> annotate_snippets::Level<'static> {
-    // TODO: pedantic flag
-
     match category {
+        _ if strict => annotate_snippets::Level::ERROR,
         AnalysisErrorCategory::Misconfiguration
         | AnalysisErrorCategory::SecurityPolicyViolation => annotate_snippets::Level::ERROR,
         AnalysisErrorCategory::UnrecognizedFeature

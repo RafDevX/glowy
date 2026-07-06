@@ -17,11 +17,11 @@ fn main() {
     let config = Config::parse();
 
     let (_warnings, errors) = if config.multi_suites {
-        orchestration::analyze_multi_suites(&config.directory, config.time_analysis)
+        orchestration::analyze_multi_suites(&config.directory, config.strict, config.time_analysis)
     } else if config.suite {
-        orchestration::analyze_suite(&config.directory, config.time_analysis)
+        orchestration::analyze_suite(&config.directory, config.strict, config.time_analysis)
     } else {
-        orchestration::analyze_single(&config.directory, config.time_analysis)
+        orchestration::analyze_single(&config.directory, config.strict, config.time_analysis)
     };
 
     if errors > 0 {
@@ -35,13 +35,16 @@ struct Config {
     /// Path to a directory containing a Go module, including a `go.mod` file.
     directory: PathBuf,
     // ^ positional because no #[arg]
+    /// Upgrade all warnings to errors before reporting them.
+    #[arg(long)]
+    strict: bool,
     /// Analyze a directory of directories with Go modules, vs. just one module.
     #[arg(long, alias("multi"))]
     suite: bool,
     /// Analyze multiple suites (directories of directories with Go modules).
     #[arg(long)]
     multi_suites: bool,
-    /// Repord elapsed time for the entire analysis process (including parsing).
+    /// Report elapsed time for the entire analysis process (including parsing).
     #[arg(long)]
     time_analysis: bool,
 }

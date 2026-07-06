@@ -7,8 +7,9 @@ use crate::errors;
 pub fn error_to_group<'a>(
     error: &'a AnalysisError<'a>,
     analyzer: &'a glowy::Analyzer,
+    strict: bool,
 ) -> annotate_snippets::Group<'a> {
-    let level = errors::error_category_to_level(error.kind.category());
+    let level = errors::error_category_to_level(error.kind.category(), strict);
 
     let builder = SnippetBuilder::new(analyzer, error.file);
 
