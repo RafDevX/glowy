@@ -22,6 +22,9 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
     r#const: HashMap<K, ValueRef<'a>>,
     // overall backtrace affecting the entire structure, from dynamic sets, etc.
     r#dyn: Option<LabelBacktrace<'a>>,
+    // exact length, when statically known. only meaningful for slice-shaped
+    // (u64-keyed) composites; conservatively collapsed to None when unknown
+    known_len: Option<u64>,
 }
 
 impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
@@ -29,6 +32,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         Self {
             r#const: HashMap::new(),
             r#dyn,
+            known_len: None,
         }
     }
 
@@ -36,6 +40,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         r#const: HashMap<K, ValueRef<'a>>,
         others: impl IntoIterator<Item = ValueRef<'a>>,
         location: Pinned<'a, Location>,
+        known_len: Option<u64>,
     ) -> Self {
         let children: Vec<_> = others
             .into_iter()
@@ -49,12 +54,22 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             location,
         );
 
-        Self { r#const, r#dyn }
+        Self {
+            r#const,
+            r#dyn,
+            known_len,
+        }
     }
 
     pub fn clear(&mut self) {
         self.r#const = HashMap::new();
         self.r#dyn = None;
+        // known_len is preserved since copy/clear doesn't change the underlying
+        // slice's size, only its elements are reset to their zero-values
+    }
+
+    pub fn known_len(&self) -> Option<u64> {
+        self.known_len
     }
 
     pub fn get_const(&self, key: &K, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
@@ -112,6 +127,70 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
         Self {
             r#const,
             r#dyn: Some(backtrace),
+            known_len: self.known_len,
+        }
+    }
+}
+
+// slice-shaped (u64-keyed) specific operations. these mirror `append(s, x)`
+// and `append(s, xs...)` on slice values, exploiting `known_len` to place the
+// appended elements at their exact indices whenever that length is available
+impl<'a> CompositeValue<'a, u64> {
+    // append a single element
+    pub fn push(
+        &mut self,
+        value: ValueRef<'a>,
+        at_location: impl FnOnce() -> Pinned<'a, Location>,
+    ) {
+        if let Some(length) = self.known_len {
+            // place the value at the exact index
+            self.set_const(length, value);
+
+            // grow length
+            self.known_len = Some(length.saturating_add(1));
+        } else {
+            // degrade to r#dyn (sound but coarse)
+            self.set_dyn(&value, at_location());
+        }
+    }
+
+    pub fn extend(
+        &mut self,
+        src_slice: Option<Self>,
+        src_value: &ValueRef<'a>,
+        at_location: Pinned<'a, Location>,
+    ) {
+        if let Some(src) = src_slice
+            && let Some(self_len) = self.known_len
+            && let Some(src_len) = src.known_len
+        {
+            // both have known lengths, so be smart about it
+
+            #[expect(clippy::iter_over_hash_type, reason = "Mutation order is irrelevant")]
+            for (k, v) in &src.r#const {
+                // set_const overwrites existing values, but that should be fine
+                // since self's positions in the extended range of
+                // [self_len, self_len + src_len[ were previously blank
+                // (any reads there would have returned Bottom + dyn)
+                self.set_const(self_len.saturating_add(*k), v.clone());
+            }
+
+            // fold src's dyn (which conservatively models reads at unknown
+            // positions in other) into self's dyn. this over-taints self's
+            // original portion but is still strictly more precise than the
+            // alternative of set_dyn'ing src's aggregate backtrace (which would
+            // additionally fold every const value's label into self's dyn)
+            self.r#dyn = LabelBacktrace::combine_options(
+                self.r#dyn.clone(),
+                src.r#dyn.clone(),
+                LabelBacktraceKind::Assignment,
+                Cow::Owned(at_location),
+            );
+
+            self.known_len = Some(self_len.saturating_add(src_len));
+        } else {
+            // degrade to r#dyn (sound but coarse)
+            self.set_dyn(src_value, at_location);
         }
     }
 }
@@ -202,7 +281,11 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
 
         let r#dyn = self.r#dyn.realize(from_func, from_slot, concrete);
 
-        Self { r#const, r#dyn }
+        Self {
+            r#const,
+            r#dyn,
+            known_len: self.known_len,
+        }
     }
 
     fn nest_backtrace(
@@ -222,7 +305,11 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             extra_children
         );
 
-        Self { r#const, r#dyn }
+        Self {
+            r#const,
+            r#dyn,
+            known_len: self.known_len,
+        }
     }
 }
 
@@ -256,7 +343,17 @@ impl<'a, K: Eq + Hash + Clone> Mergeable<'a> for CompositeValue<'a, K> {
             .r#dyn
             .merge_with(&other.r#dyn, with_kind, at_location.clone());
 
-        Self { r#const, r#dyn }
+        // only retain length when both branches agree
+        let known_len = match (self.known_len, other.known_len) {
+            (Some(left), Some(right)) if left == right => Some(left),
+            _ => None,
+        };
+
+        Self {
+            r#const,
+            r#dyn,
+            known_len,
+        }
     }
 }
 
@@ -276,6 +373,7 @@ impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
         self.r#dyn.snapshot_aware_eq(&other.r#dyn)
             && self.r#const.len() == other.r#const.len()
             && self.r#const.snapshot_aware_eq(&other.r#const)
+            && self.known_len == other.known_len
     }
 }
 

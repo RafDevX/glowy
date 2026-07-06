@@ -13,7 +13,7 @@
 
 use std::{borrow::Cow, cell::Cell, collections::HashMap};
 
-use parser::ast::{CallNode, MakeNode, TypeNode};
+use parser::ast::{CallNode, ExprNode, MakeNode, TypeNode};
 
 use crate::{
     context::AnalysisContext,
@@ -43,6 +43,8 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
     )]
     match resolved.as_ref().unwrap_or(&node.r#type) {
         TypeNode::Slice { .. } => {
+            let known_len = node.n.as_deref().and_then(resolve_const_len);
+
             let n = node
                 .n
                 .as_ref()
@@ -59,6 +61,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 HashMap::new(),
                 n.into_iter().chain(m),
                 location.clone(),
+                known_len,
             );
 
             ValueRef::new(Value::Slice(composite), location, declared_type)
@@ -148,12 +151,16 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
     }
 }
 
+fn resolve_const_len(expr: &ExprNode<'_>) -> Option<u64> {
+    match SimpleConstValue::try_resolve_from_expr(expr) {
+        Some(SimpleConstValue::Integer(length)) => Some(length),
+        _ => None,
+    }
+}
+
 pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
     // Note: `append` in Go returns a new slice with the appended value, but it
     // does NOT mutate the original slice!
-
-    // TODO: is it possible to infer what is the current slice length, at least
-    // in some cases, so we can use const instead of dyn?
 
     let location = ctx.pin(node.location.clone());
 
@@ -192,15 +199,19 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
             return ValueRef::new_bottom(location, None);
         };
 
-        let value = exprs::visit_single_expr(ctx, other);
+        let src_value = exprs::visit_single_expr(ctx, other);
 
-        slice.set_dyn(&value, location);
+        // we need to clone this since we cannot hold a reference to both a
+        // ValueRef and its CompositeValue at the same time
+        let src_slice = src_value.as_complex_sliceable().as_deref().cloned();
+
+        slice.extend(src_slice, &src_value, location);
     } else {
         // multiple arguments corresponding to individual elements
         for el in node.args.iter().skip(1) {
             let value = exprs::visit_single_expr(ctx, el);
 
-            slice.set_dyn(&value, location.clone());
+            slice.push(value, || location.clone());
         }
     }
 

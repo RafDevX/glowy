@@ -173,6 +173,12 @@ fn visit_integer_keyed_composite_literal<'a>(
     let mut map = HashMap::new();
     let mut others = Vec::new();
 
+    // valid Go array/slice composite literals require constant keys, so
+    // in the well-formed case every position is known and the final length is
+    // `next_default_key`. we only forfeit that hint if we hit the defensive
+    // "non-const key" branch below, where the true length becomes ambiguous
+    let mut known_length = true;
+
     let mut next_default_key = 0;
     for (opt_key, el) in values {
         let value = visit_array_literal_element(ctx, el, &location);
@@ -204,11 +210,14 @@ fn visit_integer_keyed_composite_literal<'a>(
         } else {
             next_default_key += 1; // no proper answer on what to do here...
 
+            known_length = false;
             others.push(value);
         }
     }
 
-    CompositeValue::new(map, others, location)
+    let known_len = known_length.then_some(next_default_key);
+
+    CompositeValue::new(map, others, location, known_len)
 }
 
 fn visit_map_composite_literal<'a>(
@@ -241,7 +250,7 @@ fn visit_map_composite_literal<'a>(
         }
     }
 
-    CompositeValue::new(map, others, location)
+    CompositeValue::new(map, others, location, None)
 }
 
 fn visit_struct_composite_literal<'a>(
@@ -338,7 +347,7 @@ fn visit_struct_composite_literal<'a>(
         }
     }
 
-    CompositeValue::new(map, others, location)
+    CompositeValue::new(map, others, location, None)
 }
 
 fn visit_array_literal_element<'a>(
