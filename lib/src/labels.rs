@@ -744,6 +744,11 @@ pub struct LabelBacktrace<'a> {
     /// This is sound because nothing ever mutates children, since there is no
     /// way to get a mutable reference to a child (i.e., [`Arc::get_mut`] is
     /// never invoked).
+    ///
+    /// Note that we use [`Arc`] instead of [`Rc`](std::rc::Rc) because
+    /// [`LabelBacktrace`] must be [`Send`], as otherwise
+    /// [`AnalysisError`](crate::errors::AnalysisError) also would not be
+    /// [`Send`], which would prevent parallelism between analysis runs.
     children: Arc<[Self]>,
 }
 
