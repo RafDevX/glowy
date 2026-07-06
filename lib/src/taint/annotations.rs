@@ -16,7 +16,7 @@ pub enum AnnotationDirective {
     #[subenum(DeclDirective, AssignmentDirective, SendDirective, FunctionDirective)]
     Label,
     #[subenum(DeclDirective, AssignmentDirective, SendDirective)]
-    Declassify,
+    Revoke,
     #[subenum(FunctionDirective)]
     Sanitizer,
     #[subenum(
@@ -49,7 +49,7 @@ impl AnnotationDirective {
     fn parse(raw: &str) -> Option<Self> {
         match raw {
             "label" => Some(Self::Label),
-            "declassify" => Some(Self::Declassify),
+            "revoke" => Some(Self::Revoke),
             "sanitizer" => Some(Self::Sanitizer),
             "allow" => Some(Self::AllowSink),
             "deny" => Some(Self::DenySink),
@@ -79,13 +79,13 @@ pub fn parse_supported_directive<'a, S: TryFrom<AnnotationDirective>>(
     }
 }
 
-pub fn resolve_declassification_label<'a>(
+pub fn resolve_revocation_label<'a>(
     ctx: &mut AnalysisContext<'a>,
     annotation: &Annotation<'a>,
     direct: bool,
 ) -> Option<Label<'a>> {
     if annotation.tags.is_empty() {
-        ctx.report_error(AnalysisErrorKind::InvalidDeclassificationSemantics {
+        ctx.report_error(AnalysisErrorKind::InvalidRevocationSemantics {
             direct,
             location: annotation.location.clone(),
         });

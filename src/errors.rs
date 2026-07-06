@@ -78,29 +78,21 @@ pub fn get_structured_error_info<'a>(
             snippets: vec![],
             help: Some("did you forget to configure information sinks?"),
         },
-        AnalysisErrorKind::InvalidDeclassificationSemantics { direct, location } => {
-            StructuredErrorInfo {
-                title: format!(
-                    "illegal {} annotation with Bottom label",
-                    if *direct {
-                        "declassification"
-                    } else {
-                        "sanitizer"
-                    }
-                )
-                .into(),
-                code: "S003".into(),
-                snippets: vec![builder.snippet().annotate(
-                    StructuredAnnotation::primary(location.clone()).label(
-                        "this is meaningless and likely indicates incorrect usage due to \
+        AnalysisErrorKind::InvalidRevocationSemantics { direct, location } => StructuredErrorInfo {
+            title: format!(
+                "illegal {} annotation with Bottom label",
+                if *direct { "revoke" } else { "sanitizer" }
+            )
+            .into(),
+            code: "S003".into(),
+            snippets: vec![builder.snippet().annotate(
+                StructuredAnnotation::primary(location.clone()).label(
+                    "this is meaningless and likely indicates incorrect usage due to \
                          misconstrued semantics",
-                    ),
-                )],
-                help: Some(
-                    "Glowy interprets declassification as subtraction, not absolute overwriting",
                 ),
-            }
-        }
+            )],
+            help: Some("Glowy interprets revocation as subtraction, not absolute overwriting"),
+        },
 
         AnalysisErrorKind::InsecureFlow { sink, backtrace } => {
             let (context, operand) = match sink.kind {

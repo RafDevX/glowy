@@ -444,7 +444,7 @@ pub trait BacktraceContainer<'a> {
     // stores no additional metadata besides the fact of its own existence)
     fn allows_lossless_downgrade(&self) -> bool;
 
-    // recursion helper for declassification
+    // recursion helper for revocation
     fn subtract_label(&mut self, subtract: &Label<'a>);
 }
 

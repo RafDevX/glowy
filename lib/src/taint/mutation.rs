@@ -29,7 +29,7 @@ pub trait LeftValue<'a> {
         rhs: ValueRef<'a>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
-        // from declassification annotation
+        // from revocation annotation
         subtract: &Label<'a>,
         location: &Location,
     );
@@ -283,7 +283,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
                     )
             };
 
-            // apply declassification
+            // apply revocation
             mutated.subtract_label(subtract);
 
             // for non-override assignments, `mutated` so far carries only
@@ -395,7 +395,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                 &ctx.pin(location.clone()),
             );
 
-            // apply declassification
+            // apply revocation
             mutated.subtract_label(subtract);
 
             Some(mutated)
@@ -523,7 +523,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 &pinned_location,
             );
 
-            // apply declassification
+            // apply revocation
             mutated.subtract_label(subtract);
 
             Some(mutated)

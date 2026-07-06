@@ -99,8 +99,8 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                     ctx.pin(node.location.clone()),
                 );
             }
-            annotations::SendDirective::Declassify => {
-                let label = annotations::resolve_declassification_label(ctx, annotation, true);
+            annotations::SendDirective::Revoke => {
+                let label = annotations::resolve_revocation_label(ctx, annotation, true);
 
                 if let Some(label) = label {
                     subtract = label;

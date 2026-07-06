@@ -174,8 +174,8 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         pinned.clone(),
                     );
                 }
-                annotations::DeclDirective::Declassify => {
-                    let label = annotations::resolve_declassification_label(ctx, annotation, true);
+                annotations::DeclDirective::Revoke => {
+                    let label = annotations::resolve_revocation_label(ctx, annotation, true);
 
                     if let Some(label) = label {
                         subtract = label;
@@ -332,8 +332,8 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     ctx.pin(node.location.clone()),
                 );
             }
-            annotations::AssignmentDirective::Declassify => {
-                let label = annotations::resolve_declassification_label(ctx, annotation, true);
+            annotations::AssignmentDirective::Revoke => {
+                let label = annotations::resolve_revocation_label(ctx, annotation, true);
 
                 if let Some(label) = label {
                     subtract = label;

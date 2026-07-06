@@ -126,19 +126,18 @@ pub enum AnalysisErrorKind<'a> {
     /// The file path associated with this error is irrelevant and should be
     /// ignored.
     NoSecurityPolicy,
-    /// Illegal Glowy declassification annotation with Bottom label.
+    /// Illegal Glowy revocation annotation with Bottom label.
     ///
-    /// Glowy interprets declassification as subtraction, not absolute
-    /// overwriting, meaning that declassification of Bottom (i.e., { }) is
-    /// meaningless. This error probably indicates an incorrect usage of the
-    /// declassification feature, hence it being reported as an error for
-    /// enhanced clarity.
+    /// Glowy interprets revocation as subtraction, not absolute overwriting,
+    /// meaning that revoking Bottom (i.e., { }) is meaningless. This error
+    /// probably indicates an incorrect usage of the revocation feature, hence
+    /// it being reported as an error for enhanced clarity.
     ///
-    /// This error is reported not only for invalid direct declassification
-    /// annotations, but also for invalid deferred declassification as declared
+    /// This error is reported not only for invalid direct revocation
+    /// annotations, but also for invalid deferred revocation as declared
     /// by an analogously illegal sanitizer annotation with Bottom label.
-    InvalidDeclassificationSemantics {
-        /// Whether the error stems from direct (vs. deferred) declassification.
+    InvalidRevocationSemantics {
+        /// Whether the error stems from direct (vs. deferred) revocation.
         direct: bool,
         /// The offending annotation's location.
         location: Location,
@@ -448,7 +447,7 @@ impl AnalysisErrorKind<'_> {
 
             Self::NoRegisteredFiles
             | Self::NoSecurityPolicy
-            | Self::InvalidDeclassificationSemantics { .. } => AnalysisErrorCategory::Suspicious,
+            | Self::InvalidRevocationSemantics { .. } => AnalysisErrorCategory::Suspicious,
 
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation

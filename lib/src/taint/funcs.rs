@@ -237,7 +237,7 @@ fn build_function_value<'a>(
                 );
             }
             annotations::FunctionDirective::Sanitizer => {
-                let label = annotations::resolve_declassification_label(ctx, annotation, false);
+                let label = annotations::resolve_revocation_label(ctx, annotation, false);
 
                 if let Some(label) = label {
                     sanitizer = label;
@@ -1485,7 +1485,7 @@ fn calculate_call_result<'a>(
         result.push(realized);
     }
 
-    // if this is a sanitizer, now declassify
+    // if this is a sanitizer, apply revocation
     if !func.sanitizer().is_bottom() {
         for realized in &mut result {
             realized.subtract_label(func.sanitizer());

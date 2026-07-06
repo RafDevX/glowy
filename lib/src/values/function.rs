@@ -37,7 +37,7 @@ pub struct FunctionValue<'a> {
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
-    // Label to be subtracted from realized result at call (declassification)
+    // Label to be subtracted from realized result at call (revocation)
     sanitizer: Label<'a>,
     // inherent deferred sink that all calls to this func implicitly represent
     sink: Option<SinkDescriptor<'a>>, // None if not a sink
