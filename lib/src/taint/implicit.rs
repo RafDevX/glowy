@@ -99,37 +99,98 @@ fn visit_for_clause<'a>(
 ) {
     if let Some(init) = &clause.init {
         // visit init regardless because it'll always be executed
+        // (and it only happens once, so no convergence loop is required)
         super::visit_statement(ctx, init);
     }
 
-    let pushed = if let Some(cond) = &clause.cond
-        && let Some(cond_backtrace) = exprs::get_expr_backtrace(ctx, cond)
-    {
-        ctx.push_branch_backtrace(cond_backtrace.into_single_child(
-            LabelBacktraceKind::Branch,
-            None,
-            ctx.pin(header_location.clone()),
-        ));
+    // body+post must be re-visited until labels stabilize because assignments
+    // inside them can taint variables that the cond depends on, which then
+    // widens the branch backtrace that guards subsequent iterations.
+    // labels grow monotonically and finitely, so convergence is guaranteed.
+    // we have to do independent speculative visits with error suppression
+    // enabled until stabilization is reached, and then another separate visit
+    // with errors unsuppressed at the end.
+    // unlike `visit_for_range`, we cannot switch gears and declare an iteration
+    // the final one when stability is determined mid-iteration, since error
+    // suppression is relevant for condition evaluation here, as it can e.g.
+    // be a function call with embedded enforcement checks that need to trigger,
+    // meaning that we always need to do a separate final iteration at the end
 
-        true
-    } else {
-        false
-    };
+    macro_rules! inner_visit {
+        ($cond_backtrace:expr) => {{
+            let pushed = if let Some(branch_backtrace) = LabelBacktrace::fold(
+                $cond_backtrace.as_ref(),
+                LabelBacktraceKind::Branch,
+                None,
+                ctx.pin(header_location.clone()),
+            ) {
+                ctx.push_branch_backtrace(branch_backtrace);
 
-    // vvv this will create another scope for the for body, which is intended
-    super::visit_block(ctx, body);
+                true
+            } else {
+                false
+            };
 
-    // branch backtrace must remain in place while visiting post because it
-    // is only executed if cond is not always false (information leakage)
-    if let Some(post) = &clause.post {
-        super::visit_statement(ctx, post);
+            // vvv this will create another scope for the for body (as intended)
+            super::visit_block(ctx, body);
 
-        // TODO: should visit body-post multiple times until labels stabilize
+            // branch backtrace must remain in place while visiting post because
+            // it is only executed if cond is not always false (info leakage)
+            if let Some(post) = &clause.post {
+                super::visit_statement(ctx, post);
+            }
+
+            if pushed {
+                ctx.pop_branch_backtrace();
+            }
+        }};
     }
 
-    if pushed {
-        ctx.pop_branch_backtrace();
+    // we need to remember deferred state before visiting the body+post, as all
+    // deferral effects of speculative body+post visits (such as from break/
+    // continue) must be rolled back before the next visit to prevent leakage
+    let pre_body_deferred = ctx.checkpoint_deferred_state();
+
+    let mut prev_cond_backtrace: Option<Option<LabelBacktrace<'a>>> = None;
+
+    ctx.push_error_suppression();
+
+    loop {
+        let cond_backtrace = clause
+            .cond
+            .as_ref()
+            .and_then(|cond| exprs::get_expr_backtrace(ctx, cond));
+
+        let stable = prev_cond_backtrace
+            .as_ref()
+            .snapshot_aware_eq(&Some(&cond_backtrace));
+
+        if stable {
+            break;
+        }
+
+        inner_visit!(cond_backtrace);
+
+        // the next iteration must re-enter the same body scope (and not a
+        // sibling), so undo the cursor advance that `visit_block` performed
+        ctx.symtab_mut().rewind_child_scope_cursor();
+
+        ctx.restore_deferred_state(pre_body_deferred.clone());
+        prev_cond_backtrace = Some(cond_backtrace);
     }
+
+    ctx.pop_error_suppression();
+
+    // final unsuppressed visit with stable labels. because labels never
+    // shrink, the cond backtrace computed here is guaranteed to match the one
+    // that broke the loop above, so the branch backtrace is the same as it
+    // would have been on the (never-executed) stable iteration
+    let cond_backtrace = clause
+        .cond
+        .as_ref()
+        .and_then(|cond| exprs::get_expr_backtrace(ctx, cond));
+
+    inner_visit!(cond_backtrace);
 }
 
 fn visit_for_range<'a>(
@@ -169,7 +230,7 @@ fn visit_for_range<'a>(
     // exits. if this ever fails to converge, it is because of a soundness bug
     // elsewhere in the analysis
 
-    let mut last_rhs_backtrace: Option<Option<LabelBacktrace<'a>>> = None;
+    let mut prev_rhs_backtrace: Option<Option<LabelBacktrace<'a>>> = None;
 
     // we need to remember deferred state before visiting the body, as all
     // deferral effects of speculative body visits (such as from break/continue)
@@ -190,7 +251,7 @@ fn visit_for_range<'a>(
 
         rhs_values.truncate(lhs_len);
 
-        let stable = last_rhs_backtrace
+        let stable = prev_rhs_backtrace
             .as_ref()
             .is_some_and(|prev| prev.snapshot_aware_eq(&rhs_backtrace));
 
@@ -264,7 +325,7 @@ fn visit_for_range<'a>(
         ctx.symtab_mut().rewind_child_scope_cursor();
 
         ctx.restore_deferred_state(pre_body_deferred.clone());
-        last_rhs_backtrace = Some(rhs_backtrace);
+        prev_rhs_backtrace = Some(rhs_backtrace);
     }
 }
 
