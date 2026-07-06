@@ -70,18 +70,7 @@ pub enum AnalysisErrorKind<'a> {
     /// The file in question was registered multiple times with the Glowy
     /// analyzer, potentially with distinct content.
     DuplicateVirtualFilePath,
-    /// Attempt to conduct analysis without specifying any Go source code files.
-    ///
-    /// Analysis without input trivially resolves to [`Ok`], so there is no need
-    /// to invoke the analyzer and thus this likely represents a bug in the
-    /// consumer code. This error is reported instead to explicitly bring
-    /// attention to this problem so that it may be assessed and fixed (for
-    /// example, by adding file registration calls via
-    /// [`Analyzer::add_file`](crate::Analyzer::add_file) or equivalent).
-    ///
-    /// The file path associated with this error is irrelevant and should be
-    /// ignored.
-    NoRegisteredFiles,
+
     /// Free build-tag dimensions exceeds the configured limit.
     ///
     /// The analyzer enumerates `2^N` permutations of mentioned build tags,
@@ -109,6 +98,19 @@ pub enum AnalysisErrorKind<'a> {
         /// The offending annotation's location.
         location: Location,
     },
+
+    /// Attempt to conduct analysis without specifying any Go source code files.
+    ///
+    /// Analysis without input trivially resolves to [`Ok`], so there is no need
+    /// to invoke the analyzer and thus this likely represents a bug in the
+    /// consumer code. This error is reported instead to explicitly bring
+    /// attention to this problem so that it may be assessed and fixed (for
+    /// example, by adding file registration calls via
+    /// [`Analyzer::add_file`](crate::Analyzer::add_file) or equivalent).
+    ///
+    /// The file path associated with this error is irrelevant and should be
+    /// ignored.
+    NoRegisteredFiles,
     /// Illegal Glowy declassification annotation with Bottom label.
     ///
     /// Glowy interprets declassification as subtraction, not absolute
