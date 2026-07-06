@@ -106,6 +106,12 @@ pub fn get_structured_error_info<'a>(
                 glowy::SinkKind::Send => ("send statement", "the value being sent"),
             };
 
+            let variant = if sink.allow {
+                "confidentiality (allow)"
+            } else {
+                "integrity (deny)"
+            };
+
             StructuredErrorInfo {
                 title: format!("insecure data flow to sink in {context}").into(),
                 code: format!("F{:0>3}", sink.kind as usize + 1).into(),
@@ -113,7 +119,8 @@ pub fn get_structured_error_info<'a>(
                     backtrace,
                     &sink.label,
                     Some(format!(
-                        "sink has label {}, but {} has label {}",
+                        "{} sink has label {}, but {} has label {}",
+                        variant,
                         sink.label,
                         operand,
                         backtrace.label()

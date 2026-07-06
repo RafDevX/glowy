@@ -36,8 +36,8 @@ pub fn trigger_sink<'a>(
         return;
     }
 
-    if *label <= sink.label {
-        // all good! value's label is compatible with sink
+    if sink.accepts(label) {
+        // all good! value's label is compatible with the sink
         return;
     }
 
@@ -108,7 +108,7 @@ pub fn try_trigger_deferred_check<'a>(
     }
 
     match check {
-        DeferredEnforcementCheck::Sink { sink, .. } if *label <= sink.label => {} // all good
+        DeferredEnforcementCheck::Sink { sink, .. } if sink.accepts(label) => {} // all good
         DeferredEnforcementCheck::Sink { sink, found, file } => {
             ctx.report_error_at(
                 file,

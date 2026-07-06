@@ -203,7 +203,7 @@ pub struct AnalysisConfig {
     /// [`Label`](labels::Label), with each individual [`String`] element
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sources: IndexMap<String, Vec<String>>,
-    /// Functions universally recognized as blanket information sinks.
+    /// Functions universally recognized as blanket confidentiality sinks.
     ///
     /// These functions will always be considered to accept only values up to
     /// the associated label.
@@ -214,7 +214,19 @@ pub struct AnalysisConfig {
     /// function in question. Each associated [`Vec<String>`] value represents a
     /// [`Label`](labels::Label), with each individual [`String`] element
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
-    pub sinks: IndexMap<String, Vec<String>>,
+    pub allow_sinks: IndexMap<String, Vec<String>>,
+    /// Functions universally recognized as blanket integrity sinks.
+    ///
+    /// These functions will always be considered to accept only values with
+    /// null intersection with the associated label.
+    ///
+    /// An [`IndexMap`] is used preserve insertion order, with each [`String`]
+    /// key corresponding to a fully qualified Go package path of where the
+    /// function is accessed, followed by a `.` and then the name of the
+    /// function in question. Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    pub deny_sinks: IndexMap<String, Vec<String>>,
     /// Whether to include `_test.go` files in the analysis.
     ///
     /// Defaults to `false`, matching the behavior of `go build` (test files
@@ -239,7 +251,8 @@ impl Default for AnalysisConfig {
         Self {
             verbose: false,
             sources: IndexMap::new(),
-            sinks: IndexMap::new(),
+            allow_sinks: IndexMap::new(),
+            deny_sinks: IndexMap::new(),
             include_tests: false,
             max_build_tag_dimensions: DEFAULT_MAX_BUILD_TAG_DIMENSIONS,
         }

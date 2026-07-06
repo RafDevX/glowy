@@ -26,7 +26,15 @@ pub enum AnnotationDirective {
         CallDirective,
         FunctionDirective
     )]
-    Sink,
+    AllowSink,
+    #[subenum(
+        DeclDirective,
+        AssignmentDirective,
+        SendDirective,
+        CallDirective,
+        FunctionDirective
+    )]
+    DenySink,
     #[subenum(
         ExprDirective,
         DeclDirective,
@@ -43,7 +51,8 @@ impl AnnotationDirective {
             "label" => Some(Self::Label),
             "declassify" => Some(Self::Declassify),
             "sanitizer" => Some(Self::Sanitizer),
-            "sink" => Some(Self::Sink),
+            "allow" => Some(Self::AllowSink),
+            "deny" => Some(Self::DenySink),
             "assert" => Some(Self::Assert),
             _ => None,
         }

@@ -106,9 +106,10 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                     subtract = label;
                 }
             }
-            annotations::SendDirective::Sink => {
+            annotations::SendDirective::AllowSink | annotations::SendDirective::DenySink => {
                 let sink = SinkDescriptor::new(
                     SinkKind::Send,
+                    directive == annotations::SendDirective::AllowSink,
                     &annotation.tags,
                     node.location.clone(), // statement, not annotation
                 );

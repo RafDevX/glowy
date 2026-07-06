@@ -181,9 +181,10 @@ pub fn visit_raw_binding_decl_spec<'a>(
                         subtract = label;
                     }
                 }
-                annotations::DeclDirective::Sink => {
+                annotations::DeclDirective::AllowSink | annotations::DeclDirective::DenySink => {
                     let sink = SinkDescriptor::new(
                         SinkKind::Declaration,
+                        directive == annotations::DeclDirective::AllowSink,
                         &annotation.tags,
                         location.clone(), // spec, not annotation
                     );
@@ -338,9 +339,11 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                     subtract = label;
                 }
             }
-            annotations::AssignmentDirective::Sink => {
+            annotations::AssignmentDirective::AllowSink
+            | annotations::AssignmentDirective::DenySink => {
                 let sink = SinkDescriptor::new(
                     SinkKind::Assignment,
+                    directive == annotations::AssignmentDirective::AllowSink,
                     &annotation.tags,
                     node.location.clone(),
                 );

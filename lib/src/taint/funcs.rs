@@ -243,9 +243,11 @@ fn build_function_value<'a>(
                     sanitizer = label;
                 }
             }
-            annotations::FunctionDirective::Sink => {
+            annotations::FunctionDirective::AllowSink
+            | annotations::FunctionDirective::DenySink => {
                 sink = Some(SinkDescriptor::new(
                     SinkKind::Function,
+                    directive == annotations::FunctionDirective::AllowSink,
                     &annotation.tags,
                     value_location.inner().clone(),
                 ));
@@ -860,9 +862,10 @@ fn apply_call<'a>(
         && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
     {
         match directive {
-            annotations::CallDirective::Sink => {
+            annotations::CallDirective::AllowSink | annotations::CallDirective::DenySink => {
                 let sink = SinkDescriptor::new(
                     SinkKind::Call,
+                    directive == annotations::CallDirective::AllowSink,
                     &annotation.tags,
                     node.location.clone(), // call, not annotation
                 );
@@ -899,9 +902,11 @@ fn apply_call<'a>(
 
         for directive in resolve_blanket_directives(ctx, &node.func) {
             match directive.kind() {
-                BlanketDirectiveKind::Sink => {
+                BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
+                    // we bypass SinkDescriptor::new as we already have a Label
                     let sink = SinkDescriptor {
                         kind: SinkKind::Call,
+                        allow: directive.kind() == BlanketDirectiveKind::AllowSink,
                         label: directive.label(),
                         location: node.location.clone(),
                     };

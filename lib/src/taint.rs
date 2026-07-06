@@ -36,6 +36,8 @@ pub use goto::GotoConvergenceState;
 pub struct SinkDescriptor<'a> {
     /// The type of sink in question.
     pub kind: SinkKind,
+    /// Whether this is a confidentiality sink (allow), vs. integrity (deny).
+    pub allow: bool,
     /// The sink's declared expected information label.
     pub label: Label<'a>,
     /// Where the sink was found.
@@ -43,13 +45,29 @@ pub struct SinkDescriptor<'a> {
 }
 
 impl<'a> SinkDescriptor<'a> {
-    fn new(kind: SinkKind, tags: &[&'a str], location: Location) -> Self {
+    fn new(kind: SinkKind, allow: bool, tags: &[&'a str], location: Location) -> Self {
         let label = Label::from_tags(tags);
 
         Self {
             kind,
+            allow,
             label,
             location,
+        }
+    }
+
+    fn accepts(&self, label: &Label<'a>) -> bool {
+        if label.is_bottom() {
+            // Bottom is always accepted; we can skip the more expensive checks
+            return true;
+        }
+
+        if self.allow {
+            // confidentiality sink (allow - whitelist)
+            *label <= self.label
+        } else {
+            // integrity sink (deny - blacklist)
+            label.intersect(&self.label).is_bottom()
         }
     }
 }
@@ -111,7 +129,8 @@ impl BlanketDirective {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlanketDirectiveKind {
     Source,
-    Sink,
+    AllowSink,
+    DenySink,
 }
 
 #[expect(

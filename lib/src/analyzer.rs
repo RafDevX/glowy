@@ -473,9 +473,15 @@ impl Analyzer {
             .map(|(func_path, tags)| (BlanketDirectiveKind::Source, func_path, tags))
             .chain(
                 config
-                    .sinks
+                    .allow_sinks
                     .into_iter()
-                    .map(|(func_path, tags)| (BlanketDirectiveKind::Sink, func_path, tags)),
+                    .map(|(func_path, tags)| (BlanketDirectiveKind::AllowSink, func_path, tags)),
+            )
+            .chain(
+                config
+                    .deny_sinks
+                    .into_iter()
+                    .map(|(func_path, tags)| (BlanketDirectiveKind::DenySink, func_path, tags)),
             );
 
         for (kind, func_path, tags) in blanket_directives {
@@ -546,7 +552,9 @@ impl Analyzer {
     /// Universally registers a function as an information sink.
     ///
     /// This instructs the analyzer to always consider all calls to the given
-    /// function as only accepting the provided [`Label`].
+    /// function as only accepting the provided [`Label`] (for confidentiality,
+    /// if `allow` is `true`) or as never accepting any overlap with the
+    /// provided [`Label`] (for integrity, if `allow` is `false`).
     ///
     /// The function path (`func_path`) is expected to be well-formed with the
     /// fully qualified Go package path of where the function is accessed,
@@ -567,14 +575,26 @@ impl Analyzer {
     ///
     /// analyzer.add_blanket_sink(
     ///     "example.com/company-name/proj/sub.SomeFunc",
-    ///     &Label::from_tags(&["trusted"]),
+    ///     false,
+    ///     &Label::from_tags(&["untrusted"]),
     /// );
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn add_blanket_sink<'f>(&mut self, func_path: impl Into<Cow<'f, str>>, label: &Label<'_>) {
-        self.add_blanket_directive(BlanketDirectiveKind::Sink, func_path, label);
+    pub fn add_blanket_sink<'f>(
+        &mut self,
+        func_path: impl Into<Cow<'f, str>>,
+        allow: bool,
+        label: &Label<'_>,
+    ) {
+        let variant = if allow {
+            BlanketDirectiveKind::AllowSink
+        } else {
+            BlanketDirectiveKind::DenySink
+        };
+
+        self.add_blanket_directive(variant, func_path, label);
     }
 
     /// Inspects the registered files for security policy violations.
