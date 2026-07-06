@@ -111,6 +111,21 @@ pub enum AnalysisErrorKind<'a> {
     /// The file path associated with this error is irrelevant and should be
     /// ignored.
     NoRegisteredFiles,
+    /// Attempt to conduct analysis without defining any security policy.
+    ///
+    /// Analysis without a security policy trivially resolves to [`Ok`], so
+    /// there is no need to invoke the analyzer and thus this likely represents
+    /// a bug in the consumer code. This error is reported instead to explicitly
+    /// bring attention to this problem so that it may be assessed and fixed
+    /// (for example, by adding sink annotations in the input source code, or
+    /// by manually configuring blanket sinks).
+    ///
+    /// Note that this error is only reported if no enforcement checks
+    /// whatsoever were specified or encountered anywhere across the codebase.
+    ///
+    /// The file path associated with this error is irrelevant and should be
+    /// ignored.
+    NoSecurityPolicy,
     /// Illegal Glowy declassification annotation with Bottom label.
     ///
     /// Glowy interprets declassification as subtraction, not absolute
@@ -431,9 +446,9 @@ impl AnalysisErrorKind<'_> {
 
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
 
-            Self::NoRegisteredFiles | Self::InvalidDeclassificationSemantics { .. } => {
-                AnalysisErrorCategory::Suspicious
-            }
+            Self::NoRegisteredFiles
+            | Self::NoSecurityPolicy
+            | Self::InvalidDeclassificationSemantics { .. } => AnalysisErrorCategory::Suspicious,
 
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation

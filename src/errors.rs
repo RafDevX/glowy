@@ -72,6 +72,12 @@ pub fn get_structured_error_info<'a>(
             snippets: vec![],
             help: Some("did you forget to add files to be analyzed?"),
         },
+        AnalysisErrorKind::NoSecurityPolicy => StructuredErrorInfo {
+            title: "no defined security policy".into(),
+            code: "S002".into(),
+            snippets: vec![],
+            help: Some("did you forget to configure information sinks?"),
+        },
         AnalysisErrorKind::InvalidDeclassificationSemantics { direct, location } => {
             StructuredErrorInfo {
                 title: format!(
@@ -83,7 +89,7 @@ pub fn get_structured_error_info<'a>(
                     }
                 )
                 .into(),
-                code: "S002".into(),
+                code: "S003".into(),
                 snippets: vec![builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone()).label(
                         "this is meaningless and likely indicates incorrect usage due to \

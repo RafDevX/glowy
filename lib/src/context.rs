@@ -84,6 +84,8 @@ pub struct AnalysisContext<'a> {
     /// Locations of currently active split control-flow regions.
     split_control_flow_regions: Vec<Pinned<'a, Location>>,
 
+    /// Whether any security policy was encountered during the analysis.
+    saw_enforcement_checks: bool,
     /// Universally-applicable directives registered for specific functions.
     blanket_directives: &'a BlanketDirectives,
 }
@@ -105,6 +107,7 @@ impl<'a> AnalysisContext<'a> {
             error_suppression_depth: 0,
             split_control_flow_regions: Vec::new(),
             goto_states: Vec::new(),
+            saw_enforcement_checks: false,
             blanket_directives,
         }
     }
@@ -382,6 +385,14 @@ impl<'a> AnalysisContext<'a> {
         );
 
         func.defer_check(check);
+    }
+
+    pub fn saw_enforcement_checks(&self) -> bool {
+        self.saw_enforcement_checks
+    }
+
+    pub fn record_saw_enforcement_check(&mut self) {
+        self.saw_enforcement_checks = true;
     }
 
     pub fn blanket_directives_for(&self, func_path: &str) -> &'a [BlanketDirective] {

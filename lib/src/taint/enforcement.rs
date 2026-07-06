@@ -36,6 +36,8 @@ pub fn trigger_sink<'a>(
         return;
     }
 
+    ctx.record_saw_enforcement_check();
+
     if sink.accepts(label) {
         // all good! value's label is compatible with the sink
         return;
@@ -76,6 +78,8 @@ pub fn trigger_assertion<'a>(
         return;
     }
 
+    ctx.record_saw_enforcement_check();
+
     let expected_label = expected_sequence.first().unwrap_or(&Label::Bottom);
 
     if *label == *expected_label {
@@ -106,6 +110,8 @@ pub fn try_trigger_deferred_check<'a>(
     if label.has_any_synthetic() {
         return false;
     }
+
+    ctx.record_saw_enforcement_check();
 
     match check {
         DeferredEnforcementCheck::Sink { sink, .. } if sink.accepts(label) => {} // all good

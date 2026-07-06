@@ -597,6 +597,19 @@ impl Analyzer {
         self.add_blanket_directive(variant, func_path, label);
     }
 
+    fn has_blanket_enforcement_checks(&self) -> bool {
+        self.blanket_directives
+            .values()
+            .flatten()
+            .map(BlanketDirective::kind)
+            .any(|kind| {
+                matches!(
+                    kind,
+                    BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink
+                )
+            })
+    }
+
     /// Inspects the registered files for security policy violations.
     ///
     /// This encapsulates all principal logic in Glowy. All Go source code files
@@ -960,6 +973,13 @@ impl Analyzer {
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
         pass!(taint::visit_source_file, true);
+
+        if !self.has_blanket_enforcement_checks() && !context.saw_enforcement_checks() {
+            context.report_error_at(
+                path::Path::new("/main.go"), // should never be used
+                AnalysisErrorKind::NoSecurityPolicy,
+            );
+        }
 
         if self.verbose {
             println!("{verbose_prefix}Finished Stage 3");
