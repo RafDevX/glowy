@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, hash_map::Entry},
+    collections::{BTreeMap, HashMap, HashSet, hash_map::Entry},
     env, fs,
     io::{self, BufRead},
     path,
@@ -894,15 +894,21 @@ impl Analyzer {
         let mut context = AnalysisContext::new(&self.blanket_directives);
 
         macro_rules! pass {
-            ($visitor:path, $clear:expr) => {{
-                if $clear {
-                    context.symtab_mut().clear_all_package_progress();
-                }
+            ($visitor:path, $worklist:expr) => {{
+                let worklist: Option<&HashSet<FullPackagePath>> = $worklist;
+
+                context.symtab_mut().clear_all_package_progress();
 
                 for (path, ast) in admitted {
-                    context.set_current_file(path);
-
                     let package_path = compute_package_path(&self.module_base, path);
+
+                    if worklist.is_some_and(|pkgs| !pkgs.contains(&package_path)) {
+                        // if `worklist` is Some, only visit files whose package
+                        // is included; skipping at the package level is safe
+                        continue;
+                    }
+
+                    context.set_current_file(path);
 
                     $visitor(&mut context, ast, package_path);
                 }
@@ -916,7 +922,7 @@ impl Analyzer {
         //     This is also used to scaffold sub-module hierarchies and package
         //     scopes, as well as register top-level named types.
 
-        pass!(decls::visit_source_file, false);
+        pass!(decls::visit_source_file, None);
 
         // retry resolving type registry entries that were enqueued during the
         // per-file decl walk above because their target was not yet known
@@ -933,7 +939,14 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::StabilizeLabels);
 
-        let mut last_snapshot = None;
+        let mut prev_snapshot: Option<HashMap<_, _>> = None;
+
+        // we use a package-level worklist to avoid visiting every package every
+        // iteration, which can be a helpful optimization in large projects.
+        // once a package has converged and there is no remaining way for it to
+        // change, it can just be omitted from all subsequent worklists.
+        // if this is set to None, it means that we have to visit everything
+        let mut worklist: Option<HashSet<FullPackagePath>> = None;
 
         // u8 is fine because this number should never be very high (<10), but
         // even if we do somehow reach overflow (>255), it's not the end of the
@@ -942,28 +955,61 @@ impl Analyzer {
         let mut iteration_index = 0_u8;
 
         loop {
-            pass!(taint::visit_source_file, true);
+            pass!(taint::visit_source_file, worklist.as_ref());
 
-            let snapshot = context.symtab().snapshot();
+            let snapshot = context.symtab().snapshot_per_package();
 
-            if last_snapshot.is_some_and(|old| snapshot == old) {
+            let unstable: HashSet<FullPackagePath> = snapshot
+                .iter()
+                .filter(|&(pkg, current)| {
+                    let Some(prev) = &prev_snapshot else {
+                        // if this is the first pass, keep everything
+                        return true;
+                    };
+
+                    // keep only packages that changed since the last iteration.
+                    // note that we never care about packages not present in the
+                    // current snapshot, since they presumably have already been
+                    // filtered out in previous iterations, and so they will
+                    // never be revisited (worklist only narrows, never widens)
+
+                    prev.get(pkg) != Some(current)
+                })
+                .map(|(pkg, _)| pkg.clone())
+                .collect();
+
+            if unstable.is_empty() {
                 // nothing relevant has changed since the last iteration, so we
                 // have reached label convergence and can thus stop the loop
                 break;
             }
 
-            last_snapshot = Some(snapshot);
+            // we only keep packages that changed since the last iteration
+            // (i.e., unstable) and their reverse transitive dependencies (i.e.,
+            // all packages that import directly or indirectly an unstable
+            // package), since no others could ever be affected anymore
+            let next_worklist = context.reverse_transitive_dependencies(&unstable);
+
+            prev_snapshot = Some(snapshot);
             iteration_index += 1;
 
             if self.verbose {
                 println!(
-                    "{verbose_prefix}Finished convergence iteration #{iteration_index} (Stage 2)"
+                    "{verbose_prefix}Finished convergence iteration #{iteration_index} \
+                     (Stage 2) - {} package(s) changed; next pass visits {}",
+                    unstable.len(),
+                    next_worklist.len(),
                 );
             }
+
+            worklist = Some(next_worklist);
         }
 
         if self.verbose {
-            println!("{verbose_prefix}Finished Stage 2");
+            println!(
+                "{verbose_prefix}Finished Stage 2 in {} iterations",
+                iteration_index + 1 // count the one where nothing changed
+            );
         }
 
         // Stage #3: EnforceSecurityPolicies
@@ -972,7 +1018,7 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
-        pass!(taint::visit_source_file, true);
+        pass!(taint::visit_source_file, None);
 
         if !self.has_blanket_enforcement_checks() && !context.saw_enforcement_checks() {
             context.report_error_at(

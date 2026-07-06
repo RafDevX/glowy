@@ -470,26 +470,27 @@ impl<'a> SymbolTable<'a> {
         }
     }
 
-    pub fn snapshot(&self) -> SymbolTableSnapshot<'a> {
-        let mut items = vec![];
+    pub fn snapshot_per_package(&self) -> HashMap<FullPackagePath, SymbolTableSnapshot<'a>> {
+        let mut per_package = HashMap::with_capacity(self.package_scopes.len());
 
-        // necessary because a HashMap has no defined order, which could lead to
-        // inconsistent theoretically-identical snapshots
-        let mut sorted: Vec<_> = self.package_scopes.iter().collect();
-        sorted.sort_unstable_by_key(|(k, _)| *k);
-
-        for (path, envelope) in sorted {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "Order is irrelevant since output also has no defined order"
+        )]
+        for (path, envelope) in &self.package_scopes {
             // we use an Rc instead of cloning String every time since there'll
             // probably be many items with the exact same namespace, and &str
             // would not compile (lifetimes, this is being returned to outside
             // this function and would depend on &self.package_scopes)
             let namespace = Rc::from(path.as_str());
 
-            items.extend(envelope.scope.borrow().partial_snapshot(&namespace));
+            let mut items = envelope.scope.borrow().partial_snapshot(&namespace);
             items.extend(envelope.partial_method_snapshot(path));
+
+            per_package.insert(path.clone(), SymbolTableSnapshot::from(items));
         }
 
-        SymbolTableSnapshot::from(items)
+        per_package
     }
 }
 
