@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter, path::Path, rc::Rc};
+use std::{borrow::Cow, iter, rc::Rc};
 
 use parser::{
     Annotation, Location, Span,
@@ -41,13 +41,9 @@ fn visit_function_def<'a>(
     let value_location = match r#ref {
         FunctionRef::Named(name) => name.pinned_location(),
         FunctionRef::Anonymous(location) => location.clone(),
-        FunctionRef::BuiltIn(_) | FunctionRef::BlackboxInference(_) => {
-            decl_symbol.as_ref().map_or_else(
-                // FIXME: fake location
-                || Pinned::new(Path::new(""), 0..1),
-                Pinned::pinned_location,
-            )
-        }
+        FunctionRef::BuiltIn(_) | FunctionRef::BlackboxInference(_) => decl_symbol
+            .as_ref()
+            .map_or_else(|| crate::FAKE_LOCATION.clone(), Pinned::pinned_location),
     };
 
     let func_val = build_function_value(

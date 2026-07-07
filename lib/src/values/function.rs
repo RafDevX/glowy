@@ -114,7 +114,7 @@ impl<'a> FunctionValue<'a> {
 
         let dummy_type = TypeNode::Name(TypeNameNode {
             package: None,
-            id: Span::new("unknown", 0, 1),
+            id: *crate::FAKE_SPAN.inner(),
             args: vec![],
         });
 
@@ -150,13 +150,13 @@ impl<'a> FunctionValue<'a> {
     ) -> Self {
         let dummy_type = TypeNode::Name(TypeNameNode {
             package: None,
-            id: Span::new("unknown", 0, 1),
+            id: *crate::FAKE_SPAN.inner(),
             args: vec![],
         });
 
         let signature = FunctionSignatureNode {
             params: vec![FunctionParamDeclNode {
-                ids: vec![Span::new("v", 0, 1)],
+                ids: vec![*crate::FAKE_SPAN.inner()],
                 variadic: false,
                 r#type: dummy_type.clone(),
             }],

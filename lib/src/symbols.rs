@@ -672,12 +672,7 @@ impl<'a> Scope<'a> {
     fn new_universe() -> Self {
         let mut scope = Self::new(None);
 
-        // FIXME: handle this better, or at least check if pinned.file() is
-        // empty everywhere this location could be reached and treat it as a
-        // special case (should only happen for predeclared)
-        // [note: cannot be `const` because MSRV would need to be raised to 1.91
-        // just to support this -- not worth it]
-        let predeclared_location = Pinned::new(Path::new(""), 0..1);
+        let predeclared_location = &*crate::FAKE_LOCATION;
 
         macro_rules! predeclared_constant {
             ($id:expr, $value:expr) => {
@@ -885,7 +880,7 @@ impl<'a> Symbol<'a> {
     fn new_predeclared_ref(name: &'a str, value: ValueRef<'a>) -> SymbolRef<'a> {
         Self::new_ref(
             // vv not very pretty, but it should never matter anyway
-            Pinned::new(Path::new(""), Span::new(name, 0, 0)),
+            Pinned::new(Path::new("/main.go"), Span::new(name, 0, 1)),
             false,
             value,
         )

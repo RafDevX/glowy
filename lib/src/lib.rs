@@ -145,7 +145,7 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 
-use std::{cmp, fmt, path::Path};
+use std::{cmp, fmt, path::Path, sync::LazyLock};
 
 pub use analyzer::Analyzer;
 pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
@@ -166,6 +166,64 @@ mod symbols;
 mod taint;
 mod types;
 mod values;
+
+/// Represents an unknown source-file location.
+///
+/// This standardizes one unified fake configuration that is used throughout the
+/// library to serve as a placeholder for when a [`Pinned`] [`Location`] is
+/// required, but one simply is not available, for a myriad of possible reasons.
+/// A fake location is used when an [`Option`] would greatly increase complexity
+/// for very narrow edge-cases, especially for internal processing that is never
+/// visible outside the library's private state.
+///
+/// Consumers may choose to assign special semantics when displaying or
+/// manipulating a location that matches this object. It is an error to attempt
+/// to obtain a source code snippet at a location matching this object, since
+/// either it does not exist, or it is meaningless (i.e., unrelated to where
+/// the location was found, and not bound to its semantics).
+///
+/// If a bare (not-[`Pinned`]) [`Location`] object is necessary, one can be
+/// obtained through [`Pinned::inner`].
+///
+/// Note that a `static` is used instead of a `const` binding because the
+/// [`Path::new`] constructor is not `const` (see
+/// [RFC 3762](https://github.com/rust-lang/rfcs/pull/3762)), so we use a
+/// [`LazyLock`] to ensure one-time initialization (upon first access).
+pub static FAKE_LOCATION: LazyLock<Pinned<Location>> = LazyLock::new(|| {
+    Pinned::new(
+        "/main.go", // should exist in most cases
+        0..1,
+    )
+});
+
+/// Represents an unknown source-code snippet.
+///
+/// This standardizes one unified fake configuration that is used throughout the
+/// library to serve as a placeholder for when a [`Pinned`] [`Span`] is
+/// required, but one simply is not available, for a myriad of possible reasons.
+/// A fake span is used when an [`Option`] would greatly increase complexity
+/// for very narrow edge-cases, especially for internal processing that is never
+/// visible outside the library's private state.
+///
+/// Consumers may choose to assign special semantics when displaying or
+/// manipulating a [`Span`] that matches this object. It is an error to attempt
+/// to obtain a source code snippet at the location of a [`Span`] matching this
+/// object, since either it does not exist, or it is meaningless (i.e.,
+/// unrelated to where the snippet was found, and not bound to its semantics).
+///
+/// If a bare (not-[`Pinned`]) [`Span`] object is necessary, one can be
+/// obtained through [`Pinned::inner`].
+///
+/// Note that a `static` is used instead of a `const` binding because the
+/// [`Path::new`] constructor is not `const` (see
+/// [RFC 3762](https://github.com/rust-lang/rfcs/pull/3762)), so we use a
+/// [`LazyLock`] to ensure one-time initialization (upon first access).
+pub static FAKE_SPAN: LazyLock<Pinned<Span<'static>>> = LazyLock::new(|| {
+    Pinned::new(
+        "/main.go", // should exist in most cases
+        Span::new("unknown", 0, 1),
+    )
+});
 
 type FullPackagePath = String; // e.g. example.com/org/something/auth
 // ^ note that auth is not necessarily the package name!
@@ -334,10 +392,7 @@ impl<'p, 'a> Pinned<'p, Span<'a>> {
     #[must_use]
     #[inline]
     pub fn pinned_location(&self) -> Pinned<'p, Location> {
-        Pinned {
-            virtual_file_path: self.virtual_file_path,
-            inner: self.inner().location(),
-        }
+        Pinned::new(self.virtual_file_path, self.inner().location())
     }
 }
 

@@ -210,7 +210,7 @@ impl<'a> SymbolCaptureCollector<'a> for BindingDeclSpecNode<'a> {
         let node = ShortVarDeclNode {
             ids: self.ids.clone(),
             exprs: self.exprs.clone(),
-            location: 0..1,
+            location: 0..1, // never used
             annotation: None,
         };
 
@@ -341,7 +341,7 @@ impl<'a> SymbolCaptureCollector<'a> for ForRangeNode<'a> {
             ForRangeNode::Decl { lhs, range_expr } => &ShortVarDeclNode {
                 ids: lhs.clone(),
                 exprs: vec![range_expr.clone()],
-                location: 0..1,
+                location: 0..1, // never used
                 annotation: None,
             },
             // fake node so we can reuse impl
@@ -349,7 +349,7 @@ impl<'a> SymbolCaptureCollector<'a> for ForRangeNode<'a> {
                 kind: AssignmentKind::Simple,
                 lhs: lhs.clone(),
                 rhs: vec![range_expr.clone()],
-                location: 0..1,
+                location: 0..1, // never used
                 annotation: None,
             },
             ForRangeNode::None { range_expr } => range_expr,
