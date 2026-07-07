@@ -13,6 +13,7 @@ use crate::{
     context::{AnalysisContext, DeferredEnforcementCheck},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
+    taint::{BlanketDirective, BlanketDirectiveKind, SinkKind},
     types::TypeInfo,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
@@ -41,6 +42,8 @@ pub struct FunctionValue<'a> {
     sanitizer: Label<'a>,
     // inherent deferred sink that all calls to this func implicitly represent
     sink: Option<SinkDescriptor<'a>>, // None if not a sink
+    // blanket directives associated with this function value
+    blanket_directives: InherentBlanketDirectives<'a>,
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
     // symbols from outer lexical scopes captured by this closure, if applicable
@@ -90,6 +93,7 @@ impl<'a> FunctionValue<'a> {
             backtrace,
             sanitizer,
             sink,
+            blanket_directives: InherentBlanketDirectives::new(),
             deferred_checks: vec![],
             captures: HashMap::new(),
             yield_param: None,
@@ -223,6 +227,17 @@ impl<'a> FunctionValue<'a> {
 
     pub fn sink(&self) -> Option<&SinkDescriptor<'a>> {
         self.sink.as_ref()
+    }
+
+    pub fn blanket_directives(&self) -> &InherentBlanketDirectives<'a> {
+        &self.blanket_directives
+    }
+
+    pub fn absorb_blanket_directives(
+        &mut self,
+        directives: impl IntoIterator<Item = &'a BlanketDirective>,
+    ) {
+        self.blanket_directives.extend(directives);
     }
 
     pub fn deferred_checks(&self) -> &[DeferredEnforcementCheck<'a>] {
@@ -412,6 +427,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
             && self.outcome.is_none()
             && self.sanitizer.is_bottom()
             && self.sink.is_none()
+            && self.blanket_directives.is_empty()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
             && self.captures.is_empty()
@@ -477,6 +493,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             backtrace,
             sanitizer: self.sanitizer.clone(),
             sink: self.sink.clone(),
+            blanket_directives: self.blanket_directives.clone(),
             deferred_checks,
             captures,
             yield_param: self.yield_param,
@@ -510,6 +527,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             backtrace,
             sanitizer: self.sanitizer.clone(),
             sink: self.sink.clone(),
+            blanket_directives: self.blanket_directives.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
             yield_param: self.yield_param,
@@ -539,6 +557,10 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer
+            && self.sink == other.sink
+            && self
+                .blanket_directives
+                .snapshot_aware_eq(&other.blanket_directives)
             && self
                 .deferred_checks
                 .snapshot_aware_eq(&other.deferred_checks)
@@ -747,5 +769,85 @@ impl SnapshotAware for CaptureBinding<'_> {
             && self
                 .hybrid_fallback
                 .snapshot_aware_eq(&other.hybrid_fallback)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InherentBlanketDirectives<'a> {
+    // we accumulate a Label instead of storing multiple (identical behavior)
+    source: Label<'a>,
+    sinks: Vec<InherentBlanketSink<'a>>,
+}
+
+impl<'a> InherentBlanketDirectives<'a> {
+    fn new() -> Self {
+        Self {
+            sinks: Vec::new(),
+            source: Label::Bottom,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.source.is_bottom() && self.sinks.is_empty()
+    }
+
+    pub fn source(&self) -> &Label<'a> {
+        &self.source
+    }
+
+    pub fn sinks(&self) -> &[InherentBlanketSink<'a>] {
+        &self.sinks
+    }
+
+    fn absorb(&mut self, directive: &'a BlanketDirective) {
+        let label = directive.label();
+
+        match directive.kind() {
+            BlanketDirectiveKind::Source => {
+                self.source = self.source.union(&label);
+            }
+            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
+                let allow = directive.kind() == BlanketDirectiveKind::AllowSink;
+                let new_sink = InherentBlanketSink { allow, label };
+
+                if !self.sinks.contains(&new_sink) {
+                    self.sinks.push(new_sink);
+                }
+            }
+        }
+    }
+}
+
+impl<'a> Extend<&'a BlanketDirective> for InherentBlanketDirectives<'a> {
+    fn extend<T: IntoIterator<Item = &'a BlanketDirective>>(&mut self, iter: T) {
+        for directive in iter {
+            self.absorb(directive);
+        }
+    }
+}
+
+impl SnapshotAware for InherentBlanketDirectives<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        // we don't have any LabelBacktraces
+        self == other
+    }
+}
+
+// we cannot use SinkDescriptor directly because blanket sinks are floating,
+// i.e., they have no associated location until triggered
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InherentBlanketSink<'a> {
+    allow: bool,
+    label: Label<'a>,
+}
+
+impl<'a> InherentBlanketSink<'a> {
+    pub fn as_descriptor_at(&self, location: Location) -> SinkDescriptor<'a> {
+        SinkDescriptor {
+            kind: SinkKind::Call,
+            allow: self.allow,
+            label: self.label.clone(),
+            location,
+        }
     }
 }

@@ -12,8 +12,11 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
-    symbols::{QualifiedSymbolResolutionResult, SymbolRef},
-    values::{ExpandableValue, PackageRefValue, SelfAwareBacktraceContainer, Value, ValueRef},
+    symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
+    values::{
+        ExpandableValue, FunctionValue, PackageRefValue, SelfAwareBacktraceContainer, Value,
+        ValueRef,
+    },
 };
 
 mod component;
@@ -177,10 +180,19 @@ pub fn resolve_operand_name<'a>(
             QualifiedSymbolResolutionResult::UnknownSymbol => None,
             QualifiedSymbolResolutionResult::PendingAnalysis => {
                 // this is likely the accessing of blackbox package for which we
-                // do not actually have the source, so we just return None now
-                // without actually reporting any error
+                // do not actually have the source, so we should just return
+                // None now without actually reporting any error
+                // (it might be another package within the same module that we
+                // will get the chance of analyzing later, but for now that
+                // warrants the same treatment as any other blackbox package)
 
-                return None;
+                // however, there is a chance that this symbol is associated
+                // with blanket directives registered to the analyzer, in which
+                // case we pretend the symbol resolution was successful and we
+                // return a fake Symbol, synthesized now on the fly with no
+                // information besides what can be derived from the associated
+                // blanket directives, so that their details can be propagated
+                return synthesize_blackbox_function_symbol(ctx, name, qualifier);
             }
             QualifiedSymbolResolutionResult::UnknownQualifier => {
                 ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
@@ -198,6 +210,34 @@ pub fn resolve_operand_name<'a>(
     }
 
     symbol
+}
+
+fn synthesize_blackbox_function_symbol<'a>(
+    ctx: &AnalysisContext<'a>,
+    name: Span<'a>,
+    qualifier: Span<'a>,
+) -> Option<SymbolRef<'a>> {
+    let package_path = ctx
+        .symtab()
+        .package_path_for_qualifier(qualifier.content())?;
+
+    let key = format!("{}.{}", package_path, name.content());
+    let directives = ctx.blanket_directives_for(&key);
+
+    if directives.is_empty() {
+        // no configured directives for this blackbox symbol, so there is no
+        // reason to lie and we tell the invoker that symbol resolution failed
+        return None;
+    }
+
+    let mut func_val = FunctionValue::new_unknown(None, false);
+
+    func_val.absorb_blanket_directives(directives);
+
+    let location = ctx.pin(name.location());
+    let value = ValueRef::new(Value::Function(Box::new(func_val)), location, None);
+
+    Some(Symbol::new_ref(ctx.pin(name), false, value))
 }
 
 fn visit_type_assertion<'a>(

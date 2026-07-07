@@ -14,10 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::Symbol,
-    taint::{
-        BlanketDirective, BlanketDirectiveKind, SinkDescriptor, SinkKind, annotations, enforcement,
-        exprs, goto,
-    },
+    taint::{SinkDescriptor, SinkKind, annotations, enforcement, exprs, goto},
     types::{TypeInfo, TypeKind},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
@@ -269,6 +266,23 @@ fn build_function_value<'a>(
         sanitizer,
         sink,
     );
+
+    // fold in any configured blanket directives associated for this function
+    if let FunctionRef::Named(name) = r#ref
+        && let Some(pkg_path) = ctx.symtab().current_package_path()
+        && ctx.current_function().is_none()
+    // root level
+    // ^^^ technically it should not be possible for nested functions to be
+    // Named (they're always anonymous literals), but we might as well check
+    // that this is not shadowing some outer function (to which the blanket
+    // directives actually apply), given that the parser does not place any
+    // type-level restrictions on this spec condition at the AST level
+    {
+        let key = format!("{}.{}", pkg_path, name.content());
+        let directives = ctx.blanket_directives_for(&key);
+
+        func_val.absorb_blanket_directives(directives.iter());
+    }
 
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
     // the vec! macro would clone the ValueRef (and so they'd all point to the
@@ -910,32 +924,19 @@ fn apply_call<'a>(
     let call_location = ctx.pin(node.location.clone());
 
     let blanket_bt = {
-        let mut blanket_label = Label::Bottom;
+        let directives = func.blanket_directives();
 
-        for directive in resolve_blanket_directives(ctx, &node.func) {
-            match directive.kind() {
-                BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
-                    // we bypass SinkDescriptor::new as we already have a Label
-                    let sink = SinkDescriptor {
-                        kind: SinkKind::Call,
-                        allow: directive.kind() == BlanketDirectiveKind::AllowSink,
-                        label: directive.label(),
-                        location: node.location.clone(),
-                    };
+        for sink in directives.sinks() {
+            let descriptor = sink.as_descriptor_at(node.location.clone());
 
-                    for (_, arg_bt) in &with_backtraces {
-                        enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), arg_bt.clone());
-                    }
-                }
-                BlanketDirectiveKind::Source => {
-                    blanket_label = blanket_label.union(&directive.label());
-                }
+            for (_, arg_bt) in &with_backtraces {
+                enforcement::trigger_sink(ctx, Cow::Borrowed(&descriptor), arg_bt.clone());
             }
         }
 
         LabelBacktrace::new_root(
             LabelBacktraceKind::BlanketSource,
-            blanket_label,
+            directives.source().clone(),
             None,
             call_location.clone(),
         )
@@ -1135,32 +1136,6 @@ fn visit_type_conversion<'a>(
     exprs::visit_single_expr(ctx, operand)
         .with_location(location)
         .into_with_declared_type(target_type)
-}
-
-fn resolve_blanket_directives<'a, 'b>(
-    ctx: &'b AnalysisContext<'a>,
-    func_expr: &ExprNode<'a>,
-) -> &'a [BlanketDirective]
-where
-    'a: 'b,
-{
-    // TODO: extend this to more than just pkg.name
-
-    let ExprNode::Selection(selection) = func_expr else {
-        return &[];
-    };
-
-    let ExprNode::Name(qualifier) = &*selection.base else {
-        return &[];
-    };
-
-    let Some(pkg_path) = ctx.symtab().package_path_for_qualifier(qualifier.content()) else {
-        return &[];
-    };
-
-    let key = format!("{}.{}", pkg_path, selection.selector.content());
-
-    ctx.blanket_directives_for(&key)
 }
 
 fn nest_blanket_source<'a>(
