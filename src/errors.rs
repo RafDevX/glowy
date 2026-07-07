@@ -83,8 +83,8 @@ pub fn get_structured_error_info<'a>(
             code: "S003".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(
-                    "this is meaningless and likely indicates incorrect usage due to \
-                         misconstrued semantics",
+                    "this is meaningless and likely indicates incorrect usage due to misconstrued \
+                     semantics",
                 ),
             )],
             help: Some("this enforcement check would always pass, for any value"),
@@ -98,8 +98,8 @@ pub fn get_structured_error_info<'a>(
             code: "S004".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(
-                    "this is meaningless and likely indicates incorrect usage due to \
-                         misconstrued semantics",
+                    "this is meaningless and likely indicates incorrect usage due to misconstrued \
+                     semantics",
                 ),
             )],
             help: Some("Glowy interprets revocation as subtraction, not absolute overwriting"),

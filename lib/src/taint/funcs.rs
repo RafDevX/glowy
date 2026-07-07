@@ -267,12 +267,11 @@ fn build_function_value<'a>(
     if let FunctionRef::Named(name) = r#ref
         && let Some(pkg_path) = ctx.symtab().current_package_path()
         && ctx.current_function().is_none()
-    // root level
-    // ^^^ technically it should not be possible for nested functions to be
-    // Named (they're always anonymous literals), but we might as well check
-    // that this is not shadowing some outer function (to which the blanket
-    // directives actually apply), given that the parser does not place any
-    // type-level restrictions on this spec condition at the AST level
+    // ^^^ check for root level: technically it should not be possible for
+    // nested functions to be Named (they're always anonymous literals), but we
+    // might as well check that this is not shadowing some outer function (to
+    // which the blanket directives actually apply), given that the parser does
+    // not place any type-level restrictions on this spec condition at AST level
     {
         let key = format!("{}.{}", pkg_path, name.content());
         let directives = ctx.blanket_directives_for(&key);

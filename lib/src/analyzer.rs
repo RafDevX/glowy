@@ -888,7 +888,7 @@ impl Analyzer {
 
     fn analyze_permutation<'a>(
         &'a self,
-        admitted: &[(&'a path::Path, &SourceFileNode<'a>)],
+        admitted_asts: &[(&'a path::Path, &SourceFileNode<'a>)],
         verbose_prefix: &str,
     ) -> Vec<AnalysisError<'a>> {
         let mut context = AnalysisContext::new(&self.blanket_directives);
@@ -899,7 +899,7 @@ impl Analyzer {
 
                 context.symtab_mut().clear_all_package_progress();
 
-                for (path, ast) in admitted {
+                for (path, ast) in admitted_asts {
                     let package_path = compute_package_path(&self.module_base, path);
 
                     if worklist.is_some_and(|pkgs| !pkgs.contains(&package_path)) {
@@ -995,8 +995,8 @@ impl Analyzer {
 
             if self.verbose {
                 println!(
-                    "{verbose_prefix}Finished convergence iteration #{iteration_index} \
-                     (Stage 2) - {} package(s) changed; next pass visits {}",
+                    "{verbose_prefix}Finished convergence iteration #{iteration_index} (Stage 2) \
+                     - {} package(s) changed; next pass visits {}",
                     unstable.len(),
                     next_worklist.len(),
                 );

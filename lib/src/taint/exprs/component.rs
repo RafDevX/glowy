@@ -149,7 +149,6 @@ pub fn visit_indexing_with<'a>(
 
     let result = composite.get_at_key(index.as_ref(), pinned.clone());
 
-
     if base.is_map() {
         // indexing a map returns a second value corresponding to whether the
         // key was or not present in the map. here, we assume that this presence
