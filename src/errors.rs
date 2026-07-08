@@ -1,6 +1,7 @@
 use glowy::{
     errors::{AnalysisErrorCategory, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    policy::SinkKind,
 };
 
 use crate::diagnostics::{
@@ -107,12 +108,10 @@ pub fn get_structured_error_info<'a>(
 
         AnalysisErrorKind::InsecureFlow { sink, backtrace } => {
             let (context, operand) = match sink.kind {
-                glowy::SinkKind::Declaration => ("declaration", "the initialization value"),
-                glowy::SinkKind::Assignment => ("assignment expression", "provided right-value"),
-                glowy::SinkKind::Call | glowy::SinkKind::Function => {
-                    ("function call", "an argument")
-                }
-                glowy::SinkKind::Send => ("send statement", "the value being sent"),
+                SinkKind::Declaration => ("declaration", "the initialization value"),
+                SinkKind::Assignment => ("assignment expression", "provided right-value"),
+                SinkKind::Call | SinkKind::Function => ("function call", "an argument"),
+                SinkKind::Send => ("send statement", "the value being sent"),
             };
 
             let variant = if sink.allow {

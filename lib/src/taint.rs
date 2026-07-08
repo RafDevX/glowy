@@ -1,7 +1,13 @@
-use std::collections::HashMap;
+//! Module for Go taint analysis and security policy enforcement.
+//!
+//! Glowy's principal pipeline processes a Go source file's Abstract Syntax Tree
+//! (AST) by visiting each descendent node exactly once and propagating defined
+//! taints to later enforcement checks configured to verify certain aspects of
+//! an overarching security policy. This module implements that core
+//! functionality.
 
 use parser::{
-    Location, Span,
+    Span,
     ast::{BlockNode, DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
 };
 
@@ -9,8 +15,7 @@ use crate::{
     FullPackagePath,
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    labels::{Label, OwnedLabel, OwnedLabelCow},
-    snapshots::SnapshotAware,
+    labels::Label,
     values::BacktraceContainer,
 };
 
@@ -27,116 +32,6 @@ mod types;
 
 pub use funcs::ResolvedCall;
 pub use goto::GotoConvergenceState;
-
-/// Structured information representing a declared sink.
-///
-/// This is a lightweight descriptor capturing the essential details of an
-/// information flow sink as declared by the security policy in effect.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SinkDescriptor<'a> {
-    /// The type of sink in question.
-    pub kind: SinkKind,
-    /// Whether this is a confidentiality sink (allow), vs. integrity (deny).
-    pub allow: bool,
-    /// The sink's declared expected information label.
-    pub label: Label<'a>,
-    /// Where the sink was found.
-    pub location: Location,
-}
-
-impl<'a> SinkDescriptor<'a> {
-    fn new(kind: SinkKind, allow: bool, tags: &[&'a str], location: Location) -> Option<Self> {
-        if !allow && tags.is_empty() {
-            // a `deny` sink with Bottom label makes no sense
-            return None;
-        }
-
-        let label = Label::from_tags(tags);
-
-        Some(Self {
-            kind,
-            allow,
-            label,
-            location,
-        })
-    }
-
-    fn accepts(&self, label: &Label<'a>) -> bool {
-        if label.is_bottom() {
-            // Bottom is always accepted; we can skip the more expensive checks
-            return true;
-        }
-
-        if self.allow {
-            // confidentiality sink (allow - whitelist)
-            *label <= self.label
-        } else {
-            // integrity sink (deny - blacklist)
-            label.intersect(&self.label).is_bottom()
-        }
-    }
-}
-
-impl SnapshotAware for SinkDescriptor<'_> {
-    fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        self == other
-    }
-}
-
-/// Represents a specific type of information flow sinks.
-///
-/// This is useful to know, for example, to provide more personalized error
-/// messages when a sink's information flow invariant is violated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SinkKind {
-    /// A variable/constant declaration.
-    Declaration,
-    /// An assignment to an existing symbol.
-    Assignment,
-    /// A function call.
-    Call,
-    /// A deferred sink via a declared function or defined function literal.
-    Function,
-    /// A send statement.
-    Send,
-}
-
-/// The map's key is a function path (e.g., `os.Remove` or
-/// `example.com/company-name/proj/sub-package.funcName`).
-pub type BlanketDirectives = HashMap<String, Vec<BlanketDirective>>;
-
-#[derive(Clone, Debug)]
-pub struct BlanketDirective {
-    kind: BlanketDirectiveKind,
-    label: OwnedLabel,
-}
-
-impl BlanketDirective {
-    pub(crate) fn new<'c1: 'c2, 'c2>(
-        kind: BlanketDirectiveKind,
-        label: impl Into<OwnedLabelCow<'c1, 'c2>>,
-    ) -> Self {
-        Self {
-            kind,
-            label: label.into().into_owned(),
-        }
-    }
-
-    pub fn kind(&self) -> BlanketDirectiveKind {
-        self.kind
-    }
-
-    pub fn label(&self) -> Label<'_> {
-        self.label.as_label()
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum BlanketDirectiveKind {
-    Source,
-    AllowSink,
-    DenySink,
-}
 
 #[expect(
     clippy::needless_pass_by_value,

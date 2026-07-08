@@ -152,7 +152,7 @@ pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
 pub use files::SourceFile;
 use indexmap::IndexMap;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
-pub use taint::{SinkDescriptor, SinkKind};
+use policy::SinkDescriptor;
 
 mod analyzer;
 mod build_constraints;
@@ -161,6 +161,7 @@ mod decls;
 pub mod errors;
 mod files;
 pub mod labels;
+pub mod policy;
 mod snapshots;
 mod symbols;
 mod taint;

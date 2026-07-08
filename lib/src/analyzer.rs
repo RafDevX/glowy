@@ -20,7 +20,8 @@ use crate::{
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, OwnedLabel, OwnedLabelCow},
-    taint::{self, BlanketDirective, BlanketDirectiveKind, BlanketDirectives},
+    policy::{BlanketDirective, BlanketDirectiveKind, BlanketDirectives},
+    taint,
 };
 
 // parallelizing parsing is not worth it at low total file size (rayon overhead)

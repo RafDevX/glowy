@@ -13,8 +13,9 @@ use crate::{
     context::{AnalysisContext, DeferTarget, DeferredCall},
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
+    policy::{SinkDescriptor, SinkKind},
     symbols::Symbol,
-    taint::{SinkDescriptor, SinkKind, annotations, enforcement, exprs, goto},
+    taint::{annotations, enforcement, exprs, goto},
     types::{TypeInfo, TypeKind},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,

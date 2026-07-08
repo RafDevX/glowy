@@ -6,7 +6,7 @@ use crate::{
     context::{AnalysisContext, DeferredEnforcementCheck},
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    taint::SinkDescriptor,
+    policy::SinkDescriptor,
 };
 
 pub fn trigger_sink<'a>(

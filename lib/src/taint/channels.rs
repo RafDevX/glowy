@@ -13,7 +13,8 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    taint::{SinkDescriptor, SinkKind, annotations, enforcement, mutation::LeftValue},
+    policy::{SinkDescriptor, SinkKind},
+    taint::{annotations, enforcement, mutation::LeftValue},
     values::ValueRef,
 };
 

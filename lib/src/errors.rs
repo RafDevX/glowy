@@ -24,7 +24,7 @@ use parser::{Location, ParsingError, Span};
 use crate::{
     Pinned,
     labels::{Label, LabelBacktrace},
-    taint::SinkDescriptor,
+    policy::SinkDescriptor,
 };
 
 /// Represents an issue arising from Glowy analysis.

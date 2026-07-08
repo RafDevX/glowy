@@ -14,9 +14,10 @@ use crate::{
     decls::receiver_base_type_name,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    policy::{BlanketDirective, BlanketDirectives},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
-    taint::{BlanketDirective, BlanketDirectives, GotoConvergenceState, ResolvedCall},
+    taint::{GotoConvergenceState, ResolvedCall},
     types::TypeRegistry,
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -101,7 +102,7 @@ pub struct AnalysisContext<'a> {
 }
 
 impl<'a> AnalysisContext<'a> {
-    pub fn new(blanket_directives: &'a BlanketDirectives) -> Self {
+    pub(crate) fn new(blanket_directives: &'a BlanketDirectives) -> Self {
         AnalysisContext {
             stage: AnalysisStage::default(),
             symbol_table: SymbolTable::new(),
@@ -447,7 +448,7 @@ impl<'a> AnalysisContext<'a> {
         self.saw_enforcement_checks = true;
     }
 
-    pub fn blanket_directives_for(&self, func_path: &str) -> &'a [BlanketDirective] {
+    pub(crate) fn blanket_directives_for(&self, func_path: &str) -> &'a [BlanketDirective] {
         self.blanket_directives
             .get(func_path)
             .map_or(&[], Vec::as_slice)

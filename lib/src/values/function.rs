@@ -12,8 +12,8 @@ use crate::{
     Pinned, SinkDescriptor,
     context::{AnalysisContext, DeferredEnforcementCheck},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    policy::{BlanketDirective, BlanketDirectiveKind, SinkKind},
     snapshots::SnapshotAware,
-    taint::{BlanketDirective, BlanketDirectiveKind, SinkKind},
     types::TypeInfo,
     values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
@@ -233,7 +233,7 @@ impl<'a> FunctionValue<'a> {
         &self.blanket_directives
     }
 
-    pub fn absorb_blanket_directives(
+    pub(crate) fn absorb_blanket_directives(
         &mut self,
         directives: impl IntoIterator<Item = &'a BlanketDirective>,
     ) {
