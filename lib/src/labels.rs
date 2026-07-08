@@ -13,7 +13,7 @@
 //! These labels' evolution and propagation history can be easily tracked using
 //! a hierarchy structure, which is here implemented via [`LabelBacktrace`].
 
-use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem, sync::Arc};
+use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem, ops, sync::Arc};
 
 use parser::{Location, Span};
 
@@ -651,6 +651,38 @@ impl fmt::Display for Label<'_> {
     }
 }
 
+impl<'a> ops::Add<&Self> for &Label<'a> {
+    type Output = Label<'a>;
+
+    #[inline]
+    fn add(self, rhs: &Self) -> Self::Output {
+        self.union(rhs)
+    }
+}
+
+impl ops::Add<&Self> for Label<'_> {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: &Self) -> Self::Output {
+        (&self) + &rhs
+    }
+}
+
+impl<'b> iter::Sum<&'b Self> for Label<'_> {
+    #[inline]
+    fn sum<I: for<'c> Iterator<Item = &'b Self>>(iter: I) -> Self {
+        iter.fold(Self::Bottom, |a, b| a + b)
+    }
+}
+
+impl iter::Sum<Self> for Label<'_> {
+    #[inline]
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::Bottom, |a, b| a + &b)
+    }
+}
+
 // useful for when it would be too bothersome to keep &'a str lifetimes around
 #[derive(Clone, Debug)]
 pub(crate) struct OwnedLabel(Vec<String>);
@@ -852,10 +884,7 @@ impl<'a> LabelBacktrace<'a> {
     where
         'a: 'b,
     {
-        let label = children
-            .clone()
-            .into_iter()
-            .fold(Label::Bottom, |acc, bt| acc.union(bt.label()));
+        let label = children.clone().into_iter().map(Self::label).sum();
 
         Self::new(with_kind, label, with_symbol, at_location, children)
         // ^ None iff children are empty
