@@ -448,10 +448,19 @@ impl<'a> AnalysisContext<'a> {
         self.saw_enforcement_checks = true;
     }
 
-    pub(crate) fn blanket_directives_for(&self, func_path: &str) -> &'a [BlanketDirective] {
-        self.blanket_directives
-            .get(func_path)
-            .map_or(&[], Vec::as_slice)
+    pub(crate) fn blanket_directives_for(
+        &self,
+        package_path: &str,
+        function_name: &str,
+    ) -> &'a [BlanketDirective] {
+        match self
+            .blanket_directives
+            .get(package_path)
+            .and_then(|inner| inner.get(function_name))
+        {
+            Some(directives) => directives,
+            None => &[],
+        }
     }
 
     pub fn report_error_at(&mut self, file: &'a Path, kind: AnalysisErrorKind<'a>) {

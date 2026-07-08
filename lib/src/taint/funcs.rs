@@ -274,8 +274,7 @@ fn build_function_value<'a>(
     // which the blanket directives actually apply), given that the parser does
     // not place any type-level restrictions on this spec condition at AST level
     {
-        let key = format!("{}.{}", pkg_path, name.content());
-        let directives = ctx.blanket_directives_for(&key);
+        let directives = ctx.blanket_directives_for(pkg_path, name.content());
 
         func_val.absorb_blanket_directives(directives.iter());
     }

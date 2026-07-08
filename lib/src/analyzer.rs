@@ -20,7 +20,7 @@ use crate::{
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, OwnedLabel, OwnedLabelCow},
-    policy::{BlanketDirective, BlanketDirectiveKind, BlanketDirectives},
+    policy::{BlanketDirective, BlanketDirectiveKind, BlanketDirectiveTarget, BlanketDirectives},
     taint,
 };
 
@@ -471,39 +471,47 @@ impl Analyzer {
         let blanket_directives = config
             .sources
             .into_iter()
-            .map(|(func_path, tags)| (BlanketDirectiveKind::Source, func_path, tags))
+            .map(|(target, tags)| (BlanketDirectiveKind::Source, target, tags))
             .chain(
                 config
                     .allow_sinks
                     .into_iter()
-                    .map(|(func_path, tags)| (BlanketDirectiveKind::AllowSink, func_path, tags)),
+                    .map(|(target, tags)| (BlanketDirectiveKind::AllowSink, target, tags)),
             )
             .chain(
                 config
                     .deny_sinks
                     .into_iter()
-                    .map(|(func_path, tags)| (BlanketDirectiveKind::DenySink, func_path, tags)),
+                    .map(|(target, tags)| (BlanketDirectiveKind::DenySink, target, tags)),
             );
 
-        for (kind, func_path, tags) in blanket_directives {
+        for (kind, target, tags) in blanket_directives {
             // we use add_blanket_directive directly to avoid conversion to
             // Label and then back to OwnedLabel (preventing unnecessary
             // allocations that would happen with add_blanket_source/sink)
-            self.add_blanket_directive(kind, func_path, OwnedLabel::from(tags));
+            self.add_blanket_directive(kind, target, OwnedLabel::from(tags));
         }
     }
 
-    fn add_blanket_directive<'f, 'c1: 'c2, 'c2>(
+    fn add_blanket_directive<'c1: 'c2, 'c2>(
         &mut self,
         kind: BlanketDirectiveKind,
-        func_path: impl Into<Cow<'f, str>>,
+        target: BlanketDirectiveTarget,
         label: impl Into<OwnedLabelCow<'c1, 'c2>>,
     ) {
-        let func_path = func_path.into().into_owned();
+        let BlanketDirectiveTarget {
+            package_path,
+            function_name,
+        } = target;
 
         let directive = BlanketDirective::new(kind, label);
 
-        match self.blanket_directives.entry(func_path) {
+        match self
+            .blanket_directives
+            .entry(package_path)
+            .or_default()
+            .entry(function_name)
+        {
             Entry::Occupied(mut occupied) => occupied.get_mut().push(directive),
             Entry::Vacant(vacant) => {
                 vacant.insert(vec![directive]);
@@ -517,9 +525,9 @@ impl Analyzer {
     /// function as yielding the provided [`Label`], in addition to what is
     /// already otherwise derived from the function.
     ///
-    /// The function path (`func_path`) is expected to be well-formed with the
+    /// The package path (`package_path`) is expected to be a well-formed,
     /// fully qualified Go package path of where the function is accessed,
-    /// followed by a `.` and then the function name.
+    /// and `function_name` its declared function name.
     ///
     /// Each invocation to this function extends the blanket directives
     /// associated with the function path, meaning that previous versions are
@@ -535,57 +543,61 @@ impl Analyzer {
     /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
     ///
     /// analyzer.add_blanket_source(
-    ///     "example.com/company-name/proj/sub.SomeFunc",
+    ///     "example.com/company-name/proj/sub",
+    ///     "SomeFunc",
     ///     &Label::from_tags(&["secret"]),
     /// );
-    ///
-    /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
     pub fn add_blanket_source<'f>(
         &mut self,
-        func_path: impl Into<Cow<'f, str>>,
+        package_path: impl Into<Cow<'f, str>>,
+        function_name: impl Into<Cow<'f, str>>,
         label: &Label<'_>,
     ) {
-        self.add_blanket_directive(BlanketDirectiveKind::Source, func_path, label);
+        // argument-targeting does not apply for sources
+        let target = BlanketDirectiveTarget::new(
+            package_path.into().into_owned(),
+            function_name.into().into_owned(),
+        );
+
+        self.add_blanket_directive(BlanketDirectiveKind::Source, target, label);
     }
 
     /// Universally registers a function as an information sink.
     ///
-    /// This instructs the analyzer to always consider all calls to the given
+    /// This instructs the analyzer to always consider calls to the given
     /// function as only accepting the provided [`Label`] (for confidentiality,
     /// if `allow` is `true`) or as never accepting any overlap with the
     /// provided [`Label`] (for integrity, if `allow` is `false`).
     ///
-    /// The function path (`func_path`) is expected to be well-formed with the
-    /// fully qualified Go package path of where the function is accessed,
-    /// followed by a `.` and then the function name.
+    /// The `target` argument identifies which function (and, optionally, which
+    /// specific argument position) this sink applies to. It can be constructed
+    /// manually or derived from a [`String`].
     ///
     /// Each invocation to this function extends the blanket directives
-    /// associated with the function path, meaning that previous versions are
-    /// not overwritten. For sinks, each invocation defines an independent
-    /// policy check, so two sink registrations for `{a}` and `{b}` are treated
+    /// associated with the target, meaning that previous versions are not
+    /// overwritten. For sinks, each invocation defines an independent policy
+    /// check, so two sink registrations for `{a}` and `{b}` are treated
     /// separately, and call arguments must satisfy both of them.
     ///
     /// # Example Usage
     ///
     /// ```
-    /// # use glowy::labels::Label;
+    /// # use glowy::{labels::Label, policy::BlanketDirectiveTarget};
     /// #
     /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
     ///
     /// analyzer.add_blanket_sink(
-    ///     "example.com/company-name/proj/sub.SomeFunc",
+    ///     BlanketDirectiveTarget::new("example.com/company-name/proj/sub", "SomeFunc"),
     ///     false,
     ///     &Label::from_tags(&["untrusted"]),
     /// );
-    ///
-    /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn add_blanket_sink<'f>(
+    pub fn add_blanket_sink(
         &mut self,
-        func_path: impl Into<Cow<'f, str>>,
+        target: BlanketDirectiveTarget,
         allow: bool,
         label: &Label<'_>,
     ) {
@@ -595,12 +607,13 @@ impl Analyzer {
             BlanketDirectiveKind::DenySink
         };
 
-        self.add_blanket_directive(variant, func_path, label);
+        self.add_blanket_directive(variant, target, label);
     }
 
     fn has_blanket_enforcement_checks(&self) -> bool {
         self.blanket_directives
             .values()
+            .flat_map(HashMap::values)
             .flatten()
             .map(BlanketDirective::kind)
             .any(|kind| {

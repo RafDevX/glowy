@@ -221,8 +221,7 @@ fn synthesize_blackbox_function_symbol<'a>(
         .symtab()
         .package_path_for_qualifier(qualifier.content())?;
 
-    let key = format!("{}.{}", package_path, name.content());
-    let directives = ctx.blanket_directives_for(&key);
+    let directives = ctx.blanket_directives_for(package_path, name.content());
 
     if directives.is_empty() {
         // no configured directives for this blackbox symbol, so there is no

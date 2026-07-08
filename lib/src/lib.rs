@@ -152,7 +152,7 @@ pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
 pub use files::SourceFile;
 use indexmap::IndexMap;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
-use policy::SinkDescriptor;
+use policy::{BlanketDirectiveTarget, SinkDescriptor};
 
 mod analyzer;
 mod build_constraints;
@@ -255,37 +255,38 @@ pub struct AnalysisConfig {
     /// These functions will always be considered to yield the associated label,
     /// in addition to what is already otherwise derived from the function body.
     ///
-    /// An [`IndexMap`] is used preserve insertion order, with each [`String`]
-    /// key corresponding to a fully qualified Go package path of where the
-    /// function is accessed, followed by a `.` and then the name of the
-    /// function in question. Each associated [`Vec<String>`] value represents a
-    /// [`Label`](labels::Label), with each individual [`String`] element
-    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
-    pub sources: IndexMap<String, Vec<String>>,
+    /// An [`IndexMap`] is used to preserve insertion order. Each key is a
+    /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
+    /// deserializes from a string of the form `pkg.func`. Each associated
+    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
+    /// individual [`String`] element corresponding to a
+    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    pub sources: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Functions universally recognized as blanket confidentiality sinks.
     ///
     /// These functions will always be considered to accept only values up to
     /// the associated label.
     ///
-    /// An [`IndexMap`] is used preserve insertion order, with each [`String`]
-    /// key corresponding to a fully qualified Go package path of where the
-    /// function is accessed, followed by a `.` and then the name of the
-    /// function in question. Each associated [`Vec<String>`] value represents a
-    /// [`Label`](labels::Label), with each individual [`String`] element
-    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
-    pub allow_sinks: IndexMap<String, Vec<String>>,
+    /// An [`IndexMap`] is used to preserve insertion order. Each key is a
+    /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
+    /// deserializes from a string of the form `pkg.func`. Each associated
+    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
+    /// individual [`String`] element corresponding to a
+    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    pub allow_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Functions universally recognized as blanket integrity sinks.
     ///
     /// These functions will always be considered to accept only values with
     /// null intersection with the associated label.
     ///
-    /// An [`IndexMap`] is used preserve insertion order, with each [`String`]
-    /// key corresponding to a fully qualified Go package path of where the
-    /// function is accessed, followed by a `.` and then the name of the
-    /// function in question. Each associated [`Vec<String>`] value represents a
-    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// An [`IndexMap`] is used to preserve insertion order. Each key is a
+    /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
+    /// deserializes from a string of the form `pkg.func`. Each associated
+    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
+    /// individual [`String`] element corresponding to a
+    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
-    pub deny_sinks: IndexMap<String, Vec<String>>,
+    pub deny_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Whether to include `_test.go` files in the analysis.
     ///
     /// Defaults to `false`, matching the behavior of `go build` (test files
