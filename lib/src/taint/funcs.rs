@@ -18,7 +18,7 @@ use crate::{
     taint::{annotations, enforcement, exprs, goto},
     types::{TypeInfo, TypeKind},
     values::{
-        BacktraceContainer, FunctionRef, FunctionValue, Mergeable, MobiusValue,
+        BacktraceContainer, FunctionRef, FunctionValue, InherentSink, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
@@ -216,7 +216,7 @@ fn build_function_value<'a>(
 ) -> FunctionValue<'a> {
     let mut explicit_backtrace = None;
     let mut sanitizer = Label::Bottom;
-    let mut sink = None;
+    let mut decl_sink = None;
 
     if let Some(annotation) = annotation
         && let Some(directive) = annotations::parse_supported_directive(ctx, annotation)
@@ -239,14 +239,13 @@ fn build_function_value<'a>(
             }
             annotations::FunctionDirective::AllowSink
             | annotations::FunctionDirective::DenySink => {
-                sink = SinkDescriptor::new(
-                    SinkKind::Function,
+                decl_sink = InherentSink::new(
                     directive == annotations::FunctionDirective::AllowSink,
                     &annotation.tags,
-                    value_location.inner().clone(),
+                    None,
                 );
 
-                if sink.is_none() {
+                if decl_sink.is_none() {
                     ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
                         location: annotation.location.clone(),
                     });
@@ -261,8 +260,11 @@ fn build_function_value<'a>(
         has_receiver,
         explicit_backtrace,
         sanitizer,
-        sink,
     );
+
+    if let Some(sink) = decl_sink {
+        func_val.add_sink(sink);
+    }
 
     // fold in any configured blanket directives associated for this function
     if let FunctionRef::Named(name) = r#ref
@@ -276,7 +278,7 @@ fn build_function_value<'a>(
     {
         let directives = ctx.blanket_directives_for(pkg_path, name.content());
 
-        func_val.absorb_blanket_directives(directives.iter());
+        func_val.absorb_blanket_sinks(directives.iter());
     }
 
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
@@ -910,38 +912,21 @@ fn apply_call<'a>(
         }
     }
 
-    if let Some(inherent_sink) = func.sink() {
-        for (_, arg_bt) in &with_backtraces {
-            enforcement::trigger_sink(ctx, Cow::Borrowed(inherent_sink), arg_bt.clone());
-        }
-    }
-
     let call_location = ctx.pin(node.location.clone());
 
-    let blanket_bt = {
-        let directives = func.blanket_directives();
+    for sink in func.sinks() {
+        let descriptor = sink.as_descriptor_at(node.location.clone());
 
-        for sink in directives.sinks() {
-            let descriptor = sink.as_descriptor_at(node.location.clone());
-
-            for (index, (_, arg_bt)) in with_backtraces.iter().enumerate() {
-                if !sink.applies_to_arg(index) {
-                    // this sink is scoped to a specific arg position and the
-                    // current one doesn't match, so skip triggering it here
-                    continue;
-                }
-
-                enforcement::trigger_sink(ctx, Cow::Borrowed(&descriptor), arg_bt.clone());
+        for (index, (_, arg_bt)) in with_backtraces.iter().enumerate() {
+            if !sink.applies_to_arg(index) {
+                // this sink is scoped to a specific arg position and the
+                // current one doesn't match, so skip triggering it here
+                continue;
             }
-        }
 
-        LabelBacktrace::new_root(
-            LabelBacktraceKind::BlanketSource,
-            directives.source().clone(),
-            None,
-            call_location.clone(),
-        )
-    };
+            enforcement::trigger_sink(ctx, Cow::Borrowed(&descriptor), arg_bt.clone());
+        }
+    }
 
     let Some(outcome) = func.outcome() else {
         // we don't have a known implementation of this function, so we must
@@ -952,7 +937,6 @@ fn apply_call<'a>(
             ctx,
             func,
             &with_backtraces_ref,
-            blanket_bt.as_ref(),
             &call_location,
             &node.location,
             func.signature(),
@@ -1028,8 +1012,6 @@ fn apply_call<'a>(
     // the result's static type is necessarily what the signature declares, not
     // what was passed to `return`, per Go semantics, so we should override
     tag_results_with_declared_types(ctx, func.signature(), &mut result);
-
-    nest_blanket_source(&mut result, blanket_bt.as_ref(), &call_location);
 
     // re-borrow as mutable
     drop(value_func);
@@ -1139,30 +1121,10 @@ fn visit_type_conversion<'a>(
         .into_with_declared_type(target_type)
 }
 
-fn nest_blanket_source<'a>(
-    result: &mut [ValueRef<'a>],
-    blanket_bt: Option<&LabelBacktrace<'a>>,
-    call_location: &Pinned<'a, Location>,
-) {
-    let Some(bt) = blanket_bt else {
-        return;
-    };
-
-    for value in result.iter_mut() {
-        *value = value.nest_backtrace(
-            LabelBacktraceKind::Expression,
-            None,
-            call_location.clone(),
-            [bt.clone()],
-        );
-    }
-}
-
 fn visit_blackbox_call<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
-    blanket_bt: Option<&LabelBacktrace<'a>>,
     call_location: &Pinned<'a, Location>,
     node_location: &Location,
     signature_hint: Option<&FunctionSignatureNode<'a>>,
@@ -1211,8 +1173,6 @@ fn visit_blackbox_call<'a>(
 
     // even if we don't have an implementation, we might have a signature
     tag_results_with_declared_types(ctx, signature_hint, &mut result);
-
-    nest_blanket_source(&mut result, blanket_bt, call_location);
 
     result
 }

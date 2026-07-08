@@ -15,7 +15,7 @@ pub use self::{
     channel::ChannelValue,
     composite::{CompositeValue, CompositeValueAdapter},
     expandable::ExpandableValue,
-    function::{CaptureBinding, FunctionRef, FunctionValue},
+    function::{CaptureBinding, FunctionRef, FunctionValue, InherentSink},
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,

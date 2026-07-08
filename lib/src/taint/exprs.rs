@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use parser::{
-    Span,
+    Location, Span,
     ast::{
         AmbiguousBracketAccessNode, ExprNode, TypeAssertionNode, TypeInstantiationNode, UnaryOpKind,
     },
@@ -9,9 +9,11 @@ use parser::{
 
 use super::{channels, funcs};
 use crate::{
+    Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    policy::{BlanketDirective, BlanketDirectiveKind},
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     values::{
         ExpandableValue, FunctionValue, PackageRefValue, SelfAwareBacktraceContainer, Value,
@@ -147,20 +149,25 @@ pub fn visit_operand_name<'a>(
         );
     }
 
-    let Some(symbol) = resolve_operand_name(ctx, name, qualifier) else {
+    let value = if let Some(symbol) = resolve_operand_name(ctx, name, qualifier) {
+        symbol.borrow().value().get()
+    } else {
         // error already reported
-        return ValueRef::new_bottom(location, None);
+        ValueRef::new_bottom(location.clone(), None)
     };
 
-    symbol
-        .borrow()
-        .value()
-        .get()
+    // embed any potential blanket source backtrace if there are any Source
+    // blanket directives targeting this symbol (propagates the backtrace in
+    // question for both functions like `os.Getenv` and non-function targets
+    // such as `os.Args` and `os.Stdin` which are read directly / never called)
+    let blanket_source_bt = build_blanket_source_backtrace(ctx, name, qualifier, &location);
+
+    value
         .nest_backtrace(
             LabelBacktraceKind::Expression,
             Some(name.content()),
             location.clone(),
-            [],
+            blanket_source_bt,
         )
         .with_location(location)
 }
@@ -192,7 +199,7 @@ pub fn resolve_operand_name<'a>(
                 // return a fake Symbol, synthesized now on the fly with no
                 // information besides what can be derived from the associated
                 // blanket directives, so that their details can be propagated
-                return synthesize_blackbox_function_symbol(ctx, name, qualifier);
+                return synthesize_fake_symbol_with_blanket_sinks(ctx, name, qualifier);
             }
             QualifiedSymbolResolutionResult::UnknownQualifier => {
                 ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
@@ -212,7 +219,7 @@ pub fn resolve_operand_name<'a>(
     symbol
 }
 
-fn synthesize_blackbox_function_symbol<'a>(
+fn synthesize_fake_symbol_with_blanket_sinks<'a>(
     ctx: &AnalysisContext<'a>,
     name: Span<'a>,
     qualifier: Span<'a>,
@@ -223,20 +230,66 @@ fn synthesize_blackbox_function_symbol<'a>(
 
     let directives = ctx.blanket_directives_for(package_path, name.content());
 
-    if directives.is_empty() {
-        // no configured directives for this blackbox symbol, so there is no
-        // reason to lie and we tell the invoker that symbol resolution failed
+    // don't want to upgrade to a FunctionValue for no reason, source directives
+    // allow non-functions (e.g., `os.Args` or `os.Stdin`)
+    let has_sinks = directives.iter().any(|directive| {
+        matches!(
+            directive.kind(),
+            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink,
+        )
+    });
+
+    if !has_sinks {
+        // no configured sink blanket directives for this blackbox symbol, so
+        // there is no reason to lie, thus we really do tell the invoker that
+        // symbol resolution failed
         return None;
     }
 
     let mut func_val = FunctionValue::new_unknown(None, false);
 
-    func_val.absorb_blanket_directives(directives);
+    func_val.absorb_blanket_sinks(directives);
 
     let location = ctx.pin(name.location());
     let value = ValueRef::new(Value::Function(Box::new(func_val)), location, None);
 
     Some(Symbol::new_ref(ctx.pin(name), false, value))
+}
+
+fn build_blanket_source_backtrace<'a>(
+    ctx: &AnalysisContext<'a>,
+    name: Span<'a>,
+    qualifier: Option<Span<'a>>,
+    at_location: &Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    let package_path = if let Some(qualifier) = qualifier {
+        ctx.symtab()
+            .package_path_for_qualifier(qualifier.content())?
+    } else {
+        // FIXME: if current package doesn't have this symbol, pick the first
+        // wildcard import that has it; ignore universe scope
+
+        ctx.symtab().current_package_path()?
+    };
+
+    let source_label: Label<'_> = ctx
+        .blanket_directives_for(package_path, name.content())
+        .iter()
+        .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
+        .map(BlanketDirective::label)
+        .sum();
+
+    if source_label.is_bottom() {
+        // prevent location cloning below
+        return None;
+    }
+
+    LabelBacktrace::new_root(
+        LabelBacktraceKind::BlanketSource,
+        source_label,
+        None,
+        at_location.clone(),
+    )
 }
 
 fn visit_type_assertion<'a>(

@@ -40,10 +40,8 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // Label to be subtracted from realized result at call (revocation)
     sanitizer: Label<'a>,
-    // inherent deferred sink that all calls to this func implicitly represent
-    sink: Option<SinkDescriptor<'a>>, // None if not a sink
-    // blanket directives associated with this function value
-    blanket_directives: InherentBlanketDirectives<'a>,
+    // inherent sinks that any call to this function implicitly triggers
+    sinks: Vec<InherentSink<'a>>,
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
     // symbols from outer lexical scopes captured by this closure, if applicable
@@ -80,7 +78,6 @@ impl<'a> FunctionValue<'a> {
         has_receiver: bool,
         backtrace: Option<LabelBacktrace<'a>>,
         sanitizer: Label<'a>,
-        sink: Option<SinkDescriptor<'a>>,
     ) -> Self {
         Self {
             r#ref,
@@ -92,8 +89,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             sanitizer,
-            sink,
-            blanket_directives: InherentBlanketDirectives::new(),
+            sinks: Vec::new(),
             deferred_checks: vec![],
             captures: HashMap::new(),
             yield_param: None,
@@ -140,7 +136,7 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(r#ref, Some(signature), false, None, Label::Bottom, None)
+        Self::new(r#ref, Some(signature), false, None, Label::Bottom)
     }
 
     pub fn new_type_constructor(
@@ -169,7 +165,6 @@ impl<'a> FunctionValue<'a> {
             false,
             None,
             Label::Bottom,
-            None,
         );
 
         value.is_type_constructor = true;
@@ -182,7 +177,7 @@ impl<'a> FunctionValue<'a> {
     pub fn new_unknown(backtrace: Option<LabelBacktrace<'a>>, has_receiver: bool) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, has_receiver, backtrace, Label::Bottom, None)
+        Self::new(r#ref, None, has_receiver, backtrace, Label::Bottom)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -225,19 +220,36 @@ impl<'a> FunctionValue<'a> {
         &self.sanitizer
     }
 
-    pub fn sink(&self) -> Option<&SinkDescriptor<'a>> {
-        self.sink.as_ref()
+    pub fn sinks(&self) -> &[InherentSink<'a>] {
+        &self.sinks
     }
 
-    pub fn blanket_directives(&self) -> &InherentBlanketDirectives<'a> {
-        &self.blanket_directives
+    pub(crate) fn add_sink(&mut self, sink: InherentSink<'a>) {
+        if !self.sinks.contains(&sink) {
+            self.sinks.push(sink);
+        }
     }
 
-    pub(crate) fn absorb_blanket_directives(
+    pub(crate) fn absorb_blanket_sinks(
         &mut self,
         directives: impl IntoIterator<Item = &'a BlanketDirective>,
     ) {
-        self.blanket_directives.extend(directives);
+        for directive in directives {
+            match directive.kind() {
+                BlanketDirectiveKind::Source => {
+                    // sources are realized at each access site (uniformly for
+                    // functions and non-function values), not folded into the
+                    // function value; nothing to do here
+                }
+                BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
+                    self.add_sink(InherentSink {
+                        allow: directive.kind() == BlanketDirectiveKind::AllowSink,
+                        label: directive.label(),
+                        arg_index: directive.arg_index(),
+                    });
+                }
+            }
+        }
     }
 
     pub fn deferred_checks(&self) -> &[DeferredEnforcementCheck<'a>] {
@@ -426,8 +438,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
         self.signature.is_none()
             && self.outcome.is_none()
             && self.sanitizer.is_bottom()
-            && self.sink.is_none()
-            && self.blanket_directives.is_empty()
+            && self.sinks.is_empty()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
             && self.captures.is_empty()
@@ -492,8 +503,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
-            sink: self.sink.clone(),
-            blanket_directives: self.blanket_directives.clone(),
+            sinks: self.sinks.clone(),
             deferred_checks,
             captures,
             yield_param: self.yield_param,
@@ -526,8 +536,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
-            sink: self.sink.clone(),
-            blanket_directives: self.blanket_directives.clone(),
+            sinks: self.sinks.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
             yield_param: self.yield_param,
@@ -557,10 +566,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer
-            && self.sink == other.sink
-            && self
-                .blanket_directives
-                .snapshot_aware_eq(&other.blanket_directives)
+            && self.sinks == other.sinks
             && self
                 .deferred_checks
                 .snapshot_aware_eq(&other.deferred_checks)
@@ -772,81 +778,29 @@ impl SnapshotAware for CaptureBinding<'_> {
     }
 }
 
+// we cannot use SinkDescriptor directly because inherent sinks are floating,
+// i.e., they have no associated location until triggered at a call site
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InherentBlanketDirectives<'a> {
-    // we accumulate a Label instead of storing multiple (identical behavior)
-    source: Label<'a>,
-    sinks: Vec<InherentBlanketSink<'a>>,
-}
-
-impl<'a> InherentBlanketDirectives<'a> {
-    fn new() -> Self {
-        Self {
-            sinks: Vec::new(),
-            source: Label::Bottom,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.source.is_bottom() && self.sinks.is_empty()
-    }
-
-    pub fn source(&self) -> &Label<'a> {
-        &self.source
-    }
-
-    pub fn sinks(&self) -> &[InherentBlanketSink<'a>] {
-        &self.sinks
-    }
-
-    fn absorb(&mut self, directive: &'a BlanketDirective) {
-        let label = directive.label();
-
-        match directive.kind() {
-            BlanketDirectiveKind::Source => {
-                self.source = self.source.union(&label);
-            }
-            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
-                let allow = directive.kind() == BlanketDirectiveKind::AllowSink;
-                let new_sink = InherentBlanketSink {
-                    allow,
-                    label,
-                    arg_index: directive.arg_index(),
-                };
-
-                if !self.sinks.contains(&new_sink) {
-                    self.sinks.push(new_sink);
-                }
-            }
-        }
-    }
-}
-
-impl<'a> Extend<&'a BlanketDirective> for InherentBlanketDirectives<'a> {
-    fn extend<T: IntoIterator<Item = &'a BlanketDirective>>(&mut self, iter: T) {
-        for directive in iter {
-            self.absorb(directive);
-        }
-    }
-}
-
-impl SnapshotAware for InherentBlanketDirectives<'_> {
-    fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        // we don't have any LabelBacktraces
-        self == other
-    }
-}
-
-// we cannot use SinkDescriptor directly because blanket sinks are floating,
-// i.e., they have no associated location until triggered
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InherentBlanketSink<'a> {
-    allow: bool,
+pub struct InherentSink<'a> {
+    allow: bool, // confidentiality (allow) sink, vs. integrity (deny)
     label: Label<'a>,
     arg_index: Option<usize>, // 0-indexed; None = applies to every argument
 }
 
-impl<'a> InherentBlanketSink<'a> {
+impl<'a> InherentSink<'a> {
+    // returns None for a `deny` sink with Bottom label
+    pub(crate) fn new(allow: bool, tags: &[&'a str], arg_index: Option<usize>) -> Option<Self> {
+        if !allow && tags.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            allow,
+            label: Label::from_tags(tags),
+            arg_index,
+        })
+    }
+
     pub fn as_descriptor_at(&self, location: Location) -> SinkDescriptor<'a> {
         SinkDescriptor {
             kind: SinkKind::Call,
