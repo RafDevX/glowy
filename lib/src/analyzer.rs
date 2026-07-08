@@ -502,9 +502,10 @@ impl Analyzer {
         let BlanketDirectiveTarget {
             package_path,
             function_name,
+            arg_index,
         } = target;
 
-        let directive = BlanketDirective::new(kind, label);
+        let directive = BlanketDirective::new(kind, arg_index, label);
 
         match self
             .blanket_directives
@@ -588,8 +589,16 @@ impl Analyzer {
     /// #
     /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
     ///
+    /// // applies to every argument passed to `SomeFunc`
     /// analyzer.add_blanket_sink(
     ///     BlanketDirectiveTarget::new("example.com/company-name/proj/sub", "SomeFunc"),
+    ///     false,
+    ///     &Label::from_tags(&["untrusted"]),
+    /// );
+    ///
+    /// // applies only to the second argument of `WriteFile`
+    /// analyzer.add_blanket_sink(
+    ///     BlanketDirectiveTarget::new_with_arg_index("os", "WriteFile", 1),
     ///     false,
     ///     &Label::from_tags(&["untrusted"]),
     /// );

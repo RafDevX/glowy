@@ -269,10 +269,11 @@ pub struct AnalysisConfig {
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
     /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
-    /// deserializes from a string of the form `pkg.func`. Each associated
-    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
-    /// individual [`String`] element corresponding to a
-    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// deserializes from a string of the form `pkg.func` (applying to every
+    /// argument) or `pkg.func#N` (applying only to the argument at position
+    /// `N`, 0-indexed). Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub allow_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Functions universally recognized as blanket integrity sinks.
     ///
@@ -281,10 +282,10 @@ pub struct AnalysisConfig {
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
     /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
-    /// deserializes from a string of the form `pkg.func`. Each associated
-    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
-    /// individual [`String`] element corresponding to a
-    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// deserializes from a string of the form `pkg.func` (applying to every
+    /// argument) or `pkg.func#N` (applying only to the argument at position
+    /// `N`, 0-indexed). Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub deny_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Whether to include `_test.go` files in the analysis.

@@ -924,7 +924,13 @@ fn apply_call<'a>(
         for sink in directives.sinks() {
             let descriptor = sink.as_descriptor_at(node.location.clone());
 
-            for (_, arg_bt) in &with_backtraces {
+            for (index, (_, arg_bt)) in with_backtraces.iter().enumerate() {
+                if !sink.applies_to_arg(index) {
+                    // this sink is scoped to a specific arg position and the
+                    // current one doesn't match, so skip triggering it here
+                    continue;
+                }
+
                 enforcement::trigger_sink(ctx, Cow::Borrowed(&descriptor), arg_bt.clone());
             }
         }

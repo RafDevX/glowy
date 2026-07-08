@@ -808,7 +808,11 @@ impl<'a> InherentBlanketDirectives<'a> {
             }
             BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
                 let allow = directive.kind() == BlanketDirectiveKind::AllowSink;
-                let new_sink = InherentBlanketSink { allow, label };
+                let new_sink = InherentBlanketSink {
+                    allow,
+                    label,
+                    arg_index: directive.arg_index(),
+                };
 
                 if !self.sinks.contains(&new_sink) {
                     self.sinks.push(new_sink);
@@ -839,6 +843,7 @@ impl SnapshotAware for InherentBlanketDirectives<'_> {
 pub struct InherentBlanketSink<'a> {
     allow: bool,
     label: Label<'a>,
+    arg_index: Option<usize>, // 0-indexed; None = applies to every argument
 }
 
 impl<'a> InherentBlanketSink<'a> {
@@ -849,5 +854,9 @@ impl<'a> InherentBlanketSink<'a> {
             label: self.label.clone(),
             location,
         }
+    }
+
+    pub fn applies_to_arg(&self, index: usize) -> bool {
+        self.arg_index.is_none_or(|target| target == index)
     }
 }

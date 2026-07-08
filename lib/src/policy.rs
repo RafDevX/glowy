@@ -5,7 +5,7 @@
 //! the consumer's convenience. This module contains several necessary types and
 //! functionality to allow representing (parts of) such a policy.
 
-use std::{collections::HashMap, error, fmt, str::FromStr};
+use std::{collections::HashMap, error, fmt, num::ParseIntError, str::FromStr};
 
 use parser::Location;
 
@@ -123,16 +123,25 @@ pub(crate) type BlanketDirectives = HashMap<String, HashMap<String, Vec<BlanketD
 pub(crate) struct BlanketDirective {
     kind: BlanketDirectiveKind,
     label: OwnedLabel,
+    arg_index: Option<usize>,
 }
 
 impl BlanketDirective {
     pub(crate) fn new<'c1: 'c2, 'c2>(
         kind: BlanketDirectiveKind,
+        arg_index: Option<usize>,
         label: impl Into<OwnedLabelCow<'c1, 'c2>>,
     ) -> Self {
+        // sources don't have a meaningful notion of "this arg only"
+        let arg_index = match kind {
+            BlanketDirectiveKind::Source => None,
+            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => arg_index,
+        };
+
         Self {
             kind,
             label: label.into().into_owned(),
+            arg_index,
         }
     }
 
@@ -142,6 +151,10 @@ impl BlanketDirective {
 
     pub fn label(&self) -> Label<'_> {
         self.label.as_label()
+    }
+
+    pub fn arg_index(&self) -> Option<usize> {
+        self.arg_index
     }
 }
 
@@ -170,18 +183,23 @@ pub(crate) enum BlanketDirectiveKind {
 ///
 /// Often, it is simplest to specify a target as a well-formed [`String`]
 /// composed of the package path, followed by a `.` and then the function name.
-/// This struct implements [`FromStr`] following this specification, and if the
-/// `toml-config` Cargo feature is enabled then it is used to support
-/// automatically deserializing a structured target from a provided string via
-/// `serde`. For example, the string
-/// `example.com/company-name/proj/sub-package.funcName` corresponds to a
-/// target with defined `package_name` and `function_name`.
+/// Optionally, a `#N` suffix (zero-indexed) may be included to also specify an
+/// `arg_index`. This struct implements [`FromStr`] following this
+/// specification, and if the `toml-config` Cargo feature is enabled then it is
+/// used to support automatically deserializing a structured target from a
+/// provided string via `serde`. For example, the string
+/// `example.com/company-name/proj/sub-package.funcName#3` corresponds to a
+/// target with defined `package_name`, `function_name`, and `arg_index`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlanketDirectiveTarget {
     /// Fully-qualified package path.
     pub package_path: FullPackagePath,
     /// Declared name of the function in question.
     pub function_name: String,
+    /// Zero-based argument index that this directive applies to, if any.
+    ///
+    /// If `None`, no restriction is imposed.
+    pub arg_index: Option<usize>,
 }
 
 impl BlanketDirectiveTarget {
@@ -199,12 +217,37 @@ impl BlanketDirectiveTarget {
             arg_index: None,
         }
     }
+
+    /// Creates a target for a specific argument of the given function.
+    ///
+    /// In most cases, it is more convenient to use the existing [`FromStr`]
+    /// implementation instead of invoking this method directly (or, if the
+    /// `toml-config` Cargo feature is enabled, automatically deserializing
+    /// from a string via `serde`).
+    #[inline]
+    pub fn new_with_arg_index(
+        package_path: impl Into<FullPackagePath>,
+        function_name: impl Into<String>,
+        arg_index: usize,
+    ) -> Self {
+        Self {
+            package_path: package_path.into(),
+            function_name: function_name.into(),
+            arg_index: Some(arg_index),
+        }
+    }
 }
 
 impl fmt::Display for BlanketDirectiveTarget {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.package_path, self.function_name)
+        write!(f, "{}.{}", self.package_path, self.function_name)?;
+
+        if let Some(index) = self.arg_index {
+            write!(f, "#{index}")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -213,10 +256,20 @@ impl FromStr for BlanketDirectiveTarget {
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (path, arg_index) = if let Some((path, arg_str)) = s.rsplit_once('#') {
+            let arg_index: usize = arg_str
+                .parse()
+                .map_err(BlanketDirectiveTargetParseError::InvalidArgIndex)?;
+
+            (path, Some(arg_index))
+        } else {
+            (s, None)
+        };
+
         // we need to rsplit instead of split because the package path may
         // contain `.`s (e.g., in `example.com`), so we cannot confuse that with
         // a separator if there is an actual separator later on
-        let Some((package_path, function_name)) = s.rsplit_once('.') else {
+        let Some((package_path, function_name)) = path.rsplit_once('.') else {
             return Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator);
         };
 
@@ -228,7 +281,13 @@ impl FromStr for BlanketDirectiveTarget {
             return Err(BlanketDirectiveTargetParseError::EmptyFunctionName);
         }
 
-        Ok(Self::new(package_path, function_name))
+        let target = if let Some(arg_index) = arg_index {
+            Self::new_with_arg_index(package_path, function_name, arg_index)
+        } else {
+            Self::new(package_path, function_name)
+        };
+
+        Ok(target)
     }
 }
 
@@ -253,6 +312,8 @@ pub enum BlanketDirectiveTargetParseError {
     EmptyPackagePath,
     /// The provided function name is empty.
     EmptyFunctionName,
+    /// The argument-index portion (after the `#`) is not a valid `usize`.
+    InvalidArgIndex(ParseIntError),
 }
 
 impl fmt::Display for BlanketDirectiveTargetParseError {
@@ -268,11 +329,27 @@ impl fmt::Display for BlanketDirectiveTargetParseError {
             Self::EmptyFunctionName => {
                 f.write_str("blanket directive target has empty function name")
             }
+            Self::InvalidArgIndex(err) => {
+                write!(
+                    f,
+                    "blanket directive target has invalid argument index: {err}"
+                )
+            }
         }
     }
 }
 
-impl error::Error for BlanketDirectiveTargetParseError {}
+impl error::Error for BlanketDirectiveTargetParseError {
+    #[inline]
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::NoPackageFunctionSeparator | Self::EmptyPackagePath | Self::EmptyFunctionName => {
+                None
+            }
+            Self::InvalidArgIndex(inner) => Some(inner),
+        }
+    }
+}
 
 #[cfg(test)]
 mod target_tests {
@@ -285,8 +362,26 @@ mod target_tests {
     }
 
     #[test]
+    fn parses_arg_targeted_function_path() {
+        let target: BlanketDirectiveTarget = "os.WriteFile#1".parse().unwrap();
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new_with_arg_index("os", "WriteFile", 1)
+        );
+    }
+
+    #[test]
+    fn parses_qualified_module_paths() {
+        let target: BlanketDirectiveTarget = "example.com/a/b/pkg.Fn#0".parse().unwrap();
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new_with_arg_index("example.com/a/b/pkg", "Fn", 0)
+        );
+    }
+
+    #[test]
     fn round_trips_through_display() {
-        for input in ["os.Remove", "os.WriteFile#1", "example.com/a/b/pkg.Fn"] {
+        for input in ["os.Remove", "os.WriteFile#1", "example.com/a/b/pkg.Fn#0"] {
             let target: BlanketDirectiveTarget = input.parse().unwrap();
             assert_eq!(target.to_string(), input);
         }
@@ -295,7 +390,7 @@ mod target_tests {
     #[test]
     fn rejects_no_separator() {
         assert!(matches!(
-            "x".parse::<BlanketDirectiveTarget>(),
+            "#0".parse::<BlanketDirectiveTarget>(),
             Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator)
         ));
     }
@@ -303,7 +398,7 @@ mod target_tests {
     #[test]
     fn rejects_empty_pkg_path() {
         assert!(matches!(
-            ".func".parse::<BlanketDirectiveTarget>(),
+            ".func#0".parse::<BlanketDirectiveTarget>(),
             Err(BlanketDirectiveTargetParseError::EmptyPackagePath)
         ));
     }
@@ -311,8 +406,16 @@ mod target_tests {
     #[test]
     fn rejects_empty_func_name() {
         assert!(matches!(
-            "pkg.".parse::<BlanketDirectiveTarget>(),
+            "pkg.#0".parse::<BlanketDirectiveTarget>(),
             Err(BlanketDirectiveTargetParseError::EmptyFunctionName)
+        ));
+    }
+
+    #[test]
+    fn rejects_non_numeric_arg_index() {
+        assert!(matches!(
+            "os.Remove#abc".parse::<BlanketDirectiveTarget>(),
+            Err(BlanketDirectiveTargetParseError::InvalidArgIndex(_))
         ));
     }
 }
