@@ -17,7 +17,7 @@ use crate::{
     policy::{SinkDescriptor, SinkKind},
     symbols::Symbol,
     taint::{annotations, enforcement, exprs, goto},
-    types::{StructFieldInfo, TypeInfo, TypeKind},
+    types::{TypeInfo, TypeKind},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, InherentSink, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
@@ -1089,23 +1089,24 @@ fn try_extract_typed_selection_callee<'a>(
 
     // otherwise, check if this selection is really just a field access being
     // called like a method (i.e., `s.F()` where `F` is a `func(...)` field)
-    if matches!(r#type.underlying(), Some(TypeKind::Struct { .. }))
+    if matches!(
+        r#type.strip_pointers().underlying(),
+        Some(TypeKind::Struct { .. })
+    ) && let Some(field) = r#type.lookup_promoted_field(selector)
         && let Some(r#struct) = base_value.as_struct()
     {
         let value = r#struct.get_const(&selector.to_owned(), location());
 
         // fold in the field-tag backtrace (if any) so any label declared on
         // the field via a struct tag manifests on this callable's value too
-        let tag_backtrace = r#type
-            .lookup_field(selector)
-            .and_then(StructFieldInfo::tag_backtrace);
+        let tag_backtrace = field.field_info().tag_backtrace().cloned();
 
         let value = match tag_backtrace {
-            Some(tag) => value.nest_backtrace(
+            Some(tag_backtrace) => value.nest_backtrace(
                 LabelBacktraceKind::Expression,
                 None,
                 location(),
-                [tag.clone()],
+                [tag_backtrace],
             ),
             None => value,
         };

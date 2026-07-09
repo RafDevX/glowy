@@ -12,7 +12,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::{BlanketDirective, BlanketDirectiveKind},
     taint::funcs,
-    types::{StructFieldInfo, TypeInfo, TypeKind},
+    types::{TypeInfo, TypeKind},
     values::{
         ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
         ValueRef,
@@ -78,13 +78,15 @@ pub fn visit_selection_with_base<'a>(
             return nest_optional_backtrace(value, blanket_backtrace, location);
         }
 
-        // note we only call `as_struct` after we know this is actually supposed
-        // to be a struct, as otherwise an unwanted upgrade would trigger
-
-        if let Some(TypeKind::Struct { fields }) = r#type.underlying()
-            && let Some(field) = fields.get(selector)
+        // ordering matters: `lookup_promoted_field` already gates on the
+        // underlying being a struct (either directly or via an embedded chain),
+        // so we only reach `as_struct` (which would otherwise force an
+        // unwanted upgrade) once we know the shape is genuinely struct-like
+        if let Some(promoted) = r#type.lookup_promoted_field(selector)
             && let Some(r#struct) = base.as_struct()
         {
+            let field = promoted.field_info();
+
             let value = r#struct
                 .get_const(&selector.to_owned(), location.clone())
                 .into_with_declared_type(field.resolved_type());
@@ -268,10 +270,9 @@ fn lookup_field_tag_backtrace<'a>(
     base: &ValueRef<'a>,
     selector: &str,
 ) -> Option<LabelBacktrace<'a>> {
-    base.declared_type()
-        .and_then(|r#type| r#type.lookup_field(selector))
-        .and_then(StructFieldInfo::tag_backtrace)
-        .cloned()
+    let field = base.declared_type()?.lookup_promoted_field(selector)?;
+
+    field.field_info().tag_backtrace().cloned()
 }
 
 fn nest_field_backtraces<'a>(

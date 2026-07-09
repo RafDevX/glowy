@@ -14,7 +14,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::{QualifiedSymbolResolutionResult, SymbolRef},
     taint::exprs,
-    types::{StructFieldInfo, TypeInfo, TypeKind},
+    types::{PromotedField, StructFieldInfo, TypeInfo, TypeKind},
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
     },
@@ -591,10 +591,18 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 // `as_struct_mut` has the chance to upgrade `target`
                 let field = target
                     .declared_type()
-                    .and_then(|r#type| r#type.lookup_field(&selector));
+                    .and_then(|r#type| r#type.lookup_promoted_field(&selector));
 
-                let field_hint = field.and_then(FieldShapeHint::for_field);
-                let field_tag_backtrace = field.and_then(StructFieldInfo::tag_backtrace).cloned();
+                let field_hint = field
+                    .as_ref()
+                    .map(PromotedField::field_info)
+                    .and_then(FieldShapeHint::for_field);
+
+                let field_tag_backtrace = field
+                    .as_ref()
+                    .map(PromotedField::field_info)
+                    .and_then(StructFieldInfo::tag_backtrace)
+                    .cloned();
 
                 let Some(mut r#struct) = target.as_struct_mut() else {
                     ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
