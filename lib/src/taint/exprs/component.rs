@@ -6,9 +6,10 @@ use parser::{
 };
 
 use crate::{
+    Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::{BlanketDirective, BlanketDirectiveKind},
     taint::funcs,
     types::{TypeInfo, TypeKind},
@@ -37,12 +38,30 @@ pub fn visit_selection_with_base<'a>(
         return super::visit_operand_name(ctx, node.selector, Some(pkg.qualifier()));
     }
 
+    let location = ctx.pin(node.location.clone());
+    let selector = node.selector.content();
+
+    // before getting started, we collect any potential blanket directives that
+    // may be targeting this selection, in case we know `base`'s type. this
+    // covers both methods and struct fields, and we will need this information
+    // regardless of the approach chosen to visit the selection
+    let type_member_directives = base
+        .declared_type()
+        .map(AsRef::as_ref)
+        .map(TypeInfo::strip_pointers)
+        .map(|r#type| ctx.blanket_directives_for(r#type.package(), Some(r#type.name()), selector))
+        .filter(|slice| !slice.is_empty());
+
+    let blanket_backtrace = type_member_directives
+        .and_then(|directives| build_blanket_backtrace(directives, &location));
+
+    // ----------
+
     // we employ multiple strategies to determine whether this selection
     // represents a method access or a field access, as well as to fetch all
     // the necessary details associated with either of them
 
-    let location = ctx.pin(node.location.clone());
-    let selector = node.selector.content();
+    // ----------
 
     // Strategy A - Typed Dispatch: when the base has a known declared type, use
     // it to look up the method or struct field by name. this is the best case
@@ -50,7 +69,13 @@ pub fn visit_selection_with_base<'a>(
 
     if let Some(r#type) = base.declared_type().cloned() {
         if let Some(method) = r#type.lookup_promoted_method(selector) {
-            return funcs::nest_receiver_backtrace(method.borrow().value().get(), base, location);
+            let value = funcs::nest_receiver_backtrace(
+                method.borrow().value().get(),
+                base,
+                location.clone(),
+            );
+
+            return nest_optional_backtrace(value, blanket_backtrace, location);
         }
 
         // note we only call `as_struct` after we know this is actually supposed
@@ -60,9 +85,11 @@ pub fn visit_selection_with_base<'a>(
             && let Some(field) = fields.get(selector)
             && let Some(r#struct) = base.as_struct()
         {
-            return r#struct
-                .get_const(&selector.to_owned(), location)
+            let value = r#struct
+                .get_const(&selector.to_owned(), location.clone())
                 .into_with_declared_type(field.resolved_type());
+
+            return nest_optional_backtrace(value, blanket_backtrace, location);
         }
         // typed lookup didn't conclusively resolve; fall through to the
         // name-only heuristic + the final blackbox-softening leaf below
@@ -79,7 +106,11 @@ pub fn visit_selection_with_base<'a>(
         .symtab()
         .lookup_unique_method_in_current_package(selector)
     {
-        return funcs::nest_receiver_backtrace(method.borrow().value().get(), base, location);
+        let method_value = method.borrow().value().get();
+
+        let value = funcs::nest_receiver_backtrace(method_value, base, location.clone());
+
+        return nest_optional_backtrace(value, blanket_backtrace, location);
     }
 
     // ----------
@@ -99,8 +130,27 @@ pub fn visit_selection_with_base<'a>(
     // unknown to us (no declared type, or an external placeholder), and also
     // when we do know it's a struct; otherwise upgrading would be known wrong
 
-    if struct_shape_plausible && let Some(r#struct) = base.as_struct() {
-        return r#struct.get_const(&selector.to_owned(), location);
+    // if there are sinks configured, this is probably not a field access
+    // (we short-circuit if we already know the shape is not plausible)
+    let has_type_member_sink = !struct_shape_plausible
+        && type_member_directives
+            .iter()
+            .copied()
+            .flatten()
+            .any(|directive| {
+                matches!(
+                    directive.kind(),
+                    BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink
+                )
+            });
+
+    if struct_shape_plausible
+        && !has_type_member_sink
+        && let Some(r#struct) = base.as_struct()
+    {
+        let value = r#struct.get_const(&selector.to_owned(), location.clone());
+
+        return nest_optional_backtrace(value, blanket_backtrace, location);
     }
 
     // ----------
@@ -116,26 +166,12 @@ pub fn visit_selection_with_base<'a>(
 
     // Criterion D.1: this is a plausible method if there's a registered blanket
     // directive for it in the base's known type (we'll always want to apply it)
-    let blanket_directives = if let Some(r#type) = base.declared_type() {
-        let directives = ctx.blanket_directives_for(
-            r#type.package(), // methods only exist in their type's package
-            Some(r#type.name()),
-            selector,
-        );
-
-        if directives.is_empty() {
-            None
-        } else {
-            Some(directives)
-        }
-    } else {
-        None
-    };
+    let has_blanket_directives = type_member_directives.is_some();
 
     // Criterion D.2: this is a plausible method if we have analyzed the source
     // code of a method somewhere with this name, on any type (we short-circuit
     // if D.1 was successful, to avoid the lookup when unnecessary)
-    let any_method_named = blanket_directives.is_none() && ctx.types().any_method_named(selector);
+    let any_method_named = !has_blanket_directives && ctx.types().any_method_named(selector);
 
     // Criterion D.3: this is a plausible method if the base's declared type
     // is an external placeholder (declaration never visited, so this is likely
@@ -150,36 +186,17 @@ pub fn visit_selection_with_base<'a>(
             .is_some_and(TypeInfo::is_external);
 
     // Final D.X aggregate condition
-    if blanket_directives.is_some() || any_method_named || base_is_external_opaque {
-        let blackbox_backtrace = if let Some(directives) = blanket_directives {
-            let blanket_label = directives
-                .iter()
-                .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
-                .map(BlanketDirective::label)
-                .sum();
-
-            let blanket_root = LabelBacktrace::new_root(
-                LabelBacktraceKind::BlanketSource,
-                blanket_label,
-                None,
-                location.clone(),
-            );
-
-            LabelBacktrace::combine_options(
-                base.backtrace(),
-                blanket_root,
-                LabelBacktraceKind::Expression,
-                Cow::Borrowed(&location),
-            )
-        } else {
-            // nothing to combine, it's really just this
-
-            base.backtrace()
-        };
+    if has_blanket_directives || any_method_named || base_is_external_opaque {
+        let blackbox_backtrace = LabelBacktrace::combine_options(
+            base.backtrace(),
+            blanket_backtrace,
+            LabelBacktraceKind::Expression,
+            Cow::Borrowed(&location),
+        );
 
         let mut blackbox = FunctionValue::new_unknown(blackbox_backtrace, true);
 
-        if let Some(directives) = blanket_directives {
+        if let Some(directives) = type_member_directives {
             blackbox.absorb_blanket_sinks(directives);
         }
 
@@ -195,6 +212,45 @@ pub fn visit_selection_with_base<'a>(
     });
 
     ValueRef::new_bottom(location, None)
+}
+
+fn build_blanket_backtrace<'a>(
+    directives: &'a [BlanketDirective],
+    at_location: &Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    let blanket_label: Label<'_> = directives
+        .iter()
+        .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
+        .map(BlanketDirective::label)
+        .sum();
+
+    if blanket_label.is_bottom() {
+        // prevent cloning location below if unnecessary
+        return None;
+    }
+
+    LabelBacktrace::new_root(
+        LabelBacktraceKind::BlanketSource,
+        blanket_label,
+        None,
+        at_location.clone(),
+    )
+}
+
+fn nest_optional_backtrace<'a>(
+    value: ValueRef<'a>,
+    backtrace: Option<LabelBacktrace<'a>>,
+    at_location: Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    match backtrace {
+        Some(backtrace) => value.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            at_location,
+            [backtrace],
+        ),
+        None => value,
+    }
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {

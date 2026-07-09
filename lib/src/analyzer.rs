@@ -517,18 +517,18 @@ impl Analyzer {
             .push(type_name, member_name, directive);
     }
 
-    /// Universally registers a symbol or a method as an information source.
+    /// Universally registers a symbol/method/field as an information source.
     ///
     /// This instructs the analyzer to always consider all calls to the given
     /// function or method as yielding the provided [`Label`], in addition to
     /// what is already otherwise derived from the function. If the specified
-    /// symbol is not a function nor a method (i.e., if it is a variable or a
-    /// constant), all accesses to it will analogously yield the provided
-    /// [`Label`].
+    /// symbol is not a function nor a method (i.e., if it is a variable, a
+    /// constant, or a struct field), all accesses to it will analogously yield
+    /// the provided [`Label`].
     ///
     /// The package path (`package_path`) is expected to be a well-formed,
     /// fully qualified Go package path of where the member is accessible,
-    /// and `member_name` its declared symbol or method name.
+    /// and `member_name` its declared symbol, method, or field name.
     ///
     /// Each invocation to this function extends the blanket directives
     /// associated with the member path, meaning that previous versions are
@@ -575,7 +575,7 @@ impl Analyzer {
     /// if `allow` is `true`) or as never accepting any overlap with the
     /// provided [`Label`] (for integrity, if `allow` is `false`).
     ///
-    /// The `target` argument identifies which symbol or method (and,
+    /// The `target` argument identifies which symbol, method, or field (and,
     /// optionally, which specific function/method argument position) this sink
     /// applies to. It can be constructed manually or derived from a [`String`].
     ///

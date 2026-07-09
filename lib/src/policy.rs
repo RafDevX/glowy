@@ -119,10 +119,10 @@ pub(crate) type BlanketDirectives = HashMap<FullPackagePath, PackageBlanketDirec
 
 #[derive(Default)]
 pub(crate) struct PackageBlanketDirectives {
-    // functions & bindings (e.g., `os.Args` is a variable)
+    // top-level package symbols: functions (`os.GetEnv`) & bindings (`os.Args`)
     pub symbols: HashMap<String, Vec<BlanketDirective>>,
-    // outer key is type name, inner key is method name
-    pub methods: HashMap<String, HashMap<String, Vec<BlanketDirective>>>,
+    // type-associated members: methods (`DB.Query`) & fields (`Request.Body`)
+    pub type_members: HashMap<String, HashMap<String, Vec<BlanketDirective>>>,
 }
 
 impl PackageBlanketDirectives {
@@ -130,7 +130,7 @@ impl PackageBlanketDirectives {
         match type_name {
             None => self.symbols.get(member_name).map(Vec::as_slice),
             Some(type_name) => self
-                .methods
+                .type_members
                 .get(type_name)
                 .and_then(|inner| inner.get(member_name))
                 .map(Vec::as_slice),
@@ -146,7 +146,7 @@ impl PackageBlanketDirectives {
         let entry = match type_name {
             None => self.symbols.entry(member_name).or_default(),
             Some(type_name) => self
-                .methods
+                .type_members
                 .entry(type_name)
                 .or_default()
                 .entry(member_name)
@@ -157,10 +157,12 @@ impl PackageBlanketDirectives {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &BlanketDirective> {
-        self.symbols
-            .values()
-            .flatten()
-            .chain(self.methods.values().flat_map(HashMap::values).flatten())
+        self.symbols.values().flatten().chain(
+            self.type_members
+                .values()
+                .flat_map(HashMap::values)
+                .flatten(),
+        )
     }
 }
 
@@ -215,13 +217,15 @@ pub(crate) enum BlanketDirectiveKind {
 /// A target is primarily identified by a member path, which is composed of a
 /// fully qualified Go package path ([`Self::package_path`]), the declared
 /// name of the member ([`Self::member_name`]), as well as an optional receiver
-/// type name ([`Self::type_name`]) if the target is a method. Package-level
-/// symbols have no  defined `type_name` (e.g., `(os, None, Remove)`), while
-/// methods carry the receiver type name (e.g.,
-/// `(database/sql, Some(DB), Query)`).
+/// type name ([`Self::type_name`]) if the target is a type-associated member
+/// (i.e., a method or a struct field). Package-level symbols have no defined
+/// `type_name` (e.g., `(os, None, Remove)`), while type members carry the
+/// receiver type name (e.g., `(database/sql, Some(DB), Query)`).
 ///
 /// Note that non-method symbols are not necessarily functions, as they may
 /// refer to variables and constants (in the case of blanket sources).
+/// Analogously, type members are not necessarily methods, and may refer to
+/// struct fields (e.g., `(net/http, Some(Request), Body)`).
 ///
 /// In addition, targets may be optionally narrowed down to specific argument
 /// positions via the inclusion of a `#N` suffix (zero-indexed). For instance,
@@ -233,12 +237,11 @@ pub(crate) enum BlanketDirectiveKind {
 ///
 /// Often, it is simplest to specify a target as a well-formed [`String`]. Two
 /// syntactic forms are supported:
-///
 /// - `pkg/path.Func`: a package-level symbol (usually a function); or
-/// - `pkg/path.Type.Method`: a method associated to a named receiver type
-///   declared in the specified package.
+/// - `pkg/path.Type.Method`: a method or struct field associated to a named
+///   receiver type declared in the specified package.
 ///
-/// Whether a target is a symbol or a method is disambiguated purely by the
+/// Whether a target is a symbol or a type member is disambiguated purely by the
 /// number of `.`-separated identifiers following the last `/` of the package
 /// path. Two identifiers means `pkg.Func`; three identifiers means
 /// `pkg.Type.Method`. This is unambiguous because Go module paths only carry
@@ -255,18 +258,20 @@ pub(crate) enum BlanketDirectiveKind {
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
 /// deserializing a structured target from a provided string via `serde`.
 ///
-/// Method receivers are matched irrespective of pointer versus value receiver:
-/// `pkg.T.M` applies whether the declared receiver is `T` or `*T`, per Go's
-/// method-set semantics. As such, no `*` should be included in `type_name`.
+/// Method receivers and struct types are matched irrespective of pointer versus
+/// value receiver: `pkg.T.M` applies whether the declared receiver/type is `T`
+/// or `*T`, per Go's method-set/struct field semantics. As such, no `*` prefix
+/// should be included in `type_name`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlanketDirectiveTarget {
     /// Fully-qualified package path.
     pub package_path: FullPackagePath,
-    /// Declared name of the receiver type, when the target is a method.
+    /// Declared name of the receiver type, when the target is a method/field.
     ///
-    /// If `None`, the target is a package-level symbol rather than a method.
+    /// If `None`, the target is a package-level symbol rather than a
+    /// type-associated member.
     pub type_name: Option<String>,
-    /// Declared name of the member (symbol or method) in question.
+    /// Declared name of the member (symbol, method, or field) in question.
     pub member_name: String,
     /// Zero-based argument index that this directive applies to, if any.
     ///
