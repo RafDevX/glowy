@@ -166,6 +166,7 @@ pub struct ExplicitFieldDeclNode<'a> {
     pub ids: Vec<Option<Span<'a>>>, // None if just padding ("_" blank field)
     pub r#type: TypeNode<'a>,
     pub tag: Option<String>,
+    pub location: Location, // for better error messages
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,6 +174,7 @@ pub struct EmbeddedFieldDeclNode<'a> {
     pub pointer: bool, // whether prefixed by `*`
     pub r#type: TypeNameNode<'a>,
     pub tag: Option<String>,
+    pub location: Location, // for better error messages
 }
 
 /// This represents both function declarations and method declarations.

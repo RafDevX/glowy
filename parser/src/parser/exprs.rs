@@ -295,12 +295,14 @@ fn parse_nested_composite_literal<'a>(
     let elements = parse_composite_literal_element_list(s, optional_keys)?;
 
     let location = s.location_since(&beginning.unwrap());
+    // ^ unwrap is safe since next token definitely exists
+    // (otherwise we would not have gotten this far; `expect` would have failed)
 
     Ok(CompositeLiteralElementNode::Nested { elements, location })
 }
 
 fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'a>> {
-    let beginning = s.peek().map(Result::as_ref).and_then(Result::ok).cloned();
+    let beginning = s.peek().cloned().transpose()?;
 
     let r#type = parse_type(s)?;
 

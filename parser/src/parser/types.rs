@@ -148,6 +148,8 @@ fn parse_struct_type_field<'a>(s: &mut TokenStream<'a>) -> PResult<'a, FieldDecl
 fn parse_explicit_struct_field<'a>(
     s: &mut TokenStream<'a>,
 ) -> PResult<'a, ExplicitFieldDeclNode<'a>> {
+    let beginning = s.peek().cloned().transpose()?;
+
     let mut ids = vec![];
 
     loop {
@@ -169,13 +171,24 @@ fn parse_explicit_struct_field<'a>(
     let r#type = parse_type(s)?;
     let tag = parse_optional_field_tag(s);
 
-    Ok(ExplicitFieldDeclNode { ids, r#type, tag })
+    let location = s.location_since(&beginning.unwrap());
+    // ^ unwrap is safe since next token definitely exists
+    // (otherwise we would not have gotten this far; `expect` would have failed)
+
+    Ok(ExplicitFieldDeclNode {
+        ids,
+        r#type,
+        tag,
+        location,
+    })
 }
 
 fn parse_embedded_struct_field<'a>(
     s: &mut TokenStream<'a>,
 ) -> PResult<'a, EmbeddedFieldDeclNode<'a>> {
-    let pointer = matches!(s.peek(), Some(Ok(of_kind!(TokenKind::Star))));
+    let beginning = s.peek().cloned().transpose()?;
+
+    let pointer = matches!(beginning, Some(of_kind!(TokenKind::Star)));
 
     if pointer {
         s.next(); // advance
@@ -185,10 +198,15 @@ fn parse_embedded_struct_field<'a>(
 
     let tag = parse_optional_field_tag(s);
 
+    let location = s.location_since(&beginning.unwrap());
+    // ^ unwrap is safe since next token definitely exists
+    // (otherwise we would not have gotten this far; `expect` would have failed)
+
     Ok(EmbeddedFieldDeclNode {
         pointer,
         r#type,
         tag,
+        location,
     })
 }
 
