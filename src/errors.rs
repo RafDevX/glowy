@@ -584,6 +584,11 @@ fn label_backtrace_to_snippets<'a>(
                 symbol!(),
                 backtrace.label()
             ),
+            LabelBacktraceKind::ExplicitFieldTag => format!(
+                "{} has been explicitly tagged with label {}",
+                symbol!("field"),
+                backtrace.label()
+            ),
             LabelBacktraceKind::BlanketSource => format!(
                 "{} is an explicitly registered blanket source with label {}",
                 symbol!("function"),

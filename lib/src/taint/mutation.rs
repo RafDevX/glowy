@@ -14,7 +14,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::{QualifiedSymbolResolutionResult, SymbolRef},
     taint::exprs,
-    types::{TypeInfo, TypeKind},
+    types::{StructFieldInfo, TypeInfo, TypeKind},
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
     },
@@ -587,13 +587,14 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
             .mutate_target(ctx, assignment_location, &|ctx, target| {
                 let selector = self.selector.content().to_owned();
 
-                // resolve the field's shape hint before `as_struct_mut` has the
-                // chance to upgrade `target`
-                let field_hint = FieldShapeHint::for_field(
-                    // provide the struct's type, not the field's directly
-                    target.declared_type().map(AsRef::as_ref),
-                    &selector,
-                );
+                // resolve the field's static metadata (shape hint + tag) before
+                // `as_struct_mut` has the chance to upgrade `target`
+                let field = target
+                    .declared_type()
+                    .and_then(|r#type| r#type.lookup_field(&selector));
+
+                let field_hint = field.and_then(FieldShapeHint::for_field);
+                let field_tag_backtrace = field.and_then(StructFieldInfo::tag_backtrace).cloned();
 
                 let Some(mut r#struct) = target.as_struct_mut() else {
                     ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
@@ -608,6 +609,19 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 if let Some(hint) = field_hint {
                     hint.try_apply(&child);
                 }
+
+                // fold in the field-tag backtrace (if any) at the access site
+                // so complex assignments (which read `child` before merging)
+                // propagate the label declared by the struct field tag
+                let child = match field_tag_backtrace {
+                    Some(tag) => child.nest_backtrace(
+                        LabelBacktraceKind::Expression,
+                        None,
+                        ctx.pin(self.location.clone()),
+                        [tag],
+                    ),
+                    None => child,
+                };
 
                 let child = mutator(ctx, child)?;
 
@@ -629,16 +643,7 @@ enum FieldShapeHint {
 }
 
 impl FieldShapeHint {
-    fn for_field(target: Option<&TypeInfo<'_>>, field_name: &str) -> Option<Self> {
-        let target = target?.strip_pointers();
-
-        let Some(TypeKind::Struct { fields }) = target.underlying() else {
-            // we only support providing hints for structs
-            return None;
-        };
-
-        let field = fields.get(field_name)?;
-
+    fn for_field(field: &StructFieldInfo<'_>) -> Option<Self> {
         // prefer the resolved TypeInfo (for named types), and fall back to the
         // syntactic TypeNode for anonymous field types that never enter the
         // type registry (such as `chan struct{}` or `map[k]v`)

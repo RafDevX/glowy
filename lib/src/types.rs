@@ -19,15 +19,32 @@ use std::{
     cell::{OnceCell, RefCell},
     collections::{HashMap, HashSet},
     fmt, iter, mem, ops,
+    path::Path,
     rc::Rc,
+    sync::LazyLock,
 };
 
 use indexmap::IndexMap;
-use parser::ast::{FieldDeclNode, TypeNameNode, TypeNode};
+use parser::{
+    Location,
+    ast::{FieldDeclNode, TypeNameNode, TypeNode},
+};
+use regex::Regex;
 
 use crate::{
-    FullPackagePath,
+    FullPackagePath, Pinned,
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::{FileImportsRecord, SymbolRef, SymbolTable},
+};
+
+static FIELD_TAG_REGEX: LazyLock<Regex> = {
+    LazyLock::new(|| {
+        Regex::new(
+            // glowy:"value, possibly with escaped \"quotes\""
+            r#"glowy:"((?:\\.|[^"\\])*)""#,
+        )
+        .unwrap()
+    })
 };
 
 /// Identity and metadata of a Go defined type (named type).
@@ -122,6 +139,14 @@ impl<'a> TypeInfo<'a> {
             inner.strip_pointers()
         } else {
             self
+        }
+    }
+
+    pub fn lookup_field(&self, name: &str) -> Option<&StructFieldInfo<'a>> {
+        if let TypeKind::Struct { fields } = self.strip_pointers().underlying()? {
+            fields.get(name)
+        } else {
+            None
         }
     }
 
@@ -310,6 +335,7 @@ pub struct StructFieldInfo<'a> {
     r#type: RefCell<Option<Rc<TypeInfo<'a>>>>,
     embedded: bool,
     declared_type_node: TypeNode<'a>,
+    tag_backtrace: Option<LabelBacktrace<'a>>,
 }
 
 impl<'a> StructFieldInfo<'a> {
@@ -317,11 +343,13 @@ impl<'a> StructFieldInfo<'a> {
         r#type: Option<Rc<TypeInfo<'a>>>,
         declared_type_node: TypeNode<'a>,
         embedded: bool,
+        tag_backtrace: Option<LabelBacktrace<'a>>,
     ) -> Self {
         Self {
             r#type: RefCell::new(r#type),
             embedded,
             declared_type_node,
+            tag_backtrace,
         }
     }
 
@@ -343,6 +371,10 @@ impl<'a> StructFieldInfo<'a> {
 
     pub fn declared_type_node(&self) -> &TypeNode<'a> {
         &self.declared_type_node
+    }
+
+    pub fn tag_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
+        self.tag_backtrace.as_ref()
     }
 }
 
@@ -391,8 +423,9 @@ impl<'a> TypeRegistry<'a> {
         package: FullPackagePath,
         name: &'a str,
         underlying: &TypeNode<'a>,
+        current_file: &'a Path,
     ) -> Rc<TypeInfo<'a>> {
-        let underlying_kind = self.build_kind(symtab, underlying);
+        let underlying_kind = self.build_kind(symtab, underlying, current_file);
 
         let inner = self.types.entry(package.clone()).or_default();
 
@@ -568,7 +601,12 @@ impl<'a> TypeRegistry<'a> {
         }
     }
 
-    fn build_kind(&mut self, symtab: &SymbolTable<'a>, node: &TypeNode<'a>) -> TypeKind<'a> {
+    fn build_kind(
+        &mut self,
+        symtab: &SymbolTable<'a>,
+        node: &TypeNode<'a>,
+        current_file: &'a Path,
+    ) -> TypeKind<'a> {
         match node {
             TypeNode::Name(_) => TypeKind::Opaque,
             TypeNode::Pointer { base } => match self.resolve(symtab, base) {
@@ -576,7 +614,7 @@ impl<'a> TypeRegistry<'a> {
                 None => TypeKind::Opaque,
             },
             TypeNode::Struct { fields } => TypeKind::Struct {
-                fields: self.build_struct_fields(symtab, fields),
+                fields: self.build_struct_fields(symtab, fields, current_file),
             },
             TypeNode::Map { .. } => TypeKind::Map,
             TypeNode::Slice { .. } => TypeKind::Slice,
@@ -591,6 +629,7 @@ impl<'a> TypeRegistry<'a> {
         &mut self,
         symtab: &SymbolTable<'a>,
         fields: &[FieldDeclNode<'a>],
+        current_file: &'a Path,
     ) -> IndexMap<&'a str, StructFieldInfo<'a>> {
         let mut result = IndexMap::new();
 
@@ -605,14 +644,28 @@ impl<'a> TypeRegistry<'a> {
                             continue;
                         };
 
-                        result.insert(
+                        let tag_backtrace = root_backtrace_from_field_tag(
                             name.content(),
-                            StructFieldInfo::new(resolved.clone(), explicit.r#type.clone(), false),
+                            explicit.tag.as_deref(),
+                            // we cannot use `ctx.pin` since there is no way to
+                            // get ctx all the way down here, as it has to be
+                            // mutably-borrowed for us to have &mut self
+                            || Pinned::new(current_file, explicit.location.clone()),
                         );
+
+                        let field = StructFieldInfo::new(
+                            resolved.clone(),
+                            explicit.r#type.clone(),
+                            false,
+                            tag_backtrace,
+                        );
+
+                        result.insert(name.content(), field);
                     }
                 }
                 FieldDeclNode::Embedded(embedded) => {
                     // per Go spec, the unqualified type name is the field name
+                    let field_name = embedded.r#type.id.content();
 
                     let resolved = self.resolve_name(symtab, &embedded.r#type);
 
@@ -624,10 +677,18 @@ impl<'a> TypeRegistry<'a> {
                         };
                     }
 
-                    result.insert(
-                        embedded.r#type.id.content(),
-                        StructFieldInfo::new(resolved, declared_type, true),
+                    let tag_backtrace = root_backtrace_from_field_tag(
+                        field_name,
+                        embedded.tag.as_deref(),
+                        // we cannot use `ctx.pin` since there is no way to
+                        // get ctx all the way down here, as it has to be
+                        // mutably-borrowed for us to have &mut self
+                        || Pinned::new(current_file, embedded.location.clone()),
                     );
+
+                    let field = StructFieldInfo::new(resolved, declared_type, true, tag_backtrace);
+
+                    result.insert(field_name, field);
                 }
             }
         }
@@ -827,6 +888,48 @@ impl Default for TypeRegistry<'_> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn root_backtrace_from_field_tag<'a>(
+    field_name: &'a str,
+    tag: Option<&str>,
+    at_location: impl Fn() -> Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    let tag = tag?;
+
+    let mut label = Label::Bottom;
+
+    // we cannot use `split` because values between quotes might have spaces,
+    // so we have to use regex to get all captures
+    for (_, [value]) in FIELD_TAG_REGEX
+        .captures_iter(tag)
+        .map(|capture| capture.extract())
+    {
+        // the extracted `value` borrows from `tag`, which is not necessarily
+        // `'a` (e.g., it may come from an owned `String` on an AST node whose
+        // borrow is shorter than `'a`); we thus copy each tag name into an
+        // owned `String` before feeding into a `Label<'a>`
+        let label_tags: Vec<_> = value
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+            .collect();
+
+        label = label.union(&Label::from_tags(label_tags));
+    }
+
+    if label.is_bottom() {
+        // avoid creating a location unnecessarily
+        return None;
+    }
+
+    LabelBacktrace::new_root(
+        LabelBacktraceKind::ExplicitFieldTag,
+        label,
+        Some(field_name),
+        at_location(),
+    )
 }
 
 #[derive(Debug, Default)]

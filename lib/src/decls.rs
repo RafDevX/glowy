@@ -163,6 +163,11 @@ fn register_type_in_registry<'a>(
     let package = ctx.symtab().current_package_path()?.clone();
     let name = node.id.content();
 
+    // we need to extract this before ctx becomes locked away when we &mut types
+    let current_file = ctx
+        .current_file()
+        .expect("some file should be under analysis");
+
     let (types, symtab) = ctx.types_mut_with_symtab();
 
     if node.alias {
@@ -177,7 +182,7 @@ fn register_type_in_registry<'a>(
                 None
             })
     } else {
-        let info = types.declare(symtab, package, name, &node.r#type);
+        let info = types.declare(symtab, package, name, &node.r#type, current_file);
 
         // just in case this is a struct with any unresolved field types
         types.queue_pending_field_resolutions_for(symtab, &info);

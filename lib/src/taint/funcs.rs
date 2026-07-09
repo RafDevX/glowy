@@ -17,7 +17,7 @@ use crate::{
     policy::{SinkDescriptor, SinkKind},
     symbols::Symbol,
     taint::{annotations, enforcement, exprs, goto},
-    types::{TypeInfo, TypeKind},
+    types::{StructFieldInfo, TypeInfo, TypeKind},
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, InherentSink, Mergeable, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
@@ -1092,7 +1092,25 @@ fn try_extract_typed_selection_callee<'a>(
     if matches!(r#type.underlying(), Some(TypeKind::Struct { .. }))
         && let Some(r#struct) = base_value.as_struct()
     {
-        return Some(r#struct.get_const(&selector.to_owned(), location()));
+        let value = r#struct.get_const(&selector.to_owned(), location());
+
+        // fold in the field-tag backtrace (if any) so any label declared on
+        // the field via a struct tag manifests on this callable's value too
+        let tag_backtrace = r#type
+            .lookup_field(selector)
+            .and_then(StructFieldInfo::tag_backtrace);
+
+        let value = match tag_backtrace {
+            Some(tag) => value.nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                location(),
+                [tag.clone()],
+            ),
+            None => value,
+        };
+
+        return Some(value);
     }
 
     // nothing we can do

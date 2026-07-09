@@ -1132,6 +1132,8 @@ impl<'a> LabelBacktrace<'a> {
 pub enum LabelBacktraceKind {
     /// Explicit source code annotation.
     ExplicitAnnotation,
+    /// Explicit instruction derived from struct field tag in the source code.
+    ExplicitFieldTag,
     /// Explicit blanket information source registered to the analyzer.
     BlanketSource,
     /// Assignment of some tainted expression to a variable.

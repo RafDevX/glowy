@@ -12,7 +12,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::{BlanketDirective, BlanketDirectiveKind},
     taint::funcs,
-    types::{TypeInfo, TypeKind},
+    types::{StructFieldInfo, TypeInfo, TypeKind},
     values::{
         ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
         ValueRef,
@@ -89,7 +89,11 @@ pub fn visit_selection_with_base<'a>(
                 .get_const(&selector.to_owned(), location.clone())
                 .into_with_declared_type(field.resolved_type());
 
-            return nest_optional_backtrace(value, blanket_backtrace, location);
+            return nest_field_backtraces(
+                value,
+                [blanket_backtrace, field.tag_backtrace().cloned()],
+                location,
+            );
         }
         // typed lookup didn't conclusively resolve; fall through to the
         // name-only heuristic + the final blackbox-softening leaf below
@@ -150,7 +154,14 @@ pub fn visit_selection_with_base<'a>(
     {
         let value = r#struct.get_const(&selector.to_owned(), location.clone());
 
-        return nest_optional_backtrace(value, blanket_backtrace, location);
+        return nest_field_backtraces(
+            value,
+            [
+                blanket_backtrace,
+                lookup_field_tag_backtrace(base, selector),
+            ],
+            location,
+        );
     }
 
     // ----------
@@ -251,6 +262,31 @@ fn nest_optional_backtrace<'a>(
         ),
         None => value,
     }
+}
+
+fn lookup_field_tag_backtrace<'a>(
+    base: &ValueRef<'a>,
+    selector: &str,
+) -> Option<LabelBacktrace<'a>> {
+    base.declared_type()
+        .and_then(|r#type| r#type.lookup_field(selector))
+        .and_then(StructFieldInfo::tag_backtrace)
+        .cloned()
+}
+
+fn nest_field_backtraces<'a>(
+    value: ValueRef<'a>,
+    backtraces: impl IntoIterator<Item = Option<LabelBacktrace<'a>>>,
+    at_location: Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    let extras: Vec<_> = backtraces.into_iter().flatten().collect();
+
+    if extras.is_empty() {
+        // avoid an unnecessary wrapping node when nothing is being folded in
+        return value;
+    }
+
+    value.nest_backtrace(LabelBacktraceKind::Expression, None, at_location, extras)
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {

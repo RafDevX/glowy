@@ -17,6 +17,7 @@ members = [".", "lib", "parser"]
 
 [workspace.dependencies]
 codespan-reporting = "0.13.1"
+regex = "1.13.0"
 
 [workspace.package]
 version = "0.1.0"
