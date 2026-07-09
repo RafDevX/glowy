@@ -115,9 +115,54 @@ pub enum SinkKind {
     Send,
 }
 
-// the map's keys are package path + function name (e.g., `(os, Remove)` or
-// `(example.com/company-name/proj/sub-package, funcName)`).
-pub(crate) type BlanketDirectives = HashMap<String, HashMap<String, Vec<BlanketDirective>>>;
+pub(crate) type BlanketDirectives = HashMap<FullPackagePath, PackageBlanketDirectives>;
+
+#[derive(Default)]
+pub(crate) struct PackageBlanketDirectives {
+    // functions & bindings (e.g., `os.Args` is a variable)
+    pub symbols: HashMap<String, Vec<BlanketDirective>>,
+    // outer key is type name, inner key is method name
+    pub methods: HashMap<String, HashMap<String, Vec<BlanketDirective>>>,
+}
+
+impl PackageBlanketDirectives {
+    pub fn get(&self, type_name: Option<&str>, member_name: &str) -> Option<&[BlanketDirective]> {
+        match type_name {
+            None => self.symbols.get(member_name).map(Vec::as_slice),
+            Some(type_name) => self
+                .methods
+                .get(type_name)
+                .and_then(|inner| inner.get(member_name))
+                .map(Vec::as_slice),
+        }
+    }
+
+    pub fn push(
+        &mut self,
+        type_name: Option<String>,
+        member_name: String,
+        directive: BlanketDirective,
+    ) {
+        let entry = match type_name {
+            None => self.symbols.entry(member_name).or_default(),
+            Some(type_name) => self
+                .methods
+                .entry(type_name)
+                .or_default()
+                .entry(member_name)
+                .or_default(),
+        };
+
+        entry.push(directive);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BlanketDirective> {
+        self.symbols
+            .values()
+            .flatten()
+            .chain(self.methods.values().flat_map(HashMap::values).flatten())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct BlanketDirective {
@@ -167,11 +212,16 @@ pub(crate) enum BlanketDirectiveKind {
 
 /// Fully-qualified target of a blanket directive.
 ///
-/// A target is primarily identified by a function path, which is composed of a
-/// a fully qualified Go package path ([`Self::package_path`]) as well as the
-/// name of the function in question ([`Self::function_name`]). For example,
-/// `(os, Remove)` or `(example.com/company-name/proj/sub-package, funcName)`
-/// are valid function paths for this context.
+/// A target is primarily identified by a member path, which is composed of a
+/// fully qualified Go package path ([`Self::package_path`]), the declared
+/// name of the member ([`Self::member_name`]), as well as an optional receiver
+/// type name ([`Self::type_name`]) if the target is a method. Package-level
+/// symbols have no  defined `type_name` (e.g., `(os, None, Remove)`), while
+/// methods carry the receiver type name (e.g.,
+/// `(database/sql, Some(DB), Query)`).
+///
+/// Note that non-method symbols are not necessarily functions, as they may
+/// refer to variables and constants (in the case of blanket sources).
 ///
 /// In addition, targets may be optionally narrowed down to specific argument
 /// positions via the inclusion of a `#N` suffix (zero-indexed). For instance,
@@ -181,21 +231,43 @@ pub(crate) enum BlanketDirectiveKind {
 ///
 /// # Parsing and Deserializing
 ///
-/// Often, it is simplest to specify a target as a well-formed [`String`]
-/// composed of the package path, followed by a `.` and then the function name.
+/// Often, it is simplest to specify a target as a well-formed [`String`]. Two
+/// syntactic forms are supported:
+///
+/// - `pkg/path.Func`: a package-level symbol (usually a function); or
+/// - `pkg/path.Type.Method`: a method associated to a named receiver type
+///   declared in the specified package.
+///
+/// Whether a target is a symbol or a method is disambiguated purely by the
+/// number of `.`-separated identifiers following the last `/` of the package
+/// path. Two identifiers means `pkg.Func`; three identifiers means
+/// `pkg.Type.Method`. This is unambiguous because Go module paths only carry
+/// `.`s within slash-separated segments (e.g., `example.com/...`), so the
+/// portion after the final `/` cleanly delimits `pkg[.Type].Member`. Standard
+/// library paths without slashes (e.g., `os`, `net/http`) work analogously.
+///
 /// Optionally, a `#N` suffix (zero-indexed) may be included to also specify an
-/// `arg_index`. This struct implements [`FromStr`] following this
-/// specification, and if the `toml-config` Cargo feature is enabled then it is
-/// used to support automatically deserializing a structured target from a
-/// provided string via `serde`. For example, the string
-/// `example.com/company-name/proj/sub-package.funcName#3` corresponds to a
-/// target with defined `package_name`, `function_name`, and `arg_index`.
+/// `arg_index`. For example, the string `database/sql.DB.Query#0` corresponds
+/// to a target with defined `package_path`, `type_name`, `member_name`, and
+/// `arg_index`.
+///
+/// This struct implements [`FromStr`] following this specification, and (if the
+/// `toml-config` Cargo feature is enabled) it is used to support automatically
+/// deserializing a structured target from a provided string via `serde`.
+///
+/// Method receivers are matched irrespective of pointer versus value receiver:
+/// `pkg.T.M` applies whether the declared receiver is `T` or `*T`, per Go's
+/// method-set semantics. As such, no `*` should be included in `type_name`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlanketDirectiveTarget {
     /// Fully-qualified package path.
     pub package_path: FullPackagePath,
-    /// Declared name of the function in question.
-    pub function_name: String,
+    /// Declared name of the receiver type, when the target is a method.
+    ///
+    /// If `None`, the target is a package-level symbol rather than a method.
+    pub type_name: Option<String>,
+    /// Declared name of the member (symbol or method) in question.
+    pub member_name: String,
     /// Zero-based argument index that this directive applies to, if any.
     ///
     /// If `None`, no restriction is imposed.
@@ -203,37 +275,24 @@ pub struct BlanketDirectiveTarget {
 }
 
 impl BlanketDirectiveTarget {
-    /// Creates a target for every argument of the given function.
+    /// Constructs a new target.
     ///
     /// In most cases, it is more convenient to use the existing [`FromStr`]
     /// implementation instead of invoking this method directly (or, if the
     /// `toml-config` Cargo feature is enabled, automatically deserializing
     /// from a string via `serde`).
     #[inline]
-    pub fn new(package_path: impl Into<FullPackagePath>, function_name: impl Into<String>) -> Self {
-        Self {
-            package_path: package_path.into(),
-            function_name: function_name.into(),
-            arg_index: None,
-        }
-    }
-
-    /// Creates a target for a specific argument of the given function.
-    ///
-    /// In most cases, it is more convenient to use the existing [`FromStr`]
-    /// implementation instead of invoking this method directly (or, if the
-    /// `toml-config` Cargo feature is enabled, automatically deserializing
-    /// from a string via `serde`).
-    #[inline]
-    pub fn new_with_arg_index(
+    pub fn new(
         package_path: impl Into<FullPackagePath>,
-        function_name: impl Into<String>,
-        arg_index: usize,
+        type_name: Option<impl Into<String>>,
+        member_name: impl Into<String>,
+        arg_index: Option<usize>,
     ) -> Self {
         Self {
             package_path: package_path.into(),
-            function_name: function_name.into(),
-            arg_index: Some(arg_index),
+            type_name: type_name.map(Into::into),
+            member_name: member_name.into(),
+            arg_index,
         }
     }
 }
@@ -241,7 +300,13 @@ impl BlanketDirectiveTarget {
 impl fmt::Display for BlanketDirectiveTarget {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.package_path, self.function_name)?;
+        write!(f, "{}.", self.package_path)?;
+
+        if let Some(type_name) = &self.type_name {
+            write!(f, "{type_name}.")?;
+        }
+
+        write!(f, "{}", self.member_name)?;
 
         if let Some(index) = self.arg_index {
             write!(f, "#{index}")?;
@@ -266,25 +331,53 @@ impl FromStr for BlanketDirectiveTarget {
             (s, None)
         };
 
-        // we need to rsplit instead of split because the package path may
-        // contain `.`s (e.g., in `example.com`), so we cannot confuse that with
-        // a separator if there is an actual separator later on
-        let Some((package_path, function_name)) = path.rsplit_once('.') else {
-            return Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator);
+        let (before_last_slash, tail) = match path.rsplit_once('/') {
+            Some((prefix, tail)) => (Some(prefix), tail),
+            None => (None, path),
         };
 
-        if package_path.is_empty() {
+        let mut tail_segments = tail.split('.');
+        // safe: split always yields at least one element
+        let subpackage = tail_segments.next().unwrap();
+        let mid_segment = tail_segments.next();
+        let last_segment = tail_segments.next();
+
+        if tail_segments.next().is_some() {
+            // more than 3 dot-separated identifiers in the last path segment
+            return Err(BlanketDirectiveTargetParseError::TooManyMemberSegments);
+        }
+
+        let (type_name, member_name) = match (mid_segment, last_segment) {
+            (Some(member_name), None) => (None, member_name),
+            (Some(type_name), Some(method_name)) => (Some(type_name), method_name),
+            (None, _) => {
+                // no `.` at all after the last `/`
+                return Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator);
+            }
+        };
+
+        if before_last_slash.is_some_and(str::is_empty) || subpackage.is_empty() {
             return Err(BlanketDirectiveTargetParseError::EmptyPackagePath);
         }
 
-        if function_name.is_empty() {
-            return Err(BlanketDirectiveTargetParseError::EmptyFunctionName);
+        if member_name.is_empty() {
+            return Err(BlanketDirectiveTargetParseError::EmptyMemberName);
         }
 
-        let target = if let Some(arg_index) = arg_index {
-            Self::new_with_arg_index(package_path, function_name, arg_index)
-        } else {
-            Self::new(package_path, function_name)
+        if type_name.is_some_and(str::is_empty) {
+            return Err(BlanketDirectiveTargetParseError::EmptyTypeName);
+        }
+
+        let package_path = match before_last_slash {
+            Some(prefix) => format!("{prefix}/{subpackage}"),
+            None => subpackage.to_owned(),
+        };
+
+        let target = Self {
+            package_path,
+            type_name: type_name.map(str::to_owned),
+            member_name: member_name.to_owned(),
+            arg_index,
         };
 
         Ok(target)
@@ -306,12 +399,16 @@ impl<'de> serde::Deserialize<'de> for BlanketDirectiveTarget {
 /// Represents a failure to parse a string into a [`BlanketDirectiveTarget`].
 #[derive(Debug)]
 pub enum BlanketDirectiveTargetParseError {
-    /// No `.` was located separating the package path from the function name.
+    /// No `.` was located separating the package path from the member name.
     NoPackageFunctionSeparator,
+    /// More than 3 `.`-separated identifiers was found after the final `/`.
+    TooManyMemberSegments,
     /// The provided package path is empty.
     EmptyPackagePath,
-    /// The provided function name is empty.
-    EmptyFunctionName,
+    /// The receiver type name is empty.
+    EmptyTypeName,
+    /// The provided member name is empty.
+    EmptyMemberName,
     /// The argument-index portion (after the `#`) is not a valid `usize`.
     InvalidArgIndex(ParseIntError),
 }
@@ -323,12 +420,15 @@ impl fmt::Display for BlanketDirectiveTargetParseError {
             Self::NoPackageFunctionSeparator => {
                 f.write_str("blanket directive target has no `.` separator")
             }
+            Self::TooManyMemberSegments => f.write_str(
+                "blanket directive target has too many `.`-separated identifiers (expected \
+                 `pkg.Func` or `pkg.Type.Method`)",
+            ),
             Self::EmptyPackagePath => {
                 f.write_str("blanket directive target has empty package path")
             }
-            Self::EmptyFunctionName => {
-                f.write_str("blanket directive target has empty function name")
-            }
+            Self::EmptyTypeName => f.write_str("blanket directive target has empty type name"),
+            Self::EmptyMemberName => f.write_str("blanket directive target has empty member name"),
             Self::InvalidArgIndex(err) => {
                 write!(
                     f,
@@ -343,9 +443,11 @@ impl error::Error for BlanketDirectiveTargetParseError {
     #[inline]
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            Self::NoPackageFunctionSeparator | Self::EmptyPackagePath | Self::EmptyFunctionName => {
-                None
-            }
+            Self::NoPackageFunctionSeparator
+            | Self::TooManyMemberSegments
+            | Self::EmptyPackagePath
+            | Self::EmptyTypeName
+            | Self::EmptyMemberName => None,
             Self::InvalidArgIndex(inner) => Some(inner),
         }
     }
@@ -358,7 +460,10 @@ mod target_tests {
     #[test]
     fn parses_bare_function_path() {
         let target: BlanketDirectiveTarget = "os.Remove".parse().unwrap();
-        assert_eq!(target, BlanketDirectiveTarget::new("os", "Remove"));
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new("os", None::<String>, "Remove", None)
+        );
     }
 
     #[test]
@@ -366,7 +471,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.WriteFile#1".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new_with_arg_index("os", "WriteFile", 1)
+            BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1))
         );
     }
 
@@ -375,16 +480,77 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "example.com/a/b/pkg.Fn#0".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new_with_arg_index("example.com/a/b/pkg", "Fn", 0)
+            BlanketDirectiveTarget::new("example.com/a/b/pkg", None::<String>, "Fn", Some(0))
+        );
+    }
+
+    #[test]
+    fn parses_stdlib_method_path() {
+        let target: BlanketDirectiveTarget = "database/sql.DB.Query".parse().unwrap();
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", None)
+        );
+    }
+
+    #[test]
+    fn parses_stdlib_method_path_with_arg_index() {
+        let target: BlanketDirectiveTarget = "database/sql.DB.Query#0".parse().unwrap();
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", Some(0))
+        );
+    }
+
+    #[test]
+    fn parses_bare_stdlib_method_path() {
+        // no `/` in the package path: `pkg.Type.Method`
+        let target: BlanketDirectiveTarget = "os.File.Read".parse().unwrap();
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new("os", Some("File"), "Read", None)
+        );
+    }
+
+    #[test]
+    fn parses_qualified_method_path() {
+        let target: BlanketDirectiveTarget =
+            "github.com/gin-gonic/gin.Context.Query".parse().unwrap();
+        assert_eq!(
+            target,
+            BlanketDirectiveTarget::new("github.com/gin-gonic/gin", Some("Context"), "Query", None)
         );
     }
 
     #[test]
     fn round_trips_through_display() {
-        for input in ["os.Remove", "os.WriteFile#1", "example.com/a/b/pkg.Fn#0"] {
+        for input in [
+            "os.Remove",
+            "os.WriteFile#1",
+            "example.com/a/b/pkg.Fn#0",
+            "database/sql.DB.Query",
+            "database/sql.DB.QueryContext#1",
+            "github.com/gin-gonic/gin.Context.Query",
+        ] {
             let target: BlanketDirectiveTarget = input.parse().unwrap();
             assert_eq!(target.to_string(), input);
         }
+    }
+
+    #[test]
+    fn rejects_too_many_member_segments() {
+        assert!(matches!(
+            "pkg.A.B.C".parse::<BlanketDirectiveTarget>(),
+            Err(BlanketDirectiveTargetParseError::TooManyMemberSegments)
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_type_name() {
+        assert!(matches!(
+            "pkg..Method".parse::<BlanketDirectiveTarget>(),
+            Err(BlanketDirectiveTargetParseError::EmptyTypeName)
+        ));
     }
 
     #[test]
@@ -404,10 +570,10 @@ mod target_tests {
     }
 
     #[test]
-    fn rejects_empty_func_name() {
+    fn rejects_empty_member_name() {
         assert!(matches!(
             "pkg.#0".parse::<BlanketDirectiveTarget>(),
-            Err(BlanketDirectiveTargetParseError::EmptyFunctionName)
+            Err(BlanketDirectiveTargetParseError::EmptyMemberName)
         ));
     }
 

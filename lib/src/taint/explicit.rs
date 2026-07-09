@@ -55,10 +55,13 @@ fn visit_binding_decl_spec<'a>(
     annotation: Option<&Annotation<'a>>,
     prev_with_exprs: Option<&BindingDeclSpecNode<'a>>,
 ) {
-    let declared_type = node
-        .r#type
-        .as_ref()
-        .and_then(|r#type| ctx.types().resolve(ctx.symtab(), r#type));
+    let declared_type = if let Some(r#type) = &node.r#type {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, r#type)
+    } else {
+        None
+    };
 
     if node.exprs.is_empty() && node.r#type.is_some() && !short {
         // no initialization expression; zero-value is used;

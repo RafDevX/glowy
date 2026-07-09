@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use parser::{
     Location,
     ast::{ExprNode, IndexingNode, SelectionNode, SlicingNode},
@@ -6,9 +8,10 @@ use parser::{
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::LabelBacktraceKind,
+    labels::{LabelBacktrace, LabelBacktraceKind},
+    policy::{BlanketDirective, BlanketDirectiveKind},
     taint::funcs,
-    types::TypeKind,
+    types::{TypeInfo, TypeKind},
     values::{
         ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
         ValueRef,
@@ -53,7 +56,7 @@ pub fn visit_selection_with_base<'a>(
         // note we only call `as_struct` after we know this is actually supposed
         // to be a struct, as otherwise an unwanted upgrade would trigger
 
-        if let TypeKind::Struct { fields } = r#type.underlying()
+        if let Some(TypeKind::Struct { fields }) = r#type.underlying()
             && let Some(field) = fields.get(selector)
             && let Some(r#struct) = base.as_struct()
         {
@@ -81,11 +84,22 @@ pub fn visit_selection_with_base<'a>(
 
     // ----------
 
-    // Strategy C - Attempted Upgrade: assume that this is a field access on a
-    // struct, and so try to access/upgrade the base into one so that we can
-    // treat this as a constant field access
+    // Strategy C - Attempted Upgrade: if we have no information demonstrating
+    // otherwise, assume that this is a field access on a struct, and so try to
+    // access/upgrade the base into one so that we can treat this as a constant
+    // field access
 
-    if let Some(r#struct) = base.as_struct() {
+    let struct_shape_plausible = base
+        .declared_type()
+        .map(AsRef::as_ref)
+        .map(TypeInfo::strip_pointers)
+        .and_then(TypeInfo::underlying)
+        .is_none_or(|kind| matches!(kind, TypeKind::Struct { .. }));
+    // ^^^ we treat this as plausibly a struct when the base's shape is
+    // unknown to us (no declared type, or an external placeholder), and also
+    // when we do know it's a struct; otherwise upgrading would be known wrong
+
+    if struct_shape_plausible && let Some(r#struct) = base.as_struct() {
         return r#struct.get_const(&selector.to_owned(), location);
     }
 
@@ -95,19 +109,79 @@ pub fn visit_selection_with_base<'a>(
     // names a method (i.e., if the selector is the name of at least one method
     // we are aware of, anywhere), assume this selection is method-related
     // (especially since `as_struct` above failed) and just return a blackbox
-    // method value
+    // method value. Note that while this strategy might assume something is a
+    // method just based on low probative value sometimes, it is important to
+    // keep in mind that there is no other solution, as if this strategy fails
+    // the only alternative is to report an error and void the analysis results
 
-    // note that this check would, own its own, have very low probative value of
-    // this actually being method-related, but `visit_selection` by definition
-    // only applies for syntactic selections (which can only be field accesses
-    // or method accesses), all strategies above failed, and especially it was
-    // deemed impossible to upgrade the base to support field accesses, so this
-    // is our last resort to make some sense of the selection before just giving
-    // up and reporting an error, meaning that the bar is very low and there are
-    // very few possible situations for being in this narrow possibility space
+    // Criterion D.1: this is a plausible method if there's a registered blanket
+    // directive for it in the base's known type (we'll always want to apply it)
+    let blanket_directives = if let Some(r#type) = base.declared_type() {
+        let directives = ctx.blanket_directives_for(
+            r#type.package(), // methods only exist in their type's package
+            Some(r#type.name()),
+            selector,
+        );
 
-    if ctx.types().any_method_named(selector) {
-        let blackbox = FunctionValue::new_unknown(base.backtrace(), true);
+        if directives.is_empty() {
+            None
+        } else {
+            Some(directives)
+        }
+    } else {
+        None
+    };
+
+    // Criterion D.2: this is a plausible method if we have analyzed the source
+    // code of a method somewhere with this name, on any type (we short-circuit
+    // if D.1 was successful, to avoid the lookup when unnecessary)
+    let any_method_named = blanket_directives.is_none() && ctx.types().any_method_named(selector);
+
+    // Criterion D.3: this is a plausible method if the base's declared type
+    // is an external placeholder (declaration never visited, so this is likely
+    // a foreign package); we cannot possibly know its method set, so `selector`
+    // might plausibly be one of them. we short-circuit if D.1 or D.2 were
+    // already successful to avoid the lookup when unnecessary
+    let base_is_external_opaque = !any_method_named
+        && base
+            .declared_type()
+            .map(AsRef::as_ref)
+            .map(TypeInfo::strip_pointers)
+            .is_some_and(TypeInfo::is_external);
+
+    // Final D.X aggregate condition
+    if blanket_directives.is_some() || any_method_named || base_is_external_opaque {
+        let blackbox_backtrace = if let Some(directives) = blanket_directives {
+            let blanket_label = directives
+                .iter()
+                .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
+                .map(BlanketDirective::label)
+                .sum();
+
+            let blanket_root = LabelBacktrace::new_root(
+                LabelBacktraceKind::BlanketSource,
+                blanket_label,
+                None,
+                location.clone(),
+            );
+
+            LabelBacktrace::combine_options(
+                base.backtrace(),
+                blanket_root,
+                LabelBacktraceKind::Expression,
+                Cow::Borrowed(&location),
+            )
+        } else {
+            // nothing to combine, it's really just this
+
+            base.backtrace()
+        };
+
+        let mut blackbox = FunctionValue::new_unknown(blackbox_backtrace, true);
+
+        if let Some(directives) = blanket_directives {
+            blackbox.absorb_blanket_sinks(directives);
+        }
 
         return ValueRef::new(Value::Function(Box::new(blackbox)), location, None);
     }
@@ -252,7 +326,7 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
     // (untyped) so we can only propagate when base is itself a slice
     let declared_type = base
         .declared_type()
-        .filter(|t| matches!(t.underlying(), TypeKind::Slice))
+        .filter(|r#type| matches!(r#type.underlying(), Some(TypeKind::Slice)))
         .cloned();
 
     ValueRef::from_backtrace_or_bottom_at(result, || location)

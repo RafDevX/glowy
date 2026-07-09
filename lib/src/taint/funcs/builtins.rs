@@ -35,7 +35,11 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
 
     // result's declared type is the user-written type (a named alias preserves
     // its identity even though we dispatch on its underlying shape below)
-    let declared_type = ctx.types().resolve(ctx.symtab(), &node.r#type);
+    let declared_type = {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, &node.r#type)
+    };
 
     #[expect(
         clippy::wildcard_enum_match_arm,

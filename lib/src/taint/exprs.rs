@@ -228,7 +228,8 @@ fn synthesize_fake_symbol_with_blanket_sinks<'a>(
         .symtab()
         .package_path_for_qualifier(qualifier.content())?;
 
-    let directives = ctx.blanket_directives_for(package_path, name.content());
+    // we pass type_name = None because this could never be a method access
+    let directives = ctx.blanket_directives_for(package_path, None, name.content());
 
     // don't want to upgrade to a FunctionValue for no reason, source directives
     // allow non-functions (e.g., `os.Args` or `os.Stdin`)
@@ -272,21 +273,22 @@ fn build_blanket_source_backtrace<'a>(
         ctx.symtab().current_package_path()?
     };
 
-    let source_label: Label<'_> = ctx
-        .blanket_directives_for(package_path, name.content())
+    // we pass type_name = None because this could never be a method access
+    let blanket_label: Label<'_> = ctx
+        .blanket_directives_for(package_path, None, name.content())
         .iter()
         .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
         .map(BlanketDirective::label)
         .sum();
 
-    if source_label.is_bottom() {
+    if blanket_label.is_bottom() {
         // prevent location cloning below
         return None;
     }
 
     LabelBacktrace::new_root(
         LabelBacktraceKind::BlanketSource,
-        source_label,
+        blanket_label,
         None,
         at_location.clone(),
     )
@@ -296,8 +298,13 @@ fn visit_type_assertion<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &TypeAssertionNode<'a>,
 ) -> ValueRef<'a> {
-    let value = visit_single_expr(ctx, &node.expr)
-        .into_with_declared_type(ctx.types().resolve(ctx.symtab(), &node.r#type));
+    let declared_type = {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, &node.r#type)
+    };
+
+    let value = visit_single_expr(ctx, &node.expr).into_with_declared_type(declared_type);
 
     let location = ctx.pin(node.location.clone());
 
@@ -316,11 +323,15 @@ fn visit_ambiguous_bracket_access<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &AmbiguousBracketAccessNode<'a>,
 ) -> ValueRef<'a> {
-    if ctx
-        .types()
-        .resolve(ctx.symtab(), &node.type_arg_if_instantiation)
-        .is_some()
-    {
+    let is_type_known = {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types
+            .resolve(symtab, &node.type_arg_if_instantiation)
+            .is_some()
+    };
+
+    if is_type_known {
         // if the type is known here, it's a type instantiation
         return visit_single_expr(ctx, &TypeInstantiationNode::from(node.clone()).into());
     }

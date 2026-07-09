@@ -632,7 +632,7 @@ impl FieldShapeHint {
     fn for_field(target: Option<&TypeInfo<'_>>, field_name: &str) -> Option<Self> {
         let target = target?.strip_pointers();
 
-        let TypeKind::Struct { fields } = target.underlying() else {
+        let Some(TypeKind::Struct { fields }) = target.underlying() else {
             // we only support providing hints for structs
             return None;
         };
@@ -650,11 +650,9 @@ impl FieldShapeHint {
     }
 
     fn from_type_info(info: &TypeInfo<'_>) -> Option<Self> {
-        let kind = info.strip_pointers().underlying();
-
         // Map/Function upgrades need `&mut ValueRef` which the mutator
-        // doesn't hold; Opaque/Interface don't map to an aggregate shape.
-        match kind {
+        // doesn't hold; Opaque/Interface don't map to an aggregate shape
+        match info.strip_pointers().underlying()? {
             TypeKind::Channel => Some(Self::Channel),
             TypeKind::Array => Some(Self::Array),
             TypeKind::Slice => Some(Self::Slice),

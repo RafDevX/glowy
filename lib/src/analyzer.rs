@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap, HashSet, hash_map::Entry},
+    collections::{BTreeMap, HashMap, HashSet},
     env, fs,
     io::{self, BufRead},
     path,
@@ -20,7 +20,10 @@ use crate::{
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, OwnedLabel, OwnedLabelCow},
-    policy::{BlanketDirective, BlanketDirectiveKind, BlanketDirectiveTarget, BlanketDirectives},
+    policy::{
+        BlanketDirective, BlanketDirectiveKind, BlanketDirectiveTarget, BlanketDirectives,
+        PackageBlanketDirectives,
+    },
     taint,
 };
 
@@ -501,37 +504,34 @@ impl Analyzer {
     ) {
         let BlanketDirectiveTarget {
             package_path,
-            function_name,
+            type_name,
+            member_name,
             arg_index,
         } = target;
 
         let directive = BlanketDirective::new(kind, arg_index, label);
 
-        match self
-            .blanket_directives
+        self.blanket_directives
             .entry(package_path)
             .or_default()
-            .entry(function_name)
-        {
-            Entry::Occupied(mut occupied) => occupied.get_mut().push(directive),
-            Entry::Vacant(vacant) => {
-                vacant.insert(vec![directive]);
-            }
-        }
+            .push(type_name, member_name, directive);
     }
 
-    /// Universally registers a function as an information source.
+    /// Universally registers a symbol or a method as an information source.
     ///
     /// This instructs the analyzer to always consider all calls to the given
-    /// function as yielding the provided [`Label`], in addition to what is
-    /// already otherwise derived from the function.
+    /// function or method as yielding the provided [`Label`], in addition to
+    /// what is already otherwise derived from the function. If the specified
+    /// symbol is not a function nor a method (i.e., if it is a variable or a
+    /// constant), all accesses to it will analogously yield the provided
+    /// [`Label`].
     ///
     /// The package path (`package_path`) is expected to be a well-formed,
-    /// fully qualified Go package path of where the function is accessed,
-    /// and `function_name` its declared function name.
+    /// fully qualified Go package path of where the member is accessible,
+    /// and `member_name` its declared symbol or method name.
     ///
     /// Each invocation to this function extends the blanket directives
-    /// associated with the function path, meaning that previous versions are
+    /// associated with the member path, meaning that previous versions are
     /// not overwritten. For sources, labels accumulate (union), so two source
     /// registrations for `{a}` and `{b}` are effectively equivalent to one
     /// registration for `{a, b}`.
@@ -545,6 +545,7 @@ impl Analyzer {
     ///
     /// analyzer.add_blanket_source(
     ///     "example.com/company-name/proj/sub",
+    ///     None::<String>,
     ///     "SomeFunc",
     ///     &Label::from_tags(&["secret"]),
     /// );
@@ -553,13 +554,15 @@ impl Analyzer {
     pub fn add_blanket_source<'f>(
         &mut self,
         package_path: impl Into<Cow<'f, str>>,
-        function_name: impl Into<Cow<'f, str>>,
+        type_name: Option<impl Into<Cow<'f, str>>>,
+        member_name: impl Into<Cow<'f, str>>,
         label: &Label<'_>,
     ) {
-        // argument-targeting does not apply for sources
         let target = BlanketDirectiveTarget::new(
-            package_path.into().into_owned(),
-            function_name.into().into_owned(),
+            package_path.into(),
+            type_name.map(Into::into),
+            member_name.into(),
+            None, // argument targeting is meaningless for sources
         );
 
         self.add_blanket_directive(BlanketDirectiveKind::Source, target, label);
@@ -572,9 +575,9 @@ impl Analyzer {
     /// if `allow` is `true`) or as never accepting any overlap with the
     /// provided [`Label`] (for integrity, if `allow` is `false`).
     ///
-    /// The `target` argument identifies which function (and, optionally, which
-    /// specific argument position) this sink applies to. It can be constructed
-    /// manually or derived from a [`String`].
+    /// The `target` argument identifies which symbol or method (and,
+    /// optionally, which specific function/method argument position) this sink
+    /// applies to. It can be constructed manually or derived from a [`String`].
     ///
     /// Each invocation to this function extends the blanket directives
     /// associated with the target, meaning that previous versions are not
@@ -591,14 +594,19 @@ impl Analyzer {
     ///
     /// // applies to every argument passed to `SomeFunc`
     /// analyzer.add_blanket_sink(
-    ///     BlanketDirectiveTarget::new("example.com/company-name/proj/sub", "SomeFunc"),
+    ///     BlanketDirectiveTarget::new(
+    ///         "example.com/company-name/proj/sub",
+    ///         None::<String>,
+    ///         "SomeFunc",
+    ///         None,
+    ///     ),
     ///     false,
     ///     &Label::from_tags(&["untrusted"]),
     /// );
     ///
     /// // applies only to the second argument of `WriteFile`
     /// analyzer.add_blanket_sink(
-    ///     BlanketDirectiveTarget::new_with_arg_index("os", "WriteFile", 1),
+    ///     BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1)),
     ///     false,
     ///     &Label::from_tags(&["untrusted"]),
     /// );
@@ -622,8 +630,7 @@ impl Analyzer {
     fn has_blanket_enforcement_checks(&self) -> bool {
         self.blanket_directives
             .values()
-            .flat_map(HashMap::values)
-            .flatten()
+            .flat_map(PackageBlanketDirectives::iter)
             .map(BlanketDirective::kind)
             .any(|kind| {
                 matches!(

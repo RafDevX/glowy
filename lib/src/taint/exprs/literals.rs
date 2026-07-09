@@ -84,7 +84,13 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
                 location.clone(),
             ));
 
-            ValueRef::new(value, location, ctx.types().resolve(ctx.symtab(), r#type))
+            let declared_type = {
+                let (types, symtab) = ctx.types_mut_with_symtab();
+
+                types.resolve(symtab, r#type)
+            };
+
+            ValueRef::new(value, location, declared_type)
         }
         LiteralNode::UnknownComposite {
             r#type,
@@ -136,7 +142,13 @@ fn visit_unknown_composite_literal<'a>(
         }
     };
 
-    ValueRef::new(value, location, ctx.types().resolve(ctx.symtab(), r#type))
+    let declared_type = {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, r#type)
+    };
+
+    ValueRef::new(value, location, declared_type)
 }
 
 // mirrors parser logic

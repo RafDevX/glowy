@@ -16,7 +16,7 @@
 //! [`Rc::ptr_eq`]).
 
 use std::{
-    cell::RefCell,
+    cell::{OnceCell, RefCell},
     collections::{HashMap, HashSet},
     fmt, iter, mem, ops,
     rc::Rc,
@@ -38,10 +38,38 @@ use crate::{
 ///
 /// Aliases (`type T = X`) do not allocate a separate [`TypeInfo`]: the alias
 /// name maps to the same [`Rc`] as its target, matching Go's spec semantics.
+///
+/// A [`TypeInfo`] can be in one of two lifecycle states:
+/// - External Placeholder: an entry interned when analyzed code refers to some
+///   `pkg.T` before (or without ever) visiting the declaration of `T`,
+///   typically because `pkg` is a package that has not been analyzed (either
+///   because we have not gotten to it yet, or more commonly because it
+///   represents an external dependency). In this state [`Self::underlying`]
+///   returns [`None`] and the method set is empty. The purpose is to give a
+///   foreign type a stable identity so downstream dispatch (blanket directives,
+///   `Rc::ptr_eq` comparisons) has something to hold on to.
+/// - Known: the type declaration has been visited and the structure recorded.
+///   [`Self::underlying`] returns [`Some`].
+///
+/// Note this means that a [`None`] underlying has different semantics to a
+/// [`Some`] holding [`TypeKind::Opaque`], as the first case means we know
+/// nothing about the type (we have never seen its declaration, so it might
+/// refer to some foreign type), while the latter case means we did see its
+/// declaration and know that it is part of a chain (`type Wrapper SomeType`).
+///
+/// A placeholder can be promoted to Known in place: [`Self::underlying`] is
+/// backed by a [`OnceCell`], so filling it does not require reallocating the
+/// [`Rc`], and every prior holder immediately observes the refined structure.
+/// The transition is monotonic (Known cannot revert to placeholder), which
+/// matches Go's rule that each package declares a given type at most once.
 pub struct TypeInfo<'a> {
     package: FullPackagePath,
     name: &'a str,
-    underlying: TypeKind<'a>,
+    // OnceCell is empty for external placeholders, populated for known types.
+    // We rely on OnceCell's write-once semantics to preserve soundness: even
+    // if `declare` is invoked twice for the same (package, name) (which Go
+    // rejects but we don't panic on), the second attempt is silently dropped.
+    underlying: OnceCell<TypeKind<'a>>,
     // note that this is just an alternative index to what is already stored in
     // the respective package envelope, so both SymbolRefs point to the exact
     // same Symbol (these are merely two alternative lookup strategies)
@@ -49,11 +77,20 @@ pub struct TypeInfo<'a> {
 }
 
 impl<'a> TypeInfo<'a> {
-    fn new(package: FullPackagePath, name: &'a str, underlying: TypeKind<'a>) -> Self {
+    fn new_known(package: FullPackagePath, name: &'a str, underlying: TypeKind<'a>) -> Self {
         Self {
             package,
             name,
-            underlying,
+            underlying: OnceCell::from(underlying),
+            methods: RefCell::new(HashMap::new()),
+        }
+    }
+
+    fn new_placeholder(package: FullPackagePath, name: &'a str) -> Self {
+        Self {
+            package,
+            name,
+            underlying: OnceCell::new(),
             methods: RefCell::new(HashMap::new()),
         }
     }
@@ -66,12 +103,22 @@ impl<'a> TypeInfo<'a> {
         self.name
     }
 
-    pub fn underlying(&self) -> &TypeKind<'a> {
-        &self.underlying
+    pub fn underlying(&self) -> Option<&TypeKind<'a>> {
+        self.underlying.get()
+    }
+
+    pub fn is_external(&self) -> bool {
+        self.underlying().is_none()
+    }
+
+    fn promote(&self, underlying: TypeKind<'a>) {
+        // we ignore the Result because this set would only fail if there was a
+        // duplicate type declaration, but we assume the input program compiles
+        let _ = self.underlying.set(underlying);
     }
 
     pub fn strip_pointers(&self) -> &Self {
-        if let TypeKind::Pointer(inner) = self.underlying() {
+        if let Some(TypeKind::Pointer(inner)) = self.underlying() {
             inner.strip_pointers()
         } else {
             self
@@ -117,7 +164,7 @@ impl<'a> TypeInfo<'a> {
         // embedded interfaces are skipped: their methods are resolved by
         // dynamic dispatch, which we don't model
 
-        let TypeKind::Struct { fields } = self.underlying() else {
+        let Some(TypeKind::Struct { fields }) = self.underlying() else {
             return PromotionFrontier::None;
         };
 
@@ -139,7 +186,7 @@ impl<'a> TypeInfo<'a> {
                 continue;
             };
 
-            if matches!(field_type.underlying(), TypeKind::Interface) {
+            if matches!(field_type.underlying(), Some(TypeKind::Interface)) {
                 // skip embedded interfaces (unsupported)
                 continue;
             }
@@ -204,7 +251,7 @@ impl fmt::Debug for TypeInfo<'_> {
         f.debug_struct("TypeInfo")
             .field("package", package)
             .field("name", name)
-            .field("underlying", underlying)
+            .field("underlying", &underlying.get())
             // intentionally omitting `methods` to avoid borrowing the RefCell,
             // since callers might already hold a borrow
             .finish_non_exhaustive()
@@ -345,15 +392,17 @@ impl<'a> TypeRegistry<'a> {
         name: &'a str,
         underlying: &TypeNode<'a>,
     ) -> Rc<TypeInfo<'a>> {
-        let underlying = self.build_kind(symtab, underlying);
+        let underlying_kind = self.build_kind(symtab, underlying);
 
         let inner = self.types.entry(package.clone()).or_default();
 
         if let Some(existing) = inner.get(name) {
+            existing.promote(underlying_kind); // in case this was a placeholder
+
             return Rc::clone(existing);
         }
 
-        let info = Rc::new(TypeInfo::new(package, name, underlying));
+        let info = Rc::new(TypeInfo::new_known(package, name, underlying_kind));
 
         inner.insert(name, Rc::clone(&info));
 
@@ -388,8 +437,23 @@ impl<'a> TypeRegistry<'a> {
             .map(Rc::clone)
     }
 
+    fn intern_placeholder(&mut self, package: FullPackagePath, name: &'a str) -> Rc<TypeInfo<'a>> {
+        let inner = self.types.entry(package.clone()).or_default();
+
+        if let Some(existing) = inner.get(name) {
+            return Rc::clone(existing);
+        }
+
+        let info = Rc::new(TypeInfo::new_placeholder(package, name));
+
+        inner.insert(name, Rc::clone(&info));
+
+        info
+    }
+
+    // must be mut to allow interning a placeholder if unknown external type
     pub fn resolve_name(
-        &self,
+        &mut self,
         symtab: &SymbolTable<'a>,
         node: &TypeNameNode<'a>,
     ) -> Option<Rc<TypeInfo<'a>>> {
@@ -401,19 +465,33 @@ impl<'a> TypeRegistry<'a> {
         )
     }
 
+    // must be mut to allow interning a placeholder if unknown external type
     fn resolve_name_with(
-        &self,
+        &mut self,
         current_package: Option<&FullPackagePath>,
         named_imports: &HashMap<String, FullPackagePath>,
         wildcard_imports: &[FullPackagePath],
         node: &TypeNameNode<'a>,
     ) -> Option<Rc<TypeInfo<'a>>> {
         if let Some(qualifier) = node.package {
-            // qualified name: just do lookup directly
-
+            // qualified name: if we've never seen this type, fall through to
+            // an external placeholder so it gets a stable identity for
+            // downstream dispatch; a later `declare` for the same
+            // (package, name) will promote this entry in place
             let path = named_imports.get(qualifier.content())?;
 
-            return self.lookup(path, node.id.content());
+            return if let Some(existing) = self.lookup(path, node.id.content()) {
+                Some(existing)
+            } else {
+                // lookup failed, so this is some unknown external type. we
+                // don't want to return None because we still want foreign types
+                // to have a stable identity, especially to allow blanket
+                // directives to target foreign methods, so we use a placeholder
+                // (and remember it in the registry, hence needing `&mut self`)
+                let placeholder = self.intern_placeholder(path.clone(), node.id.content());
+
+                Some(placeholder)
+            };
         }
 
         // try checking if type exists in the current package
@@ -449,8 +527,9 @@ impl<'a> TypeRegistry<'a> {
         None
     }
 
+    // must be mut to allow interning a placeholder if unknown external type
     pub fn resolve(
-        &self,
+        &mut self,
         symtab: &SymbolTable<'a>,
         node: &TypeNode<'a>,
     ) -> Option<Rc<TypeInfo<'a>>> {
@@ -462,8 +541,9 @@ impl<'a> TypeRegistry<'a> {
         )
     }
 
+    // must be mut to allow interning a placeholder if unknown external type
     fn resolve_with(
-        &self,
+        &mut self,
         current_package: Option<&FullPackagePath>,
         named_imports: &HashMap<String, FullPackagePath>,
         wildcard_imports: &[FullPackagePath],
@@ -488,7 +568,7 @@ impl<'a> TypeRegistry<'a> {
         }
     }
 
-    fn build_kind(&self, symtab: &SymbolTable<'a>, node: &TypeNode<'a>) -> TypeKind<'a> {
+    fn build_kind(&mut self, symtab: &SymbolTable<'a>, node: &TypeNode<'a>) -> TypeKind<'a> {
         match node {
             TypeNode::Name(_) => TypeKind::Opaque,
             TypeNode::Pointer { base } => match self.resolve(symtab, base) {
@@ -508,7 +588,7 @@ impl<'a> TypeRegistry<'a> {
     }
 
     fn build_struct_fields(
-        &self,
+        &mut self,
         symtab: &SymbolTable<'a>,
         fields: &[FieldDeclNode<'a>],
     ) -> IndexMap<&'a str, StructFieldInfo<'a>> {
@@ -605,7 +685,7 @@ impl<'a> TypeRegistry<'a> {
         symtab: &SymbolTable<'a>,
         owner: &Rc<TypeInfo<'a>>,
     ) {
-        let TypeKind::Struct { fields } = owner.underlying() else {
+        let Some(TypeKind::Struct { fields }) = owner.underlying() else {
             return;
         };
 
@@ -691,7 +771,7 @@ impl<'a> TypeRegistry<'a> {
         let pending = mem::take(&mut self.deferred.fields);
 
         for entry in pending {
-            let TypeKind::Struct { fields } = entry.owner.underlying() else {
+            let Some(TypeKind::Struct { fields }) = entry.owner.underlying() else {
                 continue; // supposedly unreachable
             };
 

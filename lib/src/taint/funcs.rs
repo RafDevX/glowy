@@ -11,6 +11,7 @@ use parser::{
 use crate::{
     Pinned,
     context::{AnalysisContext, DeferTarget, DeferredCall},
+    decls,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     policy::{SinkDescriptor, SinkKind},
@@ -47,11 +48,12 @@ fn visit_function_def<'a>(
             .map_or_else(|| crate::FAKE_LOCATION.clone(), Pinned::pinned_location),
     };
 
+    #[rustfmt::skip]
     let func_val = build_function_value(
         ctx,
         r#ref,
         signature,
-        receiver.is_some(),
+        receiver,
         annotation,
         &value_location,
     );
@@ -115,7 +117,11 @@ fn visit_function_def<'a>(
         && let [id] = receiver.ids.as_slice()
         && id.content() != "_"
     {
-        let receiver_type = ctx.types().resolve(ctx.symtab(), &receiver.r#type);
+        let receiver_type = {
+            let (types, symtab) = ctx.types_mut_with_symtab();
+
+            types.resolve(symtab, &receiver.r#type)
+        };
 
         declare_param!(*id, SyntheticSlot::Receiver, receiver_type);
     }
@@ -129,7 +135,9 @@ fn visit_function_def<'a>(
 
             None
         } else {
-            ctx.types().resolve(ctx.symtab(), &param.r#type)
+            let (types, symtab) = ctx.types_mut_with_symtab();
+
+            types.resolve(symtab, &param.r#type)
         };
 
         for &id in &param.ids {
@@ -210,7 +218,7 @@ fn build_function_value<'a>(
     ctx: &mut AnalysisContext<'a>,
     r#ref: &FunctionRef<'a>,
     signature: &FunctionSignatureNode<'a>,
-    has_receiver: bool,
+    receiver: Option<&FunctionParamDeclNode<'a>>,
     annotation: Option<&Annotation<'a>>,
     value_location: &Pinned<'a, Location>,
 ) -> FunctionValue<'a> {
@@ -257,7 +265,7 @@ fn build_function_value<'a>(
     let mut func_val = FunctionValue::new(
         r#ref.clone(),
         Some(signature.clone()),
-        has_receiver,
+        receiver.is_some(),
         explicit_backtrace,
         sanitizer,
     );
@@ -266,7 +274,7 @@ fn build_function_value<'a>(
         func_val.add_sink(sink);
     }
 
-    // fold in any configured blanket directives associated for this function
+    // fold in any configured blanket directives associated with this function
     if let FunctionRef::Named(name) = r#ref
         && let Some(pkg_path) = ctx.symtab().current_package_path()
         && ctx.current_function().is_none()
@@ -276,7 +284,13 @@ fn build_function_value<'a>(
     // which the blanket directives actually apply), given that the parser does
     // not place any type-level restrictions on this spec condition at AST level
     {
-        let directives = ctx.blanket_directives_for(pkg_path, name.content());
+        // in case this is a method
+        let receiver_type_name = receiver.and_then(|receiver| {
+            // extract from TypeNode::Name, if applicable
+            decls::receiver_base_type_name(&receiver.r#type)
+        });
+
+        let directives = ctx.blanket_directives_for(pkg_path, receiver_type_name, name.content());
 
         func_val.absorb_blanket_sinks(directives.iter());
     }
@@ -323,7 +337,11 @@ fn bind_named_result_locals<'a>(ctx: &mut AnalysisContext<'a>, result: &Function
     };
 
     for param in params {
-        let r#type = ctx.types().resolve(ctx.symtab(), &param.r#type);
+        let r#type = {
+            let (types, symtab) = ctx.types_mut_with_symtab();
+
+            types.resolve(symtab, &param.r#type)
+        };
 
         for &id in &param.ids {
             if id.content() == "_" {
@@ -1071,7 +1089,7 @@ fn try_extract_typed_selection_callee<'a>(
 
     // otherwise, check if this selection is really just a field access being
     // called like a method (i.e., `s.F()` where `F` is a `func(...)` field)
-    if matches!(r#type.underlying(), TypeKind::Struct { .. })
+    if matches!(r#type.underlying(), Some(TypeKind::Struct { .. }))
         && let Some(r#struct) = base_value.as_struct()
     {
         return Some(r#struct.get_const(&selector.to_owned(), location()));
@@ -1178,7 +1196,7 @@ fn visit_blackbox_call<'a>(
 }
 
 fn tag_results_with_declared_types<'a>(
-    ctx: &AnalysisContext<'a>,
+    ctx: &mut AnalysisContext<'a>,
     signature: Option<&FunctionSignatureNode<'a>>,
     results: &mut [ValueRef<'a>],
 ) {
@@ -1198,7 +1216,13 @@ fn tag_results_with_declared_types<'a>(
     };
 
     for (result, type_node) in results.iter_mut().zip(type_iter) {
-        if let Some(r#type) = ctx.types().resolve(ctx.symtab(), type_node) {
+        let resolved = {
+            let (types, symtab) = ctx.types_mut_with_symtab();
+
+            types.resolve(symtab, type_node)
+        };
+
+        if let Some(r#type) = resolved {
             result.set_declared_type(r#type);
         }
     }

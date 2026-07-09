@@ -102,10 +102,13 @@ fn visit_binding_decl_spec<'a>(
     node: &BindingDeclSpecNode<'a>,
     mutable: bool,
 ) {
-    let declared_type = node
-        .r#type
-        .as_ref()
-        .and_then(|r#type| ctx.types().resolve(ctx.symtab(), r#type));
+    let declared_type = if let Some(r#type) = &node.r#type {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, r#type)
+    } else {
+        None
+    };
 
     for &id in &node.ids {
         let name = ctx.pin(id);
