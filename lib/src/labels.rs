@@ -17,7 +17,7 @@ use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem, ops, sy
 
 use parser::{Location, Span};
 
-use crate::Pinned;
+use crate::{IntoCowStr, Pinned};
 // we need this to be publicly accessible and documented, since it's referenced
 // publicly by LabelTag::Synthetic
 pub use crate::values::FunctionRef;
@@ -110,7 +110,12 @@ impl fmt::Display for SyntheticSlot {
 #[derive(Debug, Clone)]
 pub enum LabelTag<'a> {
     /// A concrete user-facing tag, like `blue` or `violet`.
-    Concrete(&'a str),
+    ///
+    /// Uses a [`Cow`] so that tags may either borrow from source (typical for
+    /// annotations, whose contents are already `&'a str` slices of the source)
+    /// or own their content (necessary when the tag content originates from an
+    /// owned [`String`] in the AST, such as struct field tags).
+    Concrete(Cow<'a, str>),
     /// An artificial tag conceptually representing an unknown label.
     ///
     /// This is used internally during the analysis of function bodies, such as
@@ -264,6 +269,10 @@ impl<'a> Label<'a> {
     /// This returns [`Label::Bottom`] if the slice is empty, or otherwise a
     /// [`Label::Tags`] with all elements converted to a [`LabelTag::Concrete`].
     ///
+    /// For invoker convenience, several different types are accepted as input,
+    /// including `&[&'a str]` and `Vec<String>`. See [`IntoCowStr`] for more
+    /// details.
+    ///
     /// # Example Usage
     ///
     /// ```
@@ -271,14 +280,27 @@ impl<'a> Label<'a> {
     /// #
     /// assert_eq!(Label::from_tags(&["dog", "cat"]).to_string(), "{cat, dog}");
     ///
-    /// assert_eq!(Label::from_tags(&[]), Label::Bottom);
+    /// // it is easier to just use `Label::Bottom`, vs. passing an empty Vec
+    /// assert_eq!(Label::from_tags(Vec::<String>::new()), Label::Bottom);
     /// ```
+    #[must_use]
     #[inline]
-    pub fn from_tags(tags: &[&'a str]) -> Self {
-        if tags.is_empty() {
+    pub fn from_tags<I, S>(tags: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        I::IntoIter: ExactSizeIterator,
+        S: IntoCowStr<'a>,
+    {
+        let iter = tags.into_iter();
+
+        // ExactSizeIterator::is_empty exists but is unstable since 2016...
+        if iter.len() == 0 {
             Self::Bottom
         } else {
-            let set = tags.iter().copied().map(LabelTag::Concrete).collect();
+            let set: BTreeSet<_> = iter
+                .map(IntoCowStr::into_cow)
+                .map(LabelTag::Concrete)
+                .collect();
 
             Self::Tags(set)
         }
@@ -322,7 +344,7 @@ impl<'a> Label<'a> {
     /// ```
     /// # use glowy::labels::{Label, LabelTag};
     /// #
-    /// let tag = LabelTag::Concrete("secret");
+    /// let tag = LabelTag::Concrete("secret".into());
     /// assert_eq!(Label::from_single(tag).to_string(), "{secret}");
     /// ```
     #[must_use]
@@ -478,14 +500,14 @@ impl<'a> Label<'a> {
     /// # use glowy::labels::{Label, LabelTag};
     /// #
     /// let x = Label::from_tags(&["alice", "bob", "charlie"]);
-    /// let y = Label::from_single(LabelTag::Concrete("david"));
+    /// let y = Label::from_single(LabelTag::Concrete("david".into()));
     /// let z = Label::Bottom;
     ///
-    /// assert!(x.contains(&LabelTag::Concrete("bob")));
-    /// assert!(!x.contains(&LabelTag::Concrete("david")));
-    /// assert!(y.contains(&LabelTag::Concrete("david")));
-    /// assert!(!y.contains(&LabelTag::Concrete("charlie")));
-    /// assert!(!z.contains(&LabelTag::Concrete("alice")));
+    /// assert!(x.contains(&LabelTag::Concrete("bob".into())));
+    /// assert!(!x.contains(&LabelTag::Concrete("david".into())));
+    /// assert!(y.contains(&LabelTag::Concrete("david".into())));
+    /// assert!(!y.contains(&LabelTag::Concrete("charlie".into())));
+    /// assert!(!z.contains(&LabelTag::Concrete("alice".into())));
     /// ```
     #[must_use]
     #[inline]
@@ -506,7 +528,7 @@ impl<'a> Label<'a> {
     /// # use glowy::labels::Label;
     /// #
     /// assert!(Label::Bottom.is_bottom());
-    /// assert!(Label::from_tags(&[]).is_bottom());
+    /// assert!(Label::from_tags::<&[&str], _>(&[]).is_bottom());
     /// assert!(!Label::from_tags(&["alice"]).is_bottom());
     /// assert!(!Label::from_tags(&["alice", "bob"]).is_bottom());
     /// ```
@@ -706,7 +728,7 @@ impl From<&Label<'_>> for OwnedLabel {
         let tags = label
             .tags()
             .filter_map(|tag| match tag {
-                LabelTag::Concrete(s) => Some((*s).to_owned()),
+                LabelTag::Concrete(s) => Some(s.clone().into_owned()),
                 LabelTag::Synthetic { .. } => None,
             })
             .collect();

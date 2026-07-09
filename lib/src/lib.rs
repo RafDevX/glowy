@@ -145,7 +145,7 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 
-use std::{cmp, fmt, path::Path, sync::LazyLock};
+use std::{borrow::Cow, cmp, fmt, path::Path, sync::LazyLock};
 
 pub use analyzer::Analyzer;
 pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
@@ -256,11 +256,10 @@ pub struct AnalysisConfig {
     /// in addition to what is already otherwise derived from the function body.
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
-    /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
-    /// deserializes from a string of the form `pkg.func`. Each associated
-    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
-    /// individual [`String`] element corresponding to a
-    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// [`BlanketDirectiveTarget`], which deserializes from a string of the form
+    /// `pkg.func`. Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sources: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Functions universally recognized as blanket confidentiality sinks.
     ///
@@ -268,12 +267,12 @@ pub struct AnalysisConfig {
     /// the associated label.
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
-    /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
-    /// deserializes from a string of the form `pkg.func` (applying to every
-    /// argument) or `pkg.func#N` (applying only to the argument at position
-    /// `N`, 0-indexed). Each associated [`Vec<String>`] value represents a
-    /// [`Label`](labels::Label), with each individual [`String`] element
-    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// [`BlanketDirectiveTarget`], which deserializes from a string of the form
+    /// `pkg.func` (applying to every argument) or `pkg.func#N` (applying only
+    /// to the argument at position `N`, 0-indexed). Each associated
+    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
+    /// individual [`String`] element corresponding to a
+    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub allow_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Functions universally recognized as blanket integrity sinks.
     ///
@@ -281,12 +280,12 @@ pub struct AnalysisConfig {
     /// null intersection with the associated label.
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
-    /// [`BlanketDirectiveTarget`](policy::BlanketDirectiveTarget), which
-    /// deserializes from a string of the form `pkg.func` (applying to every
-    /// argument) or `pkg.func#N` (applying only to the argument at position
-    /// `N`, 0-indexed). Each associated [`Vec<String>`] value represents a
-    /// [`Label`](labels::Label), with each individual [`String`] element
-    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// [`BlanketDirectiveTarget`], which deserializes from a string of the form
+    /// `pkg.func` (applying to every argument) or `pkg.func#N` (applying only
+    /// to the argument at position `N`, 0-indexed). Each associated
+    /// [`Vec<String>`] value represents a [`Label`](labels::Label), with each
+    /// individual [`String`] element corresponding to a
+    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub deny_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Whether to include `_test.go` files in the analysis.
     ///
@@ -479,5 +478,51 @@ impl PartialOrd for Pinned<'_, Location> {
             }
             cmp::Ordering::Equal => None,
         }
+    }
+}
+
+/// Functionality relating to easy conversion to a [`Cow<'a, str>`].
+///
+/// This trait allows consumers to accept various different types that can be
+/// unified and converted into a [`Cow<'a, str>`] without requiring additional
+/// allocations. An existing [`String`] has its ownership preserved as a
+/// [`Cow::Owned`], while any references or slices (such as `&str` or `&String`)
+/// become [`Cow::Borrowed`] and maintain their underlying lifetime.
+///
+/// While [`Into<Cow<'a, str>>`] would already solve [`AsRef<str>`] this problem
+/// for some of the supported types, [`IntoCowStr`] is more generic and more
+/// extensible. In particular, it is implemented for `&String`, making it very
+/// useful in flexible contexts.
+pub trait IntoCowStr<'a> {
+    /// Consumes a value and converts it into a clone-on-write string.
+    #[must_use]
+    fn into_cow(self) -> Cow<'a, str>;
+}
+
+impl<'a> IntoCowStr<'a> for &'a str {
+    #[inline]
+    fn into_cow(self) -> Cow<'a, str> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl<'a> IntoCowStr<'a> for &&'a str {
+    #[inline]
+    fn into_cow(self) -> Cow<'a, str> {
+        Cow::Borrowed(*self)
+    }
+}
+
+impl<'a> IntoCowStr<'a> for String {
+    #[inline]
+    fn into_cow(self) -> Cow<'a, str> {
+        Cow::Owned(self)
+    }
+}
+
+impl<'a> IntoCowStr<'a> for &'a String {
+    #[inline]
+    fn into_cow(self) -> Cow<'a, str> {
+        Cow::Borrowed(self.as_str())
     }
 }
