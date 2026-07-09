@@ -9,11 +9,7 @@ use std::{collections::HashMap, error, fmt, num::ParseIntError, str::FromStr};
 
 use parser::Location;
 
-use crate::{
-    FullPackagePath,
-    labels::{Label, OwnedLabel, OwnedLabelCow},
-    snapshots::SnapshotAware,
-};
+use crate::{FullPackagePath, labels::Label, snapshots::SnapshotAware};
 
 /// Structured information representing a declared sink.
 ///
@@ -169,15 +165,15 @@ impl PackageBlanketDirectives {
 #[derive(Clone, Debug)]
 pub(crate) struct BlanketDirective {
     kind: BlanketDirectiveKind,
-    label: OwnedLabel,
+    label: Label<'static>,
     arg_index: Option<usize>,
 }
 
 impl BlanketDirective {
-    pub(crate) fn new<'c1: 'c2, 'c2>(
+    pub(crate) fn new(
         kind: BlanketDirectiveKind,
         arg_index: Option<usize>,
-        label: impl Into<OwnedLabelCow<'c1, 'c2>>,
+        label: Label<'static>,
     ) -> Self {
         // sources don't have a meaningful notion of "this arg only"
         let arg_index = match kind {
@@ -187,7 +183,7 @@ impl BlanketDirective {
 
         Self {
             kind,
-            label: label.into().into_owned(),
+            label,
             arg_index,
         }
     }
@@ -196,8 +192,8 @@ impl BlanketDirective {
         self.kind
     }
 
-    pub fn label(&self) -> Label<'_> {
-        self.label.as_label()
+    pub fn label(&self) -> &Label<'_> {
+        &self.label
     }
 
     pub fn arg_index(&self) -> Option<usize> {

@@ -244,7 +244,7 @@ impl<'a> FunctionValue<'a> {
                 BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
                     self.add_sink(InherentSink {
                         allow: directive.kind() == BlanketDirectiveKind::AllowSink,
-                        label: directive.label(),
+                        label: directive.label().clone(),
                         arg_index: directive.arg_index(),
                     });
                 }

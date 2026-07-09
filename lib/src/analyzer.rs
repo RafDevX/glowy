@@ -19,7 +19,7 @@ use crate::{
     context::{AnalysisContext, AnalysisStage},
     decls,
     errors::{AnalysisError, AnalysisErrorKind},
-    labels::{Label, OwnedLabel, OwnedLabelCow},
+    labels::Label,
     policy::{
         BlanketDirective, BlanketDirectiveKind, BlanketDirectiveTarget, BlanketDirectives,
         PackageBlanketDirectives,
@@ -492,7 +492,7 @@ impl Analyzer {
             // we use add_blanket_directive directly to avoid conversion to
             // Label and then back to OwnedLabel (preventing unnecessary
             // allocations that would happen with add_blanket_source/sink)
-            self.add_blanket_directive(kind, target, OwnedLabel::from(tags));
+            self.add_blanket_directive(kind, target, Label::from_tags(tags));
         }
     }
 
@@ -500,7 +500,7 @@ impl Analyzer {
         &mut self,
         kind: BlanketDirectiveKind,
         target: BlanketDirectiveTarget,
-        label: impl Into<OwnedLabelCow<'c1, 'c2>>,
+        label: Label<'static>,
     ) {
         let BlanketDirectiveTarget {
             package_path,
@@ -547,7 +547,7 @@ impl Analyzer {
     ///     "example.com/company-name/proj/sub",
     ///     None::<String>,
     ///     "SomeFunc",
-    ///     &Label::from_tags(&["secret"]),
+    ///     Label::from_tags(&["secret"]),
     /// );
     /// ```
     #[inline]
@@ -556,7 +556,7 @@ impl Analyzer {
         package_path: impl Into<Cow<'f, str>>,
         type_name: Option<impl Into<Cow<'f, str>>>,
         member_name: impl Into<Cow<'f, str>>,
-        label: &Label<'_>,
+        label: Label<'static>,
     ) {
         let target = BlanketDirectiveTarget::new(
             package_path.into(),
@@ -601,14 +601,14 @@ impl Analyzer {
     ///         None,
     ///     ),
     ///     false,
-    ///     &Label::from_tags(&["untrusted"]),
+    ///     Label::from_tags(&["untrusted"]),
     /// );
     ///
     /// // applies only to the second argument of `WriteFile`
     /// analyzer.add_blanket_sink(
     ///     BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1)),
     ///     false,
-    ///     &Label::from_tags(&["untrusted"]),
+    ///     Label::from_tags(&["untrusted"]),
     /// );
     /// ```
     #[inline]
@@ -616,7 +616,7 @@ impl Analyzer {
         &mut self,
         target: BlanketDirectiveTarget,
         allow: bool,
-        label: &Label<'_>,
+        label: Label<'static>,
     ) {
         let variant = if allow {
             BlanketDirectiveKind::AllowSink
