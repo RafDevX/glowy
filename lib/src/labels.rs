@@ -17,10 +17,155 @@ use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, hash, iter, mem, ops, sy
 
 use parser::{Location, Span};
 
-use crate::{IntoCowStr, Pinned};
 // we need this to be publicly accessible and documented, since it's referenced
 // publicly by LabelTag::Synthetic
 pub use crate::values::FunctionRef;
+use crate::{IntoCowStr, Pinned};
+
+const WELL_KNOWN_AXIS_PREFIXES: &[(char, &str)] = &[('$', "secret"), ('?', "untrusted")];
+
+/// Represents a concrete label tag's canonical structured layout.
+///
+/// This struct is used to hold a [`LabelTag::Concrete`]'s underlying tag, as
+/// well as the axis it is bound to (if any). Both values are in their canonical
+/// form: for example, a concrete tag specified as `$env` is here expanded into
+/// tag `env` on axis `secret`. See [`ConcreteLabelTag::new`] for more
+/// information.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConcreteLabelTag<'a> {
+    axis: Option<Cow<'a, str>>,
+    tag: Cow<'a, str>,
+}
+
+impl<'a> ConcreteLabelTag<'a> {
+    /// Constructs a new instance given an (optional) axis and a tag component.
+    ///
+    /// If no axis is specified and the tag carries a well-known prefix, the
+    /// prefix is stripped and the tag is associated with the prefix's
+    /// corresponding axis. In particular, for the current version of Glowy,
+    /// the prefix `$` is associated with axis `secret` and the prefix `?` is
+    /// associated with axis `untrusted`, but more prefix shorthands may be
+    /// added without notice, so consumers are advised to avoid non-alphanumeric
+    /// characters at the beginning of custom tags.
+    ///
+    /// In many cases, it may prove more convenient to avoid using this method
+    /// in favor of using one of the struct's [`From`] implementations, which
+    /// support parsing an axis and a tag from a string.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::ConcreteLabelTag;
+    /// #
+    /// let bound = ConcreteLabelTag::new(Some("dir"), "north");
+    /// let not_bound = ConcreteLabelTag::new(None::<&str>, "violet");
+    /// let prefixed = ConcreteLabelTag::new(None::<&str>, "$env");
+    ///
+    /// assert_eq!(bound.to_string(), "dir:north");
+    /// assert_eq!(not_bound.to_string(), "violet");
+    /// assert_eq!(prefixed.to_string(), "secret:env");
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn new(axis: Option<impl IntoCowStr<'a>>, tag: impl IntoCowStr<'a>) -> Self {
+        let tag_cow = tag.into_cow();
+
+        if axis.is_none() {
+            macro_rules! search_prefixes {
+                ($full:expr, $convert:expr) => {
+                    for (prefix, new_axis) in WELL_KNOWN_AXIS_PREFIXES {
+                        if let Some(stripped) = $full.strip_prefix(*prefix).map(str::trim)
+                            && !stripped.is_empty()
+                        {
+                            return Self::new(Some(*new_axis), $convert(stripped));
+                        }
+                    }
+                };
+            }
+
+            match &tag_cow {
+                Cow::Borrowed(inner) => {
+                    search_prefixes!(inner, |s| s)
+                }
+                Cow::Owned(inner) => {
+                    search_prefixes!(inner, str::to_owned)
+                }
+            }
+        }
+
+        Self {
+            axis: axis.map(IntoCowStr::into_cow),
+            tag: tag_cow,
+        }
+    }
+
+    /// Returns the axis to which this [`LabelTag`] is bound, if any.
+    #[must_use]
+    #[inline]
+    pub fn axis(&self) -> Option<&str> {
+        self.axis.as_deref()
+    }
+
+    /// Returns the actual tag component identifying this [`LabelTag`].
+    #[must_use]
+    #[inline]
+    pub fn tag(&self) -> &str {
+        &self.tag
+    }
+}
+
+impl fmt::Display for ConcreteLabelTag<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(axis) = &self.axis {
+            write!(f, "{axis}:")?;
+        }
+
+        self.tag.fmt(f)
+    }
+}
+
+impl<'a> From<Cow<'a, str>> for ConcreteLabelTag<'a> {
+    #[inline]
+    fn from(cow: Cow<'a, str>) -> Self {
+        fn split_axis_tag(s: &str) -> Option<(&str, &str)> {
+            let (axis, tag) = s.split_once(':')?;
+
+            let axis = axis.trim();
+            let tag = tag.trim();
+
+            if axis.is_empty() || tag.is_empty() {
+                None
+            } else {
+                Some((axis, tag))
+            }
+        }
+
+        match cow {
+            Cow::Borrowed(s) => {
+                if let Some((axis, tag)) = split_axis_tag(s) {
+                    return Self::new(Some(axis), tag);
+                }
+
+                Self::new(None::<&str>, s)
+            }
+            Cow::Owned(s) => {
+                if let Some((axis, tag)) = split_axis_tag(&s) {
+                    return Self::new(Some(axis.to_owned()), tag.to_owned());
+                }
+
+                Self::new(None::<&str>, s)
+            }
+        }
+    }
+}
+
+impl<'a, T: IntoCowStr<'a>> From<T> for ConcreteLabelTag<'a> {
+    #[inline]
+    fn from(s: T) -> Self {
+        Self::from(s.into_cow())
+    }
+}
 
 /// Represents a synthetic label tag's purpose and identity, for some function.
 ///
@@ -109,13 +254,8 @@ impl fmt::Display for SyntheticSlot {
 /// then lexicographically by its internal value/identifier.
 #[derive(Debug, Clone)]
 pub enum LabelTag<'a> {
-    /// A concrete user-facing tag, like `blue` or `violet`.
-    ///
-    /// Uses a [`Cow`] so that tags may either borrow from source (typical for
-    /// annotations, whose contents are already `&'a str` slices of the source)
-    /// or own their content (necessary when the tag content originates from an
-    /// owned [`String`] in the AST, such as struct field tags).
-    Concrete(Cow<'a, str>),
+    /// A concrete user-facing tag, like `blue`, `violet`, or `dir:north`.
+    Concrete(ConcreteLabelTag<'a>),
     /// An artificial tag conceptually representing an unknown label.
     ///
     /// This is used internally during the analysis of function bodies, such as
@@ -139,6 +279,16 @@ pub enum LabelTag<'a> {
 }
 
 impl<'a> LabelTag<'a> {
+    /// Returns this label tag's defined axis, if any.
+    #[must_use]
+    #[inline]
+    pub fn axis(&self) -> Option<&str> {
+        match self {
+            LabelTag::Concrete(concrete) => concrete.axis(),
+            LabelTag::Synthetic { .. } => None,
+        }
+    }
+
     fn is_synthetic_representation(&self, func: &FunctionRef<'a>, slot: SyntheticSlot) -> bool {
         let LabelTag::Synthetic {
             func: tag_func,
@@ -157,7 +307,7 @@ impl fmt::Display for LabelTag<'_> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Concrete(tag) => write!(f, "{tag}"),
+            Self::Concrete(tag) => tag.fmt(f),
             Self::Synthetic {
                 func,
                 slot,
@@ -242,10 +392,10 @@ impl hash::Hash for LabelTag<'_> {
     }
 }
 
-impl<'a, T: IntoCowStr<'a>> From<T> for LabelTag<'a> {
+impl<'a, T: Into<ConcreteLabelTag<'a>>> From<T> for LabelTag<'a> {
     #[inline]
     fn from(s: T) -> Self {
-        Self::Concrete(s.into_cow())
+        Self::Concrete(s.into())
     }
 }
 
@@ -278,7 +428,11 @@ impl<'a> Label<'a> {
     ///
     /// For invoker convenience, several different types are accepted as input,
     /// including `&[&'a str]` and `Vec<String>`. See [`IntoCowStr`] for more
-    /// details.
+    /// details. A [`Cow`] is used internally so that tags may either borrow
+    /// from source (typical for annotations lifted from the codebase, which are
+    /// already `&'a str` slices of the source code) or own their content
+    /// (necessary when the tag content originates from an owned [`String`],
+    /// such as in the case of struct field tags).
     ///
     /// # Example Usage
     ///
@@ -304,10 +458,7 @@ impl<'a> Label<'a> {
         if iter.len() == 0 {
             Self::Bottom
         } else {
-            let set: BTreeSet<_> = iter
-                .map(IntoCowStr::into_cow)
-                .map(LabelTag::Concrete)
-                .collect();
+            let set: BTreeSet<_> = iter.map(LabelTag::from).collect();
 
             Self::Tags(set)
         }
