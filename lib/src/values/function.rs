@@ -242,9 +242,14 @@ impl<'a> FunctionValue<'a> {
                     // function value; nothing to do here
                 }
                 BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
+                    let mut label = directive.label().clone();
+                    label.accept_wildcards();
+
+                    // we don't use InherentSink::new because we already have a
+                    // Label, there is no need to convert tags back and forth
                     self.add_sink(InherentSink {
                         allow: directive.kind() == BlanketDirectiveKind::AllowSink,
-                        label: directive.label().clone(),
+                        label,
                         arg_index: directive.arg_index(),
                     });
                 }
@@ -794,14 +799,18 @@ impl<'a> InherentSink<'a> {
             return None;
         }
 
+        let mut label = Label::from_tags(tags);
+        label.accept_wildcards();
+
         Some(Self {
             allow,
-            label: Label::from_tags(tags),
+            label,
             arg_index,
         })
     }
 
     pub fn as_descriptor_at(&self, location: Location) -> SinkDescriptor<'a> {
+        // we don't use SinkDescriptor::new because we already have a Label
         SinkDescriptor {
             kind: SinkKind::Call,
             allow: self.allow,

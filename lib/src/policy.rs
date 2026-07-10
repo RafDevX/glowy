@@ -39,7 +39,8 @@ impl<'a> SinkDescriptor<'a> {
             return None;
         }
 
-        let label = Label::from_tags(tags);
+        let mut label = Label::from_tags(tags);
+        label.accept_wildcards();
 
         Some(Self {
             kind,
