@@ -256,6 +256,8 @@ impl fmt::Display for SyntheticSlot {
 pub enum LabelTag<'a> {
     /// A concrete user-facing tag, like `blue`, `violet`, or `dir:north`.
     Concrete(ConcreteLabelTag<'a>),
+    /// A shorthand for all concrete tags of a given axis, like `dir:*`.
+    AxisWildcard(Cow<'a, str>),
     /// An artificial tag conceptually representing an unknown label.
     ///
     /// This is used internally during the analysis of function bodies, such as
@@ -285,7 +287,53 @@ impl<'a> LabelTag<'a> {
     pub fn axis(&self) -> Option<&str> {
         match self {
             LabelTag::Concrete(concrete) => concrete.axis(),
+            LabelTag::AxisWildcard(axis) => Some(axis),
             LabelTag::Synthetic { .. } => None,
+        }
+    }
+
+    /// Converts `self` into a [`LabelTag::AxisWildcard`], if applicable.
+    ///
+    /// Axis wildcards only have a defined semantic meaning if very narrow
+    /// cases, so they exist only as opt-in behavior. For example, a tag
+    /// `dir:*` will generally be interpreted as a normal [`LabelTag::Concrete`]
+    /// composed of the literal `*` in the scope of axis `dir`, but in certain
+    /// very specific (and documented) analysis contexts it may be upgraded
+    /// into a [`LabelTag::AxisWildcard`], since it has a defined axis and its
+    /// tag component is `*`.
+    ///
+    /// Only [`LabelTag::Concrete`]s meeting the conditions above may be
+    /// upgraded into a [`LabelTag::AxisWildcard`]; other variants and other
+    /// cases of [`LabelTag::Concrete`] are returned as-is.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::LabelTag;
+    /// #
+    /// let x = LabelTag::from("dir:*");
+    /// let y = LabelTag::from("dir:north");
+    /// let z = LabelTag::from("unbounded");
+    ///
+    /// let wildcard = LabelTag::AxisWildcard("dir".into());
+    ///
+    /// assert_eq!(x.try_upgrade_to_wildcard(), wildcard);
+    /// assert_eq!(z.try_upgrade_to_wildcard(), LabelTag::from("unbounded"));
+    /// assert_eq!(y.try_upgrade_to_wildcard(), LabelTag::from("dir:north"));
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn try_upgrade_to_wildcard(self) -> Self {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "We explicitly want to match only one case and ignore all others"
+        )]
+        match self {
+            Self::Concrete(ConcreteLabelTag {
+                axis: Some(axis),
+                tag,
+            }) if tag == "*" => Self::AxisWildcard(axis),
+            other => other,
         }
     }
 
@@ -308,6 +356,7 @@ impl fmt::Display for LabelTag<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Concrete(tag) => tag.fmt(f),
+            Self::AxisWildcard(axis) => write!(f, "{axis}:*"),
             Self::Synthetic {
                 func,
                 slot,
@@ -327,9 +376,12 @@ impl Ord for LabelTag<'_> {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self, other) {
-            (Self::Concrete(_), Self::Synthetic { .. }) => cmp::Ordering::Less,
-            (Self::Synthetic { .. }, Self::Concrete(_)) => cmp::Ordering::Greater,
+            (Self::Concrete(_), Self::AxisWildcard(_) | Self::Synthetic { .. })
+            | (Self::AxisWildcard(_), Self::Synthetic { .. }) => cmp::Ordering::Less,
+            (Self::Synthetic { .. }, Self::Concrete(_) | Self::AxisWildcard(_))
+            | (Self::AxisWildcard(_), Self::Concrete(_)) => cmp::Ordering::Greater,
             (Self::Concrete(left), Self::Concrete(right)) => left.cmp(right),
+            (Self::AxisWildcard(left), Self::AxisWildcard(right)) => left.cmp(right),
             (
                 Self::Synthetic {
                     func: left_func,
@@ -358,6 +410,7 @@ impl PartialEq for LabelTag<'_> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Concrete(left), Self::Concrete(right)) => left == right,
+            (Self::AxisWildcard(left), Self::AxisWildcard(right)) => left == right,
             (
                 Self::Synthetic {
                     func: left_func,
@@ -384,6 +437,7 @@ impl hash::Hash for LabelTag<'_> {
 
         match self {
             LabelTag::Concrete(tag) => tag.hash(state),
+            LabelTag::AxisWildcard(axis) => axis.hash(state),
             LabelTag::Synthetic { func, slot, .. } => {
                 func.hash(state);
                 slot.hash(state);
@@ -512,6 +566,45 @@ impl<'a> Label<'a> {
         set.insert(tag);
 
         Self::Tags(set)
+    }
+
+    /// Upgrades all applicable tags to [`LabelTag::AxisWildcard`].
+    ///
+    /// Axis wildcard tags are considered opt-in behavior for only very narrow
+    /// situations within the analysis process. This method reinterprets all of
+    /// the [`Label`]'s tags to convert any axis-bound [`LabelTag::Concrete`]s
+    /// with a tag component corresponding to the literal `*` into full-fledged
+    /// [`LabelTag::AxisWildcard`]s.
+    ///
+    /// See [`LabelTag::try_upgrade_to_wildcard`] for more information, as this
+    /// method uses that one under the hood.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::{Label, LabelTag};
+    /// #
+    /// let mut label = Label::from_tags(&["not-bound", "dir:north", "dir:*"]);
+    ///
+    /// label.accept_wildcards();
+    ///
+    /// let mut tags = label.tags();
+    /// assert_eq!(tags.next(), Some(&LabelTag::from("not-bound"))); // concrete
+    /// assert_eq!(tags.next(), Some(&LabelTag::from("dir:north"))); // concrete
+    /// assert_eq!(tags.next(), Some(&LabelTag::AxisWildcard("dir".into())));
+    /// assert_eq!(tags.next(), None);
+    /// ```
+    #[inline]
+    pub fn accept_wildcards(&mut self) {
+        let Self::Tags(tags) = self else {
+            return;
+        };
+
+        // we need to rebuild the whole set since some tags might have changed
+        *tags = mem::take(tags)
+            .into_iter()
+            .map(LabelTag::try_upgrade_to_wildcard)
+            .collect();
     }
 
     /// Returns the union of `self` and `other` as a new [`Label`].
@@ -768,7 +861,7 @@ impl<'a> Label<'a> {
 
         let rebound: BTreeSet<_> = tags
             .iter()
-            .map(|t| match t {
+            .map(|tag| match tag {
                 LabelTag::Synthetic {
                     func,
                     slot,
@@ -778,7 +871,9 @@ impl<'a> Label<'a> {
                     slot: *slot,
                     identifier: *identifier,
                 },
-                LabelTag::Synthetic { .. } | LabelTag::Concrete(_) => t.clone(),
+                LabelTag::Concrete(_) | LabelTag::AxisWildcard(_) | LabelTag::Synthetic { .. } => {
+                    tag.clone()
+                }
             })
             .collect();
 
