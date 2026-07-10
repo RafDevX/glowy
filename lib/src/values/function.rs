@@ -787,7 +787,7 @@ impl SnapshotAware for CaptureBinding<'_> {
 // i.e., they have no associated location until triggered at a call site
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InherentSink<'a> {
-    allow: bool, // confidentiality (allow) sink, vs. integrity (deny)
+    allow: bool, // whitelist-based (allow) sink, vs. blacklist-based (deny)
     label: Label<'a>,
     arg_index: Option<usize>, // 0-indexed; None = applies to every argument
 }

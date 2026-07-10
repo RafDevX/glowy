@@ -19,7 +19,7 @@ use crate::{FullPackagePath, labels::Label, snapshots::SnapshotAware};
 pub struct SinkDescriptor<'a> {
     /// The type of sink in question.
     pub kind: SinkKind,
-    /// Whether this is a confidentiality sink (allow), vs. integrity (deny).
+    /// Whether this is a whitelist-based sink (allow), vs. blacklist (deny).
     pub allow: bool,
     /// The sink's declared expected information label.
     pub label: Label<'a>,
@@ -59,13 +59,13 @@ impl<'a> SinkDescriptor<'a> {
     /// All sinks always accept [`Label::Bottom`], but any other [`Label`] is
     /// only considered valid if:
     /// - its [restriction](Label::restrict_to_axes) to the explicit axes of
-    ///   this sink's inherent policy label is a
-    ///   [subset of](Label::is_subset_of) or is [equal](Label::eq) to the
-    ///   sink's aforementioned inherent policy label, for confidentiality
-    ///   (allow) sinks --- restricting whitelist enforcement;
+    ///   this sink's inherent policy label is a [subset
+    ///   of](Label::is_subset_of) or is [equal](Label::eq) to the sink's
+    ///   aforementioned inherent policy label, for allow sinks
+    ///   (Axis-Restricting Whitelist Enforcement);
     /// - its [intersection](Label::intersect) with this sink's inherent policy
-    ///   label is exactly [`Label::Bottom`], for integrity (deny) sinks ---
-    ///   blacklist enforcement.
+    ///   label is exactly [`Label::Bottom`], for deny sinks (Blacklist
+    ///   Enforcement).
     ///
     /// This is used by enforcement checks to determine whether an insecure
     /// information flow error should be reported (i.e.,
@@ -81,14 +81,15 @@ impl<'a> SinkDescriptor<'a> {
         }
 
         if self.allow {
-            // confidentiality sink (allow - restricting whitelist)
+            // allow sink - axis-restricting whitelist
 
             let axes = self.label.axes();
             let restricted = label.restrict_to_axes(&axes);
 
             restricted <= self.label
         } else {
-            // integrity sink (deny - blacklist)
+            // deny sink - blacklist
+
             label.intersect(&self.label).is_bottom()
         }
     }

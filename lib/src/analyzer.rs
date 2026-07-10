@@ -568,12 +568,16 @@ impl Analyzer {
         self.add_blanket_directive(BlanketDirectiveKind::Source, target, label);
     }
 
-    /// Universally registers a function as an information sink.
+    /// Universally registers a symbol/method/field as an information sink.
     ///
     /// This instructs the analyzer to always consider calls to the given
-    /// function as only accepting the provided [`Label`] (for confidentiality,
-    /// if `allow` is `true`) or as never accepting any overlap with the
-    /// provided [`Label`] (for integrity, if `allow` is `false`).
+    /// function or method as only accepting the provided axis-restricting
+    /// [`Label`] (for a whitelist-based sink, if `allow` is `true`) or as
+    /// never accepting any overlap with the provided [`Label`] (for a
+    /// blacklist-based sink, if `allow` is `false`). If the specified target is
+    /// not a function nor a method (i.e., if it is a variable, a constant, or a
+    /// struct field), all writes to it will analogously trigger the relevant
+    /// enforcement checks.
     ///
     /// The `target` argument identifies which symbol, method, or field (and,
     /// optionally, which specific function/method argument position) this sink

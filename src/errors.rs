@@ -115,9 +115,9 @@ pub fn get_structured_error_info<'a>(
             };
 
             let variant = if sink.allow {
-                "confidentiality (allow)"
+                "allow sink (axis-restricting whitelist)"
             } else {
-                "integrity (deny)"
+                "deny sink (blacklist)"
             };
 
             StructuredErrorInfo {
@@ -127,7 +127,7 @@ pub fn get_structured_error_info<'a>(
                     backtrace,
                     &sink.label,
                     Some(format!(
-                        "{} sink has label {}, but {} has label {}",
+                        "{} has label {}, but {} has label {}",
                         variant,
                         sink.label,
                         operand,

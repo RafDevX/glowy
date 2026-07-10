@@ -250,9 +250,9 @@ pub struct AnalysisConfig {
     /// variable `GLOWY_VERBOSE` is set (in which case the analyzer is always
     /// verbose).
     pub verbose: bool,
-    /// Functions universally recognized as blanket information sources.
+    /// Targets universally recognized as blanket information sources.
     ///
-    /// These functions will always be considered to yield the associated label,
+    /// These targets will always be considered to yield the associated label,
     /// in addition to what is already otherwise derived from the function body.
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
@@ -261,9 +261,9 @@ pub struct AnalysisConfig {
     /// [`Label`](labels::Label), with each individual [`String`] element
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sources: IndexMap<BlanketDirectiveTarget, Vec<String>>,
-    /// Functions universally recognized as blanket confidentiality sinks.
+    /// Targets universally recognized as blanket whitelist-based sinks.
     ///
-    /// These functions will always be considered to accept only values up to
+    /// These targets will always be considered to accept only values up to
     /// the associated label, after the value's calculated label has been
     /// [restricted](labels::Label::restrict_to_axes) to the sink's label.
     ///
@@ -275,9 +275,9 @@ pub struct AnalysisConfig {
     /// individual [`String`] element corresponding to a
     /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub allow_sinks: IndexMap<BlanketDirectiveTarget, Vec<String>>,
-    /// Functions universally recognized as blanket integrity sinks.
+    /// Targets universally recognized as blanket blacklist-based sinks.
     ///
-    /// These functions will always be considered to accept only values with
+    /// These targets will always be considered to accept only values with
     /// null intersection with the associated label.
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
