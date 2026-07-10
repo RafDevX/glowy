@@ -1,0 +1,29 @@
+# Glowy Base Security Policy
+# ==========================
+
+# IMPORTANT: These are heuristics, encoding sensible security assumptions for an
+# arbitrary Go program, but each project requires domain-specific adjustments to
+# extract the most possible value from Glowy with respect to the possible
+# security guarantees offered by analysis.
+
+# Convention: all tags in this policy use either the `secret` axis (shorthand:
+# prefix `$`) or the `untrusted` axis (shorthand: prefix `?`). No other axes are
+# used, as they would necessarily be specific to the domain under analysis.
+
+# ==============================================================================
+[sources] # === ROOTS FOR TAINT PROPAGATION ====================================
+# ==============================================================================
+
+# --- TODO ---
+
+# ==============================================================================
+[allow_sinks] # === AXIS-RESTRICTING WHITELIST-BASED ENFORCEMENT CHECKS ========
+# ==============================================================================
+
+# --- TODO ---
+
+# ==============================================================================
+[deny_sinks] # === BLACKLIST-BASED ENFORCEMENT CHECKS ==========================
+# ==============================================================================
+
+# --- TODO ---

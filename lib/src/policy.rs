@@ -11,6 +11,25 @@ use parser::Location;
 
 use crate::{FullPackagePath, labels::Label, snapshots::SnapshotAware};
 
+/// Standard base security policy with sensible defaults.
+///
+/// Glowy ships with a default, standard security policy designed for supporting
+/// a softer bootstrap curve for stakeholders to start using the provided
+/// analysis features. This base policy is heuristics-driven and
+/// domain-agnostic, meaning that it will often be wrong in many fronts. It is
+/// designed as a starting resource, under the expectation of being replaced by
+/// a custom security policy before any serious use. When such a (more adequate)
+/// policy exists, the base configuration should be disabled by setting the
+/// [`AnalysisConfig::inherit_base_policy`][ACibp] option to `false`.
+///
+/// This constant holds a TOML-formatted string representation of the current
+/// base security policy, and is only present when Cargo feature
+/// `base-security-policy` is enabled.
+///
+/// [ACibp]: crate::AnalysisConfig::inherit_base_policy
+#[cfg(feature = "base-security-policy")]
+pub const BASE_SECURITY_POLICY: &str = include_str!("../base-security-policy.toml");
+
 /// Structured information representing a declared sink.
 ///
 /// This is a lightweight descriptor capturing the essential details of an

@@ -14,7 +14,7 @@ use parser::ast::SourceFileNode;
 use rayon::prelude::*;
 
 use crate::{
-    AnalysisConfig, DEFAULT_MAX_BUILD_TAG_DIMENSIONS, FullPackagePath, SourceFile,
+    AnalysisConfig, FullPackagePath, SourceFile,
     build_constraints::{self, BuildPermutation},
     context::{AnalysisContext, AnalysisStage},
     decls,
@@ -100,6 +100,9 @@ impl Analyzer {
     /// allowing for imports like `import "example.com/company-name/proj/auth"`
     /// to be resolved.
     ///
+    /// This method is a simplified constructor that simply defers to
+    /// [`Analyzer::new_with_config`] via [`AnalysisConfig::default`].
+    ///
     /// # Example Usage
     ///
     /// ```
@@ -110,17 +113,147 @@ impl Analyzer {
     ///
     /// It may often be more convenient to instead use the
     /// [`Analyzer::from_directory`] utility or [`Analyzer::from_go_mod`], which
-    /// are helpful wrappers around this method.
+    /// are helpful wrappers around [`Analyzer`]'s constructors.
     #[must_use]
     #[inline]
     pub fn new(module_base: &str) -> Self {
-        Self {
+        Self::new_with_config(module_base, AnalysisConfig::default())
+    }
+
+    /// Constructs a new instance and applies a structured configuration object.
+    ///
+    /// This constructor allows invokers to easily configure the analysis by
+    /// providing a standardized collection of configuration options and other
+    /// customizable values. See [`AnalysisConfig`] for which options are
+    /// accepted.
+    ///
+    /// The `module_base` argument is the module path of the Go module that will
+    /// be analyzed, such as `example.com/company-name/proj`. Any inner packages
+    /// within the module will be associated with paths relative to this value,
+    /// allowing for imports like `import "example.com/company-name/proj/auth"`
+    /// to be resolved.
+    ///
+    /// If [`AnalysisConfig::inherit_base_policy`] is `true` (its default value)
+    /// and Cargo feature `base-security-policy` is enabled (which it is, by
+    /// default), then immediately before ingesting the blanket directives in
+    /// the provided invoker-defined structured configuration,
+    /// [`policy::BASE_SECURITY_POLICY`](crate::policy::BASE_SECURITY_POLICY)
+    /// is TOML-deserialized and its defined blanket directives are ingested.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// let config = glowy::AnalysisConfig {
+    ///     // change some fields here
+    ///     // field1: value1,
+    ///     // field2: value2,
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let analyzer = glowy::Analyzer::new_with_config("example.com/company-name/proj", config);
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// It is often more convenient to specify per-project configuration by
+    /// means of a TOML file. If Cargo feature `toml-config` is enabled, this
+    /// library makes available the method [`Analyzer::new_with_config_file`],
+    /// which automatically reads and parses such a file before invoking this
+    /// present function under the hood.
+    ///
+    /// Note that if the `toml-config` Cargo feature is enabled, the
+    /// [`Analyzer::from_directory`] constructor automatically invokes this
+    /// constructor if a `glowy.toml` file is found in the project root.
+    #[cfg_attr(
+        feature = "base-security-policy",
+        expect(
+            clippy::missing_panics_doc,
+            reason = "Base Security Policy should always be well-formed TOML"
+        )
+    )]
+    #[must_use]
+    #[inline]
+    pub fn new_with_config(module_base: &str, config: AnalysisConfig) -> Self {
+        // never downgrade verbosity: if envvar is set, we never want e.g. a
+        // config file to overwrite it
+        let verbose = env::var("GLOWY_VERBOSE").is_ok() || config.verbose;
+
+        let mut analyzer = Self {
             module_base: module_base.to_owned(),
             files: Vec::new(),
             blanket_directives: BlanketDirectives::new(),
-            verbose: env::var("GLOWY_VERBOSE").is_ok(),
-            include_tests: false,
-            max_build_tag_dimensions: DEFAULT_MAX_BUILD_TAG_DIMENSIONS,
+            verbose,
+            include_tests: config.include_tests,
+            max_build_tag_dimensions: config.max_build_tag_dimensions,
+        };
+
+        #[cfg(feature = "base-security-policy")]
+        if config.inherit_base_policy {
+            let base: AnalysisConfig = toml::from_str(crate::policy::BASE_SECURITY_POLICY)
+                .expect("base security policy failed to TOML-deserialize");
+
+            analyzer.ingest_blanket_directives(base.sources, base.allow_sinks, base.deny_sinks);
+        }
+
+        analyzer.ingest_blanket_directives(config.sources, config.allow_sinks, config.deny_sinks);
+
+        analyzer
+    }
+
+    /// Constructs a new instance with a configuration from a TOML file on disk.
+    ///
+    /// This utility method reads and parses a given TOML-formatted file into
+    /// a structured [`AnalysisConfig`] object, subsequently passing it to
+    /// [`Analyzer::new_with_config`] so that its defined options may be
+    /// applied.
+    ///
+    /// If ingestion is successful, `Ok(Ok(Self))` is returned.
+    ///
+    /// Note that this method is only available if the Cargo feature
+    /// `toml-config` is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Any [`std::io::Error`] encountered while opening and reading the
+    /// specified file is returned as-is, enclosed in a top-level [`Err`]
+    /// variant. If no such error occurs, [`Ok`] is returned, containing a
+    /// second-level [`Result`], which may encapsulate a TOML deserialization
+    /// error as `Ok(Err)`.
+    ///
+    /// # Example Usage
+    ///
+    /// ```no_run
+    /// let analyzer = glowy::Analyzer::new_with_config_file("./proj", "/tmp/glowy.toml")?
+    ///     .expect("well-formed TOML");
+    ///
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// It may not be necessary to use this method directly, as if it is
+    /// available, an equivalent effect is automatically applied by
+    /// [`Analyzer::from_directory`] if a `glowy.toml` file is found in the
+    /// project root.
+    #[cfg(feature = "toml-config")]
+    #[inline]
+    pub fn new_with_config_file<P: AsRef<path::Path>>(
+        module_base: &str,
+        path: P,
+    ) -> io::Result<Result<Self, toml::de::Error>> {
+        Self::read_config_file(path)
+            .map(|inner| inner.map(|config| Self::new_with_config(module_base, config)))
+    }
+
+    #[cfg(feature = "toml-config")]
+    fn read_config_file<P: AsRef<path::Path>>(
+        path: P,
+    ) -> io::Result<Result<AnalysisConfig, toml::de::Error>> {
+        let contents = fs::read_to_string(path)?;
+
+        match toml::from_str(&contents) {
+            Ok(config) => Ok(Ok(config)),
+            Err(err) => Ok(Err(err)),
         }
     }
 
@@ -143,10 +276,15 @@ impl Analyzer {
     /// directive was found in the `go.mod` file.
     ///
     /// Using this method to construct [`Analyzer`] brings the added advantage
-    /// of [`Analyzer::ingest_config_file`] being automatically invoked if a
-    /// `glowy.toml` configuration file is found in the project root. However,
-    /// this is only possible if that method is available, i.e., if Cargo
-    /// feature `toml-config` is enabled.
+    /// of [`Analyzer::new_with_config`] being automatically invoked if a
+    /// `glowy.toml` configuration file is found in the project root, similarly
+    /// to what [`Analyzer::new_with_config_file`] would accomplish if passed
+    /// the corresponding path. However, this is only possible if TOML
+    /// deserialization is available, i.e., if Cargo feature `toml-config` is
+    /// enabled. In order to ensure signature parity across Cargo features, if
+    /// TOML deserialization fails, `Ok(None)` is returned; detailed error
+    /// information ([`toml::de::Error`]) can be obtained by manually invoking
+    /// [`Analyzer::new_with_config_file`].
     ///
     /// # Errors
     ///
@@ -167,22 +305,27 @@ impl Analyzer {
     /// ```
     #[inline]
     pub fn from_directory<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
-        let Some(mut analyzer) = Self::from_go_mod(path.as_ref().join("go.mod"))? else {
-            return Ok(None);
-        };
+        #[cfg(not(feature = "toml-config"))]
+        let config = None;
 
         #[cfg(feature = "toml-config")]
-        {
+        let config = {
             // checking if the file exists ourselves could lead to strange race
             // conditions, so we just try it and see if it fails
-            match analyzer.ingest_config_file(path.as_ref().join("glowy.toml")) {
-                Ok(_) => {} // great
+            match Self::read_config_file(path.as_ref().join("glowy.toml")) {
+                Ok(Ok(config)) => Some(config), // great
+                Ok(Err(_)) => return Ok(None),  // deserialization error
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {
                     // no such file, so we just ignore this (don't report error)
+                    None
                 }
                 Err(err) => return Err(err), // something else; report
             }
-        }
+        };
+
+        let Some(mut analyzer) = Self::from_go_mod(path.as_ref().join("go.mod"), config)? else {
+            return Ok(None);
+        };
 
         analyzer.add_directory_recurs(path::Component::RootDir, path)?;
 
@@ -191,11 +334,13 @@ impl Analyzer {
 
     /// Constructs a new instance of [`Analyzer`] based on a `go.mod` file.
     ///
-    /// This method is a wrapper around [`Analyzer::new`] that provides the
-    /// convenience of extracting the base Go module path directly from a
-    /// specified `go.mod` file. The file residing at the given path is opened
-    /// in read-only mode and the module path is extracted from the first
-    /// `module` directive per the [spec](https://go.dev/ref/mod).
+    /// This method is a wrapper around either [`Analyzer::new`] or
+    /// [`Analyzer::new_with_config`] (depending on whether the given `config`
+    /// is [`Some`]) that provides the convenience of extracting the base Go
+    /// module path directly from a specified `go.mod` file. The file residing
+    /// at the given path is opened in read-only mode and the module path is
+    /// extracted from the first `module` directive per the
+    /// [spec](https://go.dev/ref/mod).
     ///
     /// If no valid `module` directive is found, this method returns `Ok(None)`.
     ///
@@ -210,12 +355,15 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```no_run
-    /// let analyzer = glowy::Analyzer::from_go_mod("./proj/go.mod")?;
+    /// let analyzer = glowy::Analyzer::from_go_mod("./proj/go.mod", None)?;
     ///
     /// # Ok::<(), std::io::Error>(())
     /// ```
     #[inline]
-    pub fn from_go_mod<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
+    pub fn from_go_mod<P: AsRef<path::Path>>(
+        path: P,
+        config: Option<AnalysisConfig>,
+    ) -> io::Result<Option<Self>> {
         let file = fs::File::open(path)?;
         let reader = io::BufReader::new(file);
         let lines = reader.lines().map_while(Result::ok);
@@ -267,7 +415,15 @@ impl Analyzer {
             };
 
             if valid_module_path(candidate) {
-                return Ok(Some(Self::new(candidate)));
+                // success, we have the module base path, so now we only need to
+                // dispatch to the applicable constructor depending on config
+                let analyzer = if let Some(config) = config {
+                    Self::new_with_config(candidate, config)
+                } else {
+                    Self::new(candidate)
+                };
+
+                return Ok(Some(analyzer));
             }
         }
 
@@ -380,120 +536,6 @@ impl Analyzer {
             .binary_search_by_key(&virtual_path.as_ref(), SourceFile::virtual_path)
             .ok()
             .map(|index| self.files[index].contents())
-    }
-
-    /// Consumes and applies configuration options from a TOML file on disk.
-    ///
-    /// This utility method reads and parses a given TOML-formatted file into
-    /// a structured [`AnalysisConfig`] object, subsequently passing it to
-    /// [`Analyzer::ingest_structured_config`] so that its defined options may
-    /// be applied.
-    ///
-    /// If ingestion is successful, `Ok(Ok(()))` is returned.
-    ///
-    /// Note that this method is only available if the Cargo feature
-    /// `toml-config` is enabled.
-    ///
-    /// # Errors
-    ///
-    /// Any [`std::io::Error`] encountered while opening and reading the
-    /// specified file is returned as-is, enclosed in a top-level [`Err`]
-    /// variant. If no such error occurs, [`Ok`] is returned, containing a
-    /// second-level [`Result`], which may encapsulate a TOML deserialization
-    /// error as `Ok(Err)`.
-    ///
-    /// # See Also
-    ///
-    /// It may not be necessary to use this method directly, as if it is
-    /// available, it is automatically invoked by [`Analyzer::from_directory`]
-    /// if a `glowy.toml` file is found in the project root.
-    #[cfg(feature = "toml-config")]
-    #[inline]
-    pub fn ingest_config_file<P: AsRef<path::Path>>(
-        &mut self,
-        path: P,
-    ) -> io::Result<Result<(), toml::de::Error>> {
-        let contents = fs::read_to_string(path)?;
-
-        let config = match toml::from_str(&contents) {
-            Ok(config) => config,
-            Err(err) => return Ok(Err(err)),
-        };
-
-        self.ingest_structured_config(config);
-
-        Ok(Ok(()))
-    }
-
-    /// Consumes and applies a unified structured analysis configuration object.
-    ///
-    /// This utility method allows invokers to easily configure the analysis by
-    /// providing a standardized collection of configuration options and other
-    /// customizable values. Each method invocation either merges with or fully
-    /// overwrites previously set values, depending on the option, so a single
-    /// invocation is recommended. See [`AnalysisConfig`] for which options are
-    /// accepted.
-    ///
-    /// # Example Usage
-    ///
-    /// ```
-    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
-    ///
-    /// let config = glowy::AnalysisConfig {
-    ///     // change some fields here
-    ///     // field1: value1,
-    ///     // field2: value2,
-    ///     ..Default::default()
-    /// };
-    ///
-    /// analyzer.ingest_structured_config(config);
-    /// ```
-    ///
-    /// # See Also
-    ///
-    /// It is often more convenient to specify per-project configuration by
-    /// means of a TOML file. If Cargo feature `toml-config` is enabled, this
-    /// library makes available the method [`Analyzer::ingest_config_file`],
-    /// which automatically reads and parses such a file before invoking this
-    /// present function under the hood.
-    ///
-    /// Note that if [`Analyzer::ingest_config_file`] is available, it is
-    /// automatically invoked by [`Analyzer::from_directory`] if a `glowy.toml`
-    /// file is found in the project root.
-    #[inline]
-    pub fn ingest_structured_config(&mut self, config: AnalysisConfig) {
-        if !self.verbose {
-            // never downgrade verbosity: if envvar is set, we never want it to
-            // be overridden by e.g. a config file
-            self.verbose = config.verbose;
-        }
-
-        self.include_tests = config.include_tests;
-        self.max_build_tag_dimensions = config.max_build_tag_dimensions;
-
-        let blanket_directives = config
-            .sources
-            .into_iter()
-            .map(|(target, tags)| (BlanketDirectiveKind::Source, target, tags))
-            .chain(
-                config
-                    .allow_sinks
-                    .into_iter()
-                    .map(|(target, tags)| (BlanketDirectiveKind::AllowSink, target, tags)),
-            )
-            .chain(
-                config
-                    .deny_sinks
-                    .into_iter()
-                    .map(|(target, tags)| (BlanketDirectiveKind::DenySink, target, tags)),
-            );
-
-        for (kind, target, tags) in blanket_directives {
-            // we use add_blanket_directive directly to avoid conversion to
-            // Label and then back to OwnedLabel (preventing unnecessary
-            // allocations that would happen with add_blanket_source/sink)
-            self.add_blanket_directive(kind, target, Label::from_tags(tags));
-        }
     }
 
     fn add_blanket_directive<'c1: 'c2, 'c2>(
@@ -629,6 +671,34 @@ impl Analyzer {
         };
 
         self.add_blanket_directive(variant, target, label);
+    }
+
+    fn ingest_blanket_directives(
+        &mut self,
+        sources: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
+        allow_sinks: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
+        deny_sinks: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
+    ) {
+        let blanket_directives = sources
+            .into_iter()
+            .map(|(target, tags)| (BlanketDirectiveKind::Source, target, tags))
+            .chain(
+                allow_sinks
+                    .into_iter()
+                    .map(|(target, tags)| (BlanketDirectiveKind::AllowSink, target, tags)),
+            )
+            .chain(
+                deny_sinks
+                    .into_iter()
+                    .map(|(target, tags)| (BlanketDirectiveKind::DenySink, target, tags)),
+            );
+
+        for (kind, target, tags) in blanket_directives {
+            // we use add_blanket_directive directly to avoid conversion to
+            // Label and then back to OwnedLabel (preventing unnecessary
+            // allocations that would happen with add_blanket_source/sink)
+            self.add_blanket_directive(kind, target, Label::from_tags(tags));
+        }
     }
 
     fn has_blanket_enforcement_checks(&self) -> bool {

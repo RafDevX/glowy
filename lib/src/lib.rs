@@ -233,9 +233,12 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 /// Represents a structured collection of analysis configuration options.
 ///
 /// This aggregates various customizable values and is primarily used as an
-/// input to [`Analyzer::ingest_structured_config`]. It may be created manually,
+/// input to [`Analyzer::new_with_config`]. It may be created manually,
 /// or it may be automatically derived from a TOML configuration file using the
-/// [`Analyzer::ingest_config_file`] method if Cargo feature `toml-config` is
+/// [`Analyzer::new_with_config_file`] method if Cargo feature `toml-config` is
+/// enabled. Similarly, deserialization and ingestion is automatic under
+/// [`Analyzer::from_directory`] if a `glowy.toml` file is found in the
+/// root of the specified directory and the `toml-config` Cargo feature is
 /// enabled.
 ///
 /// Note that the [`Default`] trait is implemented, meaning that it can be used
@@ -250,6 +253,23 @@ pub struct AnalysisConfig {
     /// variable `GLOWY_VERBOSE` is set (in which case the analyzer is always
     /// verbose).
     pub verbose: bool,
+    /// Whether to compose all configuration onto Glowy's base security policy.
+    ///
+    /// When Cargo feature `base-security-policy` is enabled, Glowy ships with a
+    /// default, standard security policy designed for supporting a softer
+    /// bootstrap curve for stakeholders to start using the provided analysis
+    /// features. This base policy (accessible at
+    /// [`policy::BASE_SECURITY_POLICY`]) is heuristics-driven and
+    /// domain-agnostic, meaning that it will often be wrong in many fronts. It
+    /// is designed as a starting resource, under the expectation of being
+    /// replaced by a custom security policy before any serious use. When such a
+    /// (more adequate) policy exists, the base configuration should be disabled
+    /// by setting this option to `false`.
+    ///
+    /// Defaults to `true`, but is only present with Cargo feature
+    /// `base-security-policy` enabled (which it is, by default).
+    #[cfg(feature = "base-security-policy")]
+    pub inherit_base_policy: bool,
     /// Targets universally recognized as blanket information sources.
     ///
     /// These targets will always be considered to yield the associated label,
@@ -299,10 +319,12 @@ pub struct AnalysisConfig {
     /// introduce a boolean dimension whose `2^N` on/off combinations the
     /// analyzer would otherwise explore in full. When a corpus mentions more
     /// distinct dimensions than this cap, the analysis with a
-    /// [`TooManyBuildTagDimensions`](errors::AnalysisErrorKind::TooManyBuildTagDimensions)
-    /// error so the invoker can decide whether to raise the cap and retry.
+    /// [`TooManyBuildTagDimensions`][AEKtmbtd] error so the invoker can decide
+    /// whether to raise the cap and retry.
     ///
     /// Defaults to [`DEFAULT_MAX_BUILD_TAG_DIMENSIONS`].
+    ///
+    /// [AEKtmbtd]: errors::AnalysisErrorKind::TooManyBuildTagDimensions
     pub max_build_tag_dimensions: usize,
 }
 
@@ -311,6 +333,8 @@ impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
             verbose: false,
+            #[cfg(feature = "base-security-policy")]
+            inherit_base_policy: true,
             sources: IndexMap::new(),
             allow_sinks: IndexMap::new(),
             deny_sinks: IndexMap::new(),

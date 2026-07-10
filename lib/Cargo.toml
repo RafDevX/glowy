@@ -12,7 +12,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["parallelism", "toml-config"]
+default = ["base-security-policy", "parallelism", "toml-config"]
+base-security-policy = ["toml-config"]
 parallelism = ["dep:rayon", "indexmap/rayon"]
 toml-config = ["indexmap/serde", "dep:serde", "dep:toml"]
 
