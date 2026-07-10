@@ -277,9 +277,12 @@ pub struct AnalysisConfig {
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
     /// [`BlanketDirectiveTarget`], which deserializes from a string of the form
-    /// `pkg.func`. Each associated [`Vec<String>`] value represents a
-    /// [`Label`](labels::Label), with each individual [`String`] element
-    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// `pkg.func` (applying to every access) or `pkg.func#N=value` (applying
+    /// only when the argument at 0-indexed position `N` is not provably
+    /// different from `value`). Each associated [`Vec<String>`] value
+    /// represents a [`Label`](labels::Label), with each individual [`String`]
+    /// element corresponding to a
+    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sources: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Targets universally recognized as blanket whitelist-based sinks.
     ///

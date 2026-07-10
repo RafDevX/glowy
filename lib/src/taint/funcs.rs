@@ -19,8 +19,8 @@ use crate::{
     taint::{annotations, enforcement, exprs, goto},
     types::{TypeInfo, TypeKind},
     values::{
-        BacktraceContainer, FunctionRef, FunctionValue, InherentSink, Mergeable, MobiusValue,
-        SelfAwareBacktraceContainer, Value, ValueRef,
+        BacktraceContainer, FunctionRef, FunctionValue, InherentConditionalSource, InherentSink,
+        Mergeable, MobiusValue, SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
 
@@ -292,7 +292,7 @@ fn build_function_value<'a>(
 
         let directives = ctx.blanket_directives_for(pkg_path, receiver_type_name, name.content());
 
-        func_val.absorb_blanket_sinks(directives.iter());
+        func_val.absorb_blanket_directives(directives.iter());
     }
 
     // cannot use `vec![ValueRef::new_bottom(); signature.result.len()]`, since
@@ -951,7 +951,7 @@ fn apply_call<'a>(
         // treat it as a blackbox and assume the label of all its outputs is the
         // union of the label of all its inputs; we can't do anything fancy
 
-        return visit_blackbox_call(
+        let mut result = visit_blackbox_call(
             ctx,
             func,
             &with_backtraces_ref,
@@ -959,6 +959,10 @@ fn apply_call<'a>(
             &node.location,
             func.signature(),
         );
+
+        apply_call_conditional_blanket_sources(func, &node.args, &call_location, &mut result);
+
+        return result;
     };
 
     // by this point, we know `func.outcome()` is `Some`, which means we have
@@ -1009,6 +1013,8 @@ fn apply_call<'a>(
         &with_backtraces_ref,
         &node.location,
     );
+
+    apply_call_conditional_blanket_sources(func, &node.args, &call_location, &mut result);
 
     // need to nest the function's backtrace into the result because the
     // function itself was accessed
@@ -1131,6 +1137,47 @@ pub fn nest_receiver_backtrace<'a>(
             [backtrace],
         ),
         None => method_value,
+    }
+}
+
+fn apply_call_conditional_blanket_sources<'a>(
+    func: &FunctionValue<'a>,
+    args: &[ExprNode<'a>],
+    call_location: &Pinned<'a, Location>,
+    result: &mut [ValueRef<'a>],
+) {
+    let sources = func.conditional_sources();
+
+    if sources.is_empty() {
+        return;
+    }
+
+    let blanket_label: Label<'_> = sources
+        .iter()
+        .filter(|source| source.applies_to_args(args))
+        .map(InherentConditionalSource::label)
+        .sum();
+
+    if blanket_label.is_bottom() {
+        // avoid clones below if unnecessary
+        return;
+    }
+
+    let backtrace = LabelBacktrace::new_root(
+        LabelBacktraceKind::BlanketSource,
+        blanket_label,
+        None,
+        call_location.clone(),
+    )
+    .unwrap(); // we just checked that blanket_label is not Bottom
+
+    for value in result {
+        *value = value.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            call_location.clone(),
+            [backtrace.clone()],
+        );
     }
 }
 

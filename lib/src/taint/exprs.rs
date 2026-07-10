@@ -199,7 +199,7 @@ pub fn resolve_operand_name<'a>(
                 // return a fake Symbol, synthesized now on the fly with no
                 // information besides what can be derived from the associated
                 // blanket directives, so that their details can be propagated
-                return synthesize_fake_symbol_with_blanket_sinks(ctx, name, qualifier);
+                return synthesize_fake_symbol_with_blanket_directives(ctx, name, qualifier);
             }
             QualifiedSymbolResolutionResult::UnknownQualifier => {
                 ctx.report_error(AnalysisErrorKind::UnknownQualifier { found: qualifier });
@@ -219,7 +219,7 @@ pub fn resolve_operand_name<'a>(
     symbol
 }
 
-fn synthesize_fake_symbol_with_blanket_sinks<'a>(
+fn synthesize_fake_symbol_with_blanket_directives<'a>(
     ctx: &AnalysisContext<'a>,
     name: Span<'a>,
     qualifier: Span<'a>,
@@ -231,25 +231,25 @@ fn synthesize_fake_symbol_with_blanket_sinks<'a>(
     // we pass type_name = None because this could never be a method access
     let directives = ctx.blanket_directives_for(package_path, None, name.content());
 
-    // don't want to upgrade to a FunctionValue for no reason, source directives
-    // allow non-functions (e.g., `os.Args` or `os.Stdin`)
-    let has_sinks = directives.iter().any(|directive| {
+    // don't want to upgrade to a FunctionValue for no reason; unconditional
+    // source directives allow non-functions (e.g., `os.Args` or `os.Stdin`)
+    let has_callable_directives = directives.iter().any(|directive| {
         matches!(
             directive.kind(),
             BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink,
-        )
+        ) || directive.arg_predicate().is_some() // conditional on call args
     });
 
-    if !has_sinks {
-        // no configured sink blanket directives for this blackbox symbol, so
-        // there is no reason to lie, thus we really do tell the invoker that
-        // symbol resolution failed
+    if !has_callable_directives {
+        // no configured call-level blanket directives for this blackbox symbol,
+        // so there is no reason to lie, thus we really do tell the invoker
+        // that symbol resolution failed
         return None;
     }
 
     let mut func_val = FunctionValue::new_unknown(None, false);
 
-    func_val.absorb_blanket_sinks(directives);
+    func_val.absorb_blanket_directives(directives);
 
     let location = ctx.pin(name.location());
     let value = ValueRef::new(Value::Function(Box::new(func_val)), location, None);
@@ -277,7 +277,10 @@ fn build_blanket_source_backtrace<'a>(
     let blanket_label: Label<'_> = ctx
         .blanket_directives_for(package_path, None, name.content())
         .iter()
-        .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
+        .filter(|directive| {
+            // only unconditional sources matter here
+            directive.kind() == BlanketDirectiveKind::Source && directive.arg_predicate().is_none()
+        })
         .map(BlanketDirective::label)
         .sum();
 

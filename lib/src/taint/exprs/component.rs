@@ -210,7 +210,7 @@ pub fn visit_selection_with_base<'a>(
         let mut blackbox = FunctionValue::new_unknown(blackbox_backtrace, true);
 
         if let Some(directives) = type_member_directives {
-            blackbox.absorb_blanket_sinks(directives);
+            blackbox.absorb_blanket_directives(directives);
         }
 
         return ValueRef::new(Value::Function(Box::new(blackbox)), location, None);
@@ -233,7 +233,10 @@ fn build_blanket_backtrace<'a>(
 ) -> Option<LabelBacktrace<'a>> {
     let blanket_label: Label<'_> = directives
         .iter()
-        .filter(|directive| directive.kind() == BlanketDirectiveKind::Source)
+        .filter(|directive| {
+            // only unconditional blanket sources matter here
+            directive.kind() == BlanketDirectiveKind::Source && directive.arg_predicate().is_none()
+        })
         .map(BlanketDirective::label)
         .sum();
 

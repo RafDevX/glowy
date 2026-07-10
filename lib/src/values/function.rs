@@ -3,7 +3,8 @@ use std::{borrow::Cow, cell::RefCell, cmp, collections::HashMap, fmt, rc::Rc};
 use parser::{
     Location, Span,
     ast::{
-        FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode, TypeNode,
+        ExprNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode,
+        TypeNode,
     },
 };
 use uuid::Uuid;
@@ -12,10 +13,12 @@ use crate::{
     Pinned, SinkDescriptor,
     context::{AnalysisContext, DeferredEnforcementCheck},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
-    policy::{BlanketDirective, BlanketDirectiveKind, SinkKind},
+    policy::{BlanketDirective, BlanketDirectiveKind, BlanketSourceArgPredicate, SinkKind},
     snapshots::SnapshotAware,
     types::TypeInfo,
-    values::{BacktraceContainer, SelfAwareBacktraceContainer, Upgrade, ValueRef},
+    values::{
+        BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade, ValueRef,
+    },
 };
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -40,6 +43,8 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // Label to be subtracted from realized result at call (revocation)
     sanitizer: Label<'a>,
+    // call-time source predicates that taint return values when matched
+    conditional_sources: Vec<InherentConditionalSource<'a>>,
     // inherent sinks that any call to this function implicitly triggers
     sinks: Vec<InherentSink<'a>>,
     // from sinks within the function, to which synthetic tags were passed
@@ -89,6 +94,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             sanitizer,
+            conditional_sources: Vec::new(),
             sinks: Vec::new(),
             deferred_checks: vec![],
             captures: HashMap::new(),
@@ -220,6 +226,16 @@ impl<'a> FunctionValue<'a> {
         &self.sanitizer
     }
 
+    pub fn conditional_sources(&self) -> &[InherentConditionalSource<'a>] {
+        &self.conditional_sources
+    }
+
+    pub(crate) fn add_conditional_source(&mut self, source: InherentConditionalSource<'a>) {
+        if !self.conditional_sources.contains(&source) {
+            self.conditional_sources.push(source);
+        }
+    }
+
     pub fn sinks(&self) -> &[InherentSink<'a>] {
         &self.sinks
     }
@@ -230,16 +246,19 @@ impl<'a> FunctionValue<'a> {
         }
     }
 
-    pub(crate) fn absorb_blanket_sinks(
+    pub(crate) fn absorb_blanket_directives(
         &mut self,
         directives: impl IntoIterator<Item = &'a BlanketDirective>,
     ) {
         for directive in directives {
             match directive.kind() {
                 BlanketDirectiveKind::Source => {
-                    // sources are realized at each access site (uniformly for
-                    // functions and non-function values), not folded into the
-                    // function value; nothing to do here
+                    if let Some(predicate) = directive.arg_predicate() {
+                        self.add_conditional_source(InherentConditionalSource {
+                            label: directive.label().clone(),
+                            predicate: predicate.clone(),
+                        });
+                    }
                 }
                 BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
                     let mut label = directive.label().clone();
@@ -443,6 +462,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
         self.signature.is_none()
             && self.outcome.is_none()
             && self.sanitizer.is_bottom()
+            && self.conditional_sources.is_empty()
             && self.sinks.is_empty()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
@@ -508,6 +528,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
+            conditional_sources: self.conditional_sources.clone(),
             sinks: self.sinks.clone(),
             deferred_checks,
             captures,
@@ -541,6 +562,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
+            conditional_sources: self.conditional_sources.clone(),
             sinks: self.sinks.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
@@ -571,6 +593,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer
+            && self.conditional_sources == other.conditional_sources
             && self.sinks == other.sinks
             && self
                 .deferred_checks
@@ -780,6 +803,30 @@ impl SnapshotAware for CaptureBinding<'_> {
             && self
                 .hybrid_fallback
                 .snapshot_aware_eq(&other.hybrid_fallback)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InherentConditionalSource<'a> {
+    label: Label<'a>,
+    predicate: BlanketSourceArgPredicate,
+}
+
+impl<'a> InherentConditionalSource<'a> {
+    pub fn label(&self) -> &Label<'a> {
+        &self.label
+    }
+
+    pub fn applies_to_args(&self, args: &[ExprNode<'_>]) -> bool {
+        let Some(arg) = args.get(self.predicate.arg_index()) else {
+            return false;
+        };
+
+        SimpleConstValue::try_resolve_from_expr(arg)
+            .as_ref()
+            .is_none_or(|actual| self.predicate.matches_const(actual))
+        // ^^ if we cannot resolve a SimpleConstValue, we have to be
+        // conservative and assume it could match the predicate
     }
 }
 

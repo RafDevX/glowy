@@ -22,7 +22,7 @@ use crate::{
     labels::Label,
     policy::{
         BlanketDirective, BlanketDirectiveKind, BlanketDirectiveTarget, BlanketDirectives,
-        PackageBlanketDirectives,
+        BlanketSourceArgPredicate, PackageBlanketDirectives,
     },
     taint,
 };
@@ -549,9 +549,10 @@ impl Analyzer {
             type_name,
             member_name,
             arg_index,
+            arg_predicate,
         } = target;
 
-        let directive = BlanketDirective::new(kind, arg_index, label);
+        let directive = BlanketDirective::new(kind, arg_index, arg_predicate, label);
 
         self.blanket_directives
             .entry(package_path)
@@ -589,6 +590,7 @@ impl Analyzer {
     ///     "example.com/company-name/proj/sub",
     ///     None::<String>,
     ///     "SomeFunc",
+    ///     None,
     ///     Label::from_tags(&["secret"]),
     /// );
     /// ```
@@ -598,6 +600,7 @@ impl Analyzer {
         package_path: impl Into<Cow<'f, str>>,
         type_name: Option<impl Into<Cow<'f, str>>>,
         member_name: impl Into<Cow<'f, str>>,
+        arg_predicate: Option<BlanketSourceArgPredicate>,
         label: Label<'static>,
     ) {
         let target = BlanketDirectiveTarget::new(
@@ -605,6 +608,7 @@ impl Analyzer {
             type_name.map(Into::into),
             member_name.into(),
             None, // argument targeting is meaningless for sources
+            arg_predicate,
         );
 
         self.add_blanket_directive(BlanketDirectiveKind::Source, target, label);
@@ -645,6 +649,7 @@ impl Analyzer {
     ///         None::<String>,
     ///         "SomeFunc",
     ///         None,
+    ///         None,
     ///     ),
     ///     false,
     ///     Label::from_tags(&["untrusted"]),
@@ -652,7 +657,7 @@ impl Analyzer {
     ///
     /// // applies only to the second argument of `WriteFile`
     /// analyzer.add_blanket_sink(
-    ///     BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1)),
+    ///     BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1), None),
     ///     false,
     ///     Label::from_tags(&["untrusted"]),
     /// );

@@ -9,7 +9,7 @@ use std::{collections::HashMap, error, fmt, num::ParseIntError, str::FromStr};
 
 use parser::Location;
 
-use crate::{FullPackagePath, labels::Label, snapshots::SnapshotAware};
+use crate::{FullPackagePath, labels::Label, snapshots::SnapshotAware, values::SimpleConstValue};
 
 /// Standard base security policy with sensible defaults.
 ///
@@ -194,24 +194,28 @@ pub(crate) struct BlanketDirective {
     kind: BlanketDirectiveKind,
     label: Label<'static>,
     arg_index: Option<usize>,
+    arg_predicate: Option<BlanketSourceArgPredicate>,
 }
 
 impl BlanketDirective {
     pub(crate) fn new(
         kind: BlanketDirectiveKind,
         arg_index: Option<usize>,
+        arg_predicate: Option<BlanketSourceArgPredicate>,
         label: Label<'static>,
     ) -> Self {
-        // sources don't have a meaningful notion of "this arg only"
-        let arg_index = match kind {
-            BlanketDirectiveKind::Source => None,
-            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => arg_index,
+        let (arg_index, arg_predicate) = match kind {
+            // sources don't have a meaningful notion of "this arg only"
+            BlanketDirectiveKind::Source => (None, arg_predicate),
+            // sinks don't have a meaningful notion of "only when this matches"
+            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => (arg_index, None),
         };
 
         Self {
             kind,
             label,
             arg_index,
+            arg_predicate,
         }
     }
 
@@ -225,6 +229,10 @@ impl BlanketDirective {
 
     pub fn arg_index(&self) -> Option<usize> {
         self.arg_index
+    }
+
+    pub fn arg_predicate(&self) -> Option<&BlanketSourceArgPredicate> {
+        self.arg_predicate.as_ref()
     }
 }
 
@@ -252,9 +260,11 @@ pub(crate) enum BlanketDirectiveKind {
 ///
 /// In addition, targets may be optionally narrowed down to specific argument
 /// positions via the inclusion of a `#N` suffix (zero-indexed). For instance,
-/// `os.WriteFile#1` targets only its second argument. Note, however, that any
-/// `arg_index` set for a source directive is ignored, since such restriction is
-/// only meaningful for enforcement checks.
+/// `os.WriteFile#1` targets only its second argument. Source directives may
+/// further use `#N=value`, meaning that the source applies at call time only
+/// when argument `N` is not provably different from `value`. Values parsed from
+/// configuration are intentionally treated as unquoted constants: `#0=123`
+/// matches both the string constant `"123"` and the integer constant `123`.
 ///
 /// # Parsing and Deserializing
 ///
@@ -275,7 +285,8 @@ pub(crate) enum BlanketDirectiveKind {
 /// Optionally, a `#N` suffix (zero-indexed) may be included to also specify an
 /// `arg_index`. For example, the string `database/sql.DB.Query#0` corresponds
 /// to a target with defined `package_path`, `type_name`, `member_name`, and
-/// `arg_index`.
+/// `arg_index`. For source directives only, `#N=value` additionally records a
+/// call-time equality predicate.
 ///
 /// This struct implements [`FromStr`] following this specification, and (if the
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
@@ -300,6 +311,8 @@ pub struct BlanketDirectiveTarget {
     ///
     /// If `None`, no restriction is imposed.
     pub arg_index: Option<usize>,
+    /// Argument-based predicate for conditional application of sources.
+    pub arg_predicate: Option<BlanketSourceArgPredicate>,
 }
 
 impl BlanketDirectiveTarget {
@@ -315,12 +328,14 @@ impl BlanketDirectiveTarget {
         type_name: Option<impl Into<String>>,
         member_name: impl Into<String>,
         arg_index: Option<usize>,
+        arg_predicate: Option<BlanketSourceArgPredicate>,
     ) -> Self {
         Self {
             package_path: package_path.into(),
             type_name: type_name.map(Into::into),
             member_name: member_name.into(),
             arg_index,
+            arg_predicate,
         }
     }
 }
@@ -336,7 +351,9 @@ impl fmt::Display for BlanketDirectiveTarget {
 
         write!(f, "{}", self.member_name)?;
 
-        if let Some(index) = self.arg_index {
+        if let Some(predicate) = &self.arg_predicate {
+            write!(f, "#{predicate}")?;
+        } else if let Some(index) = self.arg_index {
             write!(f, "#{index}")?;
         }
 
@@ -349,14 +366,29 @@ impl FromStr for BlanketDirectiveTarget {
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (path, arg_index) = if let Some((path, arg_str)) = s.rsplit_once('#') {
+        let (path, arg_index, arg_predicate) = if let Some((path, arg_spec)) = s.rsplit_once('#') {
+            let (arg_str, arg_value_str) = arg_spec
+                .split_once('=')
+                .map_or((arg_spec, None), |(arg_str, value)| (arg_str, Some(value)));
+
             let arg_index: usize = arg_str
                 .parse()
                 .map_err(BlanketDirectiveTargetParseError::InvalidArgIndex)?;
 
-            (path, Some(arg_index))
+            let arg_predicate = arg_value_str
+                .map(BlanketSourcePredicateValue::from_str)
+                .transpose()?
+                .map(|value| BlanketSourceArgPredicate::new(arg_index, value));
+
+            let arg_index = if arg_predicate.is_some() {
+                None
+            } else {
+                Some(arg_index)
+            };
+
+            (path, arg_index, arg_predicate)
         } else {
-            (s, None)
+            (s, None, None)
         };
 
         let (before_last_slash, tail) = match path.rsplit_once('/') {
@@ -406,6 +438,7 @@ impl FromStr for BlanketDirectiveTarget {
             type_name: type_name.map(str::to_owned),
             member_name: member_name.to_owned(),
             arg_index,
+            arg_predicate,
         };
 
         Ok(target)
@@ -424,6 +457,149 @@ impl<'de> serde::Deserialize<'de> for BlanketDirectiveTarget {
     }
 }
 
+/// Represents an applicability predicate for argument-targeted blanket sources.
+///
+/// Glowy supports conditionally configuring blanket sources that are only
+/// actually effective under specific conditions, based on the inferred value of
+/// a specific argument, for an invocable source.
+///
+/// For example, consumers might find it helpful to declare that `os.Getenv` is
+/// a blanket source but only when the value passed to its first argument
+/// matches (or could match) `API_TOKEN`. The analyzer would then only apply the
+/// blanket source's effects on invocations where it could not statically
+/// determine that the value did not match `API_TOKEN`. Note that only very
+/// simple value tracking is available, but obvious cases such as
+/// `os.GetEnv("PORT")` will not trigger the blanket source.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BlanketSourceArgPredicate {
+    arg_index: usize,
+    value: BlanketSourcePredicateValue,
+}
+
+impl BlanketSourceArgPredicate {
+    /// Constructs a new argument predicate for the given call argument index.
+    #[must_use]
+    #[inline]
+    pub fn new(arg_index: usize, value: impl Into<BlanketSourcePredicateValue>) -> Self {
+        Self {
+            arg_index,
+            value: value.into(),
+        }
+    }
+
+    /// Returns the zero-based call argument index tested by this predicate.
+    #[must_use]
+    #[inline]
+    pub fn arg_index(&self) -> usize {
+        self.arg_index
+    }
+
+    /// Returns the constant value tested by this predicate.
+    #[must_use]
+    #[inline]
+    pub fn value(&self) -> &BlanketSourcePredicateValue {
+        &self.value
+    }
+
+    pub(crate) fn matches_const(&self, actual: &SimpleConstValue) -> bool {
+        self.value.matches_const(actual)
+    }
+}
+
+impl fmt::Display for BlanketSourceArgPredicate {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}={}", self.arg_index, self.value)
+    }
+}
+
+/// Constant value used by an argument-targeting blanket source predicate.
+///
+/// See [`BlanketSourceArgPredicate`] for more information on usage.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BlanketSourcePredicateValue {
+    /// A predicate value without a known type.
+    ///
+    /// Since this value has unknown type, it is considered to match with any
+    /// other value (of any other type) with the same string representation.
+    /// For example, a [`BlanketSourcePredicateValue::Raw`] holding "123"
+    /// matches both a string-typed argument "123" and an integer-shaped
+    /// argument 123.
+    Raw(String),
+    /// A predicate value bound to a specific, known type.
+    ///
+    /// The wrapped type, `SimpleConstValue`, is an internal representation
+    /// available only for very simple expression combinations, such as `5`
+    /// derived from `2 + 3`.
+    Typed(SimpleConstValue),
+}
+
+impl BlanketSourcePredicateValue {
+    pub(crate) fn matches_const(&self, actual: &SimpleConstValue) -> bool {
+        match self {
+            Self::Typed(expected) => expected == actual,
+            Self::Raw(expected) => match actual {
+                SimpleConstValue::Boolean(actual) => *expected == actual.to_string(),
+                SimpleConstValue::Integer(actual) => expected
+                    .parse::<u64>()
+                    .is_ok_and(|expected| expected == *actual),
+                SimpleConstValue::String(actual) => expected == actual,
+            },
+        }
+    }
+}
+
+impl fmt::Display for BlanketSourcePredicateValue {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Raw(raw) => f.write_str(raw),
+            Self::Typed(value) => value.fmt(f),
+        }
+    }
+}
+
+impl FromStr for BlanketSourcePredicateValue {
+    type Err = BlanketDirectiveTargetParseError;
+
+    #[inline]
+    fn from_str(raw_value: &str) -> Result<Self, Self::Err> {
+        if raw_value.is_empty() {
+            return Err(BlanketDirectiveTargetParseError::EmptyArgPredicateValue);
+        }
+
+        Ok(Self::Raw(raw_value.to_owned()))
+    }
+}
+
+impl From<bool> for BlanketSourcePredicateValue {
+    #[inline]
+    fn from(value: bool) -> Self {
+        Self::Typed(SimpleConstValue::Boolean(value))
+    }
+}
+
+impl From<u64> for BlanketSourcePredicateValue {
+    #[inline]
+    fn from(value: u64) -> Self {
+        Self::Typed(SimpleConstValue::Integer(value))
+    }
+}
+
+impl From<String> for BlanketSourcePredicateValue {
+    #[inline]
+    fn from(value: String) -> Self {
+        Self::Typed(SimpleConstValue::String(value))
+    }
+}
+
+impl From<&str> for BlanketSourcePredicateValue {
+    #[inline]
+    fn from(value: &str) -> Self {
+        Self::from(value.to_owned())
+    }
+}
+
 /// Represents a failure to parse a string into a [`BlanketDirectiveTarget`].
 #[derive(Debug)]
 pub enum BlanketDirectiveTargetParseError {
@@ -439,6 +615,8 @@ pub enum BlanketDirectiveTargetParseError {
     EmptyMemberName,
     /// The argument-index portion (after the `#`) is not a valid `usize`.
     InvalidArgIndex(ParseIntError),
+    /// The provided source argument predicate value is empty.
+    EmptyArgPredicateValue,
 }
 
 impl fmt::Display for BlanketDirectiveTargetParseError {
@@ -463,6 +641,9 @@ impl fmt::Display for BlanketDirectiveTargetParseError {
                     "blanket directive target has invalid argument index: {err}"
                 )
             }
+            Self::EmptyArgPredicateValue => {
+                f.write_str("blanket directive source argument predicate value is empty")
+            }
         }
     }
 }
@@ -475,7 +656,8 @@ impl error::Error for BlanketDirectiveTargetParseError {
             | Self::TooManyMemberSegments
             | Self::EmptyPackagePath
             | Self::EmptyTypeName
-            | Self::EmptyMemberName => None,
+            | Self::EmptyMemberName
+            | Self::EmptyArgPredicateValue => None,
             Self::InvalidArgIndex(inner) => Some(inner),
         }
     }
@@ -490,7 +672,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.Remove".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("os", None::<String>, "Remove", None)
+            BlanketDirectiveTarget::new("os", None::<String>, "Remove", None, None)
         );
     }
 
@@ -499,7 +681,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.WriteFile#1".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1))
+            BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1), None)
         );
     }
 
@@ -508,7 +690,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "example.com/a/b/pkg.Fn#0".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("example.com/a/b/pkg", None::<String>, "Fn", Some(0))
+            BlanketDirectiveTarget::new("example.com/a/b/pkg", None::<String>, "Fn", Some(0), None)
         );
     }
 
@@ -517,7 +699,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "database/sql.DB.Query".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", None)
+            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", None, None)
         );
     }
 
@@ -526,7 +708,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "database/sql.DB.Query#0".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", Some(0))
+            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", Some(0), None)
         );
     }
 
@@ -536,7 +718,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.File.Read".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("os", Some("File"), "Read", None)
+            BlanketDirectiveTarget::new("os", Some("File"), "Read", None, None)
         );
     }
 
@@ -546,7 +728,13 @@ mod target_tests {
             "github.com/gin-gonic/gin.Context.Query".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("github.com/gin-gonic/gin", Some("Context"), "Query", None)
+            BlanketDirectiveTarget::new(
+                "github.com/gin-gonic/gin",
+                Some("Context"),
+                "Query",
+                None,
+                None
+            )
         );
     }
 
@@ -610,6 +798,14 @@ mod target_tests {
         assert!(matches!(
             "os.Remove#abc".parse::<BlanketDirectiveTarget>(),
             Err(BlanketDirectiveTargetParseError::InvalidArgIndex(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_arg_predicate_value() {
+        assert!(matches!(
+            "os.Getenv#0=".parse::<BlanketDirectiveTarget>(),
+            Err(BlanketDirectiveTargetParseError::EmptyArgPredicateValue)
         ));
     }
 }

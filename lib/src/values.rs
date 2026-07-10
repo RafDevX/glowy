@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     cell::{Ref, RefCell, RefMut},
+    fmt,
     hash::Hash,
     iter,
     rc::Rc,
@@ -15,7 +16,9 @@ pub use self::{
     channel::ChannelValue,
     composite::{CompositeValue, CompositeValueAdapter},
     expandable::ExpandableValue,
-    function::{CaptureBinding, FunctionRef, FunctionValue, InherentSink},
+    function::{
+        CaptureBinding, FunctionRef, FunctionValue, InherentConditionalSource, InherentSink,
+    },
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,
@@ -771,5 +774,15 @@ impl SimpleConstValue {
         };
 
         Some(result)
+    }
+}
+
+impl fmt::Display for SimpleConstValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Boolean(inner) => inner.fmt(f),
+            Self::Integer(inner) => inner.fmt(f),
+            Self::String(inner) => inner.fmt(f),
+        }
     }
 }
