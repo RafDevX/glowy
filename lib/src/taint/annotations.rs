@@ -92,6 +92,10 @@ pub fn resolve_revocation_label<'a>(
 
         None
     } else {
-        Some(Label::from_tags(&annotation.tags))
+        let mut label = Label::from_tags(&annotation.tags);
+
+        label.accept_wildcards();
+
+        Some(label)
     }
 }
