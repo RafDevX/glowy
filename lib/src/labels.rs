@@ -769,6 +769,62 @@ impl<'a> Label<'a> {
         }
     }
 
+    /// Returns the restriction of this label to the provided axes.
+    ///
+    /// This operation constructs a new instance of [`Label`] which is identical
+    /// to `self`, except for the omission of [`LabelTag`]s with a defined axis
+    /// not whitelisted by `axes`.
+    ///
+    /// In particular, this means that:
+    /// - [`Label::Bottom`] is always restricted to [`Label::Bottom`];
+    /// - any [`LabelTag`] without a defined axis is never omitted; and
+    /// - if `axes` is empty, only [`LabelTag`]s without an axis are included.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// # use std::collections::BTreeSet;
+    /// #
+    /// let x = Label::from_tags(&["cat", "color:blue", "color:red", "q:no"]);
+    /// let y = Label::from_tags(&["alice", "bob"]);
+    /// let z = Label::Bottom;
+    ///
+    /// let color = BTreeSet::from(["color"]);
+    /// let q = BTreeSet::from(["q"]);
+    ///
+    /// assert_eq!(
+    ///     x.restrict_to_axes(&color),
+    ///     Label::from_tags(&["cat", "color:blue", "color:red"])
+    /// );
+    /// assert_eq!(x.restrict_to_axes(&q), Label::from_tags(&["cat", "q:no"]));
+    ///
+    /// assert_eq!(y.restrict_to_axes(&color), y);
+    /// assert_eq!(y.restrict_to_axes(&q), y);
+    ///
+    /// assert_eq!(z.restrict_to_axes(&color), Label::Bottom);
+    /// assert_eq!(z.restrict_to_axes(&q), Label::Bottom);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn restrict_to_axes(&self, axes: &BTreeSet<&str>) -> Self {
+        let Self::Tags(tags) = self else {
+            return Self::Bottom;
+        };
+
+        let restricted: BTreeSet<_> = tags
+            .iter()
+            .filter(|tag| tag.axis().is_none_or(|axis| axes.contains(axis)))
+            .cloned()
+            .collect();
+
+        if restricted.is_empty() {
+            Self::Bottom
+        } else {
+            Self::Tags(restricted)
+        }
+    }
+
     /// Returns whether this [`Label`] is a [`Label::Bottom`].
     ///
     /// For example, `{a}` and `{a, b, c}` are not Bottom, while `{}` is.
@@ -822,6 +878,34 @@ impl<'a> Label<'a> {
         };
 
         tags.into_iter().flatten()
+    }
+
+    /// Returns a set of all axes explicitly mentioned by this label's tags.
+    ///
+    /// All of this [`Label`]'s [`LabelTag`]'s axes (if any) are collected and
+    /// deduplicated into a [`BTreeSet`]. For [`Label::Bottom`], the returned
+    /// set is empty. For [`Label::Tags`], it yields each axis exactly once and
+    /// according to their natural ordering (lexicographical), per standard
+    /// [`BTreeSet`] guarantees.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::labels::Label;
+    /// # use std::collections::BTreeSet;
+    /// #
+    /// let x = Label::Bottom;
+    /// let y = Label::from_tags(&["alice", "bob"]);
+    /// let z = Label::from_tags(&["cat", "color:blue", "color:red", "q:no"]);
+    ///
+    /// assert_eq!(x.axes(), BTreeSet::new());
+    /// assert_eq!(y.axes(), BTreeSet::new());
+    /// assert_eq!(z.axes(), BTreeSet::from(["color", "q"]));
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn axes(&self) -> BTreeSet<&str> {
+        self.tags().filter_map(LabelTag::axis).collect()
     }
 
     pub(crate) fn as_single(&self) -> Option<&LabelTag<'a>> {

@@ -264,7 +264,8 @@ pub struct AnalysisConfig {
     /// Functions universally recognized as blanket confidentiality sinks.
     ///
     /// These functions will always be considered to accept only values up to
-    /// the associated label.
+    /// the associated label, after the value's calculated label has been
+    /// [restricted](labels::Label::restrict_to_axes) to the sink's label.
     ///
     /// An [`IndexMap`] is used to preserve insertion order. Each key is a
     /// [`BlanketDirectiveTarget`], which deserializes from a string of the form

@@ -57,9 +57,11 @@ impl<'a> SinkDescriptor<'a> {
     ///
     /// All sinks always accept [`Label::Bottom`], but any other [`Label`] is
     /// only considered valid if:
-    /// - it is a [subset of](Label::is_subset_of) or it is [equal](Label::eq)
-    ///   to this sink's inherent policy label, for confidentiality (allow)
-    ///   sinks --- whitelist enforcement;
+    /// - its [restriction](Label::restrict_to_axes) to the explicit axes of
+    ///   this sink's inherent policy label is a
+    ///   [subset of](Label::is_subset_of) or is [equal](Label::eq) to the
+    ///   sink's aforementioned inherent policy label, for confidentiality
+    ///   (allow) sinks --- restricting whitelist enforcement;
     /// - its [intersection](Label::intersect) with this sink's inherent policy
     ///   label is exactly [`Label::Bottom`], for integrity (deny) sinks ---
     ///   blacklist enforcement.
@@ -78,8 +80,12 @@ impl<'a> SinkDescriptor<'a> {
         }
 
         if self.allow {
-            // confidentiality sink (allow - whitelist)
-            *label <= self.label
+            // confidentiality sink (allow - restricting whitelist)
+
+            let axes = self.label.axes();
+            let restricted = label.restrict_to_axes(&axes);
+
+            restricted <= self.label
         } else {
             // integrity sink (deny - blacklist)
             label.intersect(&self.label).is_bottom()
