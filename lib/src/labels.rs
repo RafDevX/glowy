@@ -242,6 +242,13 @@ impl hash::Hash for LabelTag<'_> {
     }
 }
 
+impl<'a, T: IntoCowStr<'a>> From<T> for LabelTag<'a> {
+    #[inline]
+    fn from(s: T) -> Self {
+        Self::Concrete(s.into_cow())
+    }
+}
+
 /// Represents the security typing associated with some piece of data.
 ///
 /// This enum models metadata connected with information and, more concretely,
@@ -344,7 +351,7 @@ impl<'a> Label<'a> {
     /// ```
     /// # use glowy::labels::{Label, LabelTag};
     /// #
-    /// let tag = LabelTag::Concrete("secret".into());
+    /// let tag = LabelTag::from("secret");
     /// assert_eq!(Label::from_single(tag).to_string(), "{secret}");
     /// ```
     #[must_use]
@@ -500,14 +507,14 @@ impl<'a> Label<'a> {
     /// # use glowy::labels::{Label, LabelTag};
     /// #
     /// let x = Label::from_tags(&["alice", "bob", "charlie"]);
-    /// let y = Label::from_single(LabelTag::Concrete("david".into()));
+    /// let y = Label::from_single(LabelTag::from("david"));
     /// let z = Label::Bottom;
     ///
-    /// assert!(x.contains(&LabelTag::Concrete("bob".into())));
-    /// assert!(!x.contains(&LabelTag::Concrete("david".into())));
-    /// assert!(y.contains(&LabelTag::Concrete("david".into())));
-    /// assert!(!y.contains(&LabelTag::Concrete("charlie".into())));
-    /// assert!(!z.contains(&LabelTag::Concrete("alice".into())));
+    /// assert!(x.contains(&LabelTag::from("bob")));
+    /// assert!(!x.contains(&LabelTag::from("david")));
+    /// assert!(y.contains(&LabelTag::from("david")));
+    /// assert!(!y.contains(&LabelTag::from("charlie")));
+    /// assert!(!z.contains(&LabelTag::from("alice")));
     /// ```
     #[must_use]
     #[inline]
