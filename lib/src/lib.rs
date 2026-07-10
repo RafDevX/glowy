@@ -145,7 +145,7 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 
-use std::{borrow::Cow, cmp, fmt, path::Path, sync::LazyLock};
+use std::{borrow::Cow, cmp, collections::HashSet, fmt, path::Path, sync::LazyLock};
 
 pub use analyzer::Analyzer;
 pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
@@ -266,10 +266,29 @@ pub struct AnalysisConfig {
     /// (more adequate) policy exists, the base configuration should be disabled
     /// by setting this option to `false`.
     ///
+    /// Specific directives can be disabled via
+    /// [`AnalysisConfig::excluded_base_blanket_directives`].
+    ///
     /// Defaults to `true`, but is only present with Cargo feature
     /// `base-security-policy` enabled (which it is, by default).
     #[cfg(feature = "base-security-policy")]
     pub inherit_base_policy: bool,
+    /// Targets for which blanket directives in Glowy's base policy are ignored.
+    ///
+    /// When Cargo feature `base-security-policy` is enabled and
+    /// [`AnalysisConfig::inherit_base_policy`] is enabled, Glowy ingests its
+    /// standard, foundational security policy (accessible at
+    /// [`policy::BASE_SECURITY_POLICY`]), comprised of heuristics-driven
+    /// and domain-agnostic defaults. Due to its impersonal nature, it is common
+    /// (and recommended) to disable all or some of these directives. This
+    /// option supports a gradual approach, by allowing consumers to specify
+    /// for which specific targets the corresponding blanket directives in the
+    /// base security policy should be disregarded.
+    ///
+    /// Alternatively, the entire base security policy can be disabled by
+    /// setting [`AnalysisConfig::inherit_base_policy`] to `false`.
+    #[cfg(feature = "base-security-policy")]
+    pub excluded_base_blanket_directives: HashSet<BlanketDirectiveTarget>,
     /// Targets universally recognized as blanket information sources.
     ///
     /// These targets will always be considered to yield the associated label,
@@ -338,6 +357,8 @@ impl Default for AnalysisConfig {
             verbose: false,
             #[cfg(feature = "base-security-policy")]
             inherit_base_policy: true,
+            #[cfg(feature = "base-security-policy")]
+            excluded_base_blanket_directives: HashSet::new(),
             sources: IndexMap::new(),
             allow_sinks: IndexMap::new(),
             deny_sinks: IndexMap::new(),

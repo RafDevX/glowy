@@ -138,7 +138,9 @@ impl Analyzer {
     /// default), then immediately before ingesting the blanket directives in
     /// the provided invoker-defined structured configuration,
     /// [`policy::BASE_SECURITY_POLICY`](crate::policy::BASE_SECURITY_POLICY)
-    /// is TOML-deserialized and its defined blanket directives are ingested.
+    /// is TOML-deserialized and its defined blanket directives are ingested,
+    /// except for blanket directives with targets present in
+    /// [`AnalysisConfig::excluded_base_blanket_directives`].
     ///
     /// # Example Usage
     ///
@@ -192,10 +194,20 @@ impl Analyzer {
             let base: AnalysisConfig = toml::from_str(crate::policy::BASE_SECURITY_POLICY)
                 .expect("base security policy failed to TOML-deserialize");
 
-            analyzer.ingest_blanket_directives(base.sources, base.allow_sinks, base.deny_sinks);
+            analyzer.ingest_blanket_directives(
+                base.sources,
+                base.allow_sinks,
+                base.deny_sinks,
+                &config.excluded_base_blanket_directives,
+            );
         }
 
-        analyzer.ingest_blanket_directives(config.sources, config.allow_sinks, config.deny_sinks);
+        analyzer.ingest_blanket_directives(
+            config.sources,
+            config.allow_sinks,
+            config.deny_sinks,
+            &HashSet::new(), // doesn't allocate, not expensive
+        );
 
         analyzer
     }
@@ -681,6 +693,7 @@ impl Analyzer {
         sources: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
         allow_sinks: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
         deny_sinks: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
+        exclude: &HashSet<BlanketDirectiveTarget>,
     ) {
         let blanket_directives = sources
             .into_iter()
@@ -697,6 +710,11 @@ impl Analyzer {
             );
 
         for (kind, target, tags) in blanket_directives {
+            if exclude.contains(&target) {
+                // explicitly excluded, so ignore it
+                continue;
+            }
+
             // we use add_blanket_directive directly to avoid conversion to
             // Label and then back to OwnedLabel (preventing unnecessary
             // allocations that would happen with add_blanket_source/sink)
