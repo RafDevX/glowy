@@ -465,6 +465,12 @@ impl<'a, T: Into<ConcreteLabelTag<'a>>> From<T> for LabelTag<'a> {
 /// also exist, but it is not actually needed in Glowy so it is not here
 /// implemented.
 ///
+/// If this label has been re-interpreted to support wildcard axis tags (i.e.,
+/// if [`Label::accept_wildcards`] has been invoked), redundant wildcard
+/// specialization is guaranteed to be discarded. For example, if wildcards are
+/// accepted, a label `{cat, dir:*, dir:north}` will never exist, since it is
+/// simplified to just `{cat, dir:*}`.
+///
 /// Label derivation and hierarchy is tracked through [`LabelBacktrace`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Label<'a> {
@@ -576,6 +582,12 @@ impl<'a> Label<'a> {
     /// with a tag component corresponding to the literal `*` into full-fledged
     /// [`LabelTag::AxisWildcard`]s.
     ///
+    /// Note that, as per [`Label`]'s guaranteed, redundant wildcard
+    /// specializations are discarded if present: this means that any
+    /// [`LabelTag::Concrete`] with a defined axis matching a newly-interpreted
+    /// [`LabelTag::AxisWildcard`] is removed, so `{cat, color:*, color:blue}`
+    /// is transparently collapsed into `{cat, color:*}`.
+    ///
     /// See [`LabelTag::try_upgrade_to_wildcard`] for more information, as this
     /// method uses that one under the hood.
     ///
@@ -590,7 +602,6 @@ impl<'a> Label<'a> {
     ///
     /// let mut tags = label.tags();
     /// assert_eq!(tags.next(), Some(&LabelTag::from("not-bound"))); // concrete
-    /// assert_eq!(tags.next(), Some(&LabelTag::from("dir:north"))); // concrete
     /// assert_eq!(tags.next(), Some(&LabelTag::AxisWildcard("dir".into())));
     /// assert_eq!(tags.next(), None);
     /// ```
@@ -601,10 +612,12 @@ impl<'a> Label<'a> {
         };
 
         // we need to rebuild the whole set since some tags might have changed
-        *tags = mem::take(tags)
+        let new_tags = mem::take(tags)
             .into_iter()
             .map(LabelTag::try_upgrade_to_wildcard)
             .collect();
+
+        *tags = discard_wildcard_specializations(new_tags);
     }
 
     /// Returns the union of `self` and `other` as a new [`Label`].
@@ -627,7 +640,9 @@ impl<'a> Label<'a> {
     pub fn union(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Bottom, l) | (l, Self::Bottom) => l.clone(),
-            (Self::Tags(left), Self::Tags(right)) => Self::Tags(left | right),
+            (Self::Tags(left), Self::Tags(right)) => {
+                Self::Tags(discard_wildcard_specializations(left | right))
+            }
         }
     }
 
@@ -660,6 +675,8 @@ impl<'a> Label<'a> {
                 if new_tags.is_empty() {
                     Self::Bottom
                 } else {
+                    // no risk of wildcard specializations being introduced,
+                    // since the intersection is necessarily a subset of self
                     Self::Tags(new_tags)
                 }
             }
@@ -696,6 +713,8 @@ impl<'a> Label<'a> {
                 if new_tags.is_empty() {
                     Self::Bottom
                 } else {
+                    // no risk of wildcard specializations being introduced,
+                    // since the difference is necessarily a subset of self
                     Self::Tags(new_tags)
                 }
             }
@@ -821,6 +840,8 @@ impl<'a> Label<'a> {
         if restricted.is_empty() {
             Self::Bottom
         } else {
+            // no risk of wildcard specializations being introduced, since the
+            // restriction is always necessarily a subset of self
             Self::Tags(restricted)
         }
     }
@@ -961,7 +982,7 @@ impl<'a> Label<'a> {
             })
             .collect();
 
-        Self::Tags(rebound)
+        Self::Tags(discard_wildcard_specializations(rebound))
     }
 }
 
@@ -1040,6 +1061,37 @@ impl iter::Sum<Self> for Label<'_> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Self::Bottom, |a, b| a + &b)
     }
+}
+
+// it's silly for a label to be {cat, dir:*, dir:north}, so make it {cat, dir:*}
+fn discard_wildcard_specializations(mut set: BTreeSet<LabelTag<'_>>) -> BTreeSet<LabelTag<'_>> {
+    let wildcards: BTreeSet<_> = set
+        .iter()
+        .filter_map(|tag| {
+            if let LabelTag::AxisWildcard(axis) = tag {
+                Some(axis.clone().into_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if wildcards.is_empty() {
+        // the most common case is that there's nothing to do
+        return set;
+    }
+
+    set.retain(|tag| {
+        if let LabelTag::Concrete(concrete) = tag
+            && let Some(axis) = concrete.axis()
+        {
+            !wildcards.contains(axis)
+        } else {
+            true
+        }
+    });
+
+    set
 }
 
 /// Represents the propagation history leading up to a label attribution.
