@@ -651,6 +651,11 @@ impl<'a> Label<'a> {
     /// For example, `{a, b, c}` intersected with `{b, d, e}` yields `{b}`.
     /// If the intersection is null, [`Label::Bottom`] is returned as expected.
     ///
+    /// Any [`LabelTag::AxisWildcard`] present is eclipsed by any
+    /// [`LabelTag::Concrete`] bound to the same axis, with the latter tag
+    /// being included in the intersection. For example, `{boat, cat, color:*}`
+    /// intersected with `{cat, color:red}` yields `{cat, color:red}`.
+    ///
     /// # Example Usage
     ///
     /// ```
@@ -663,6 +668,15 @@ impl<'a> Label<'a> {
     /// assert_eq!(x.intersect(&y).to_string(), "{bob}");
     /// assert_eq!(x.intersect(&z).to_string(), "{alice, frank}");
     /// assert_eq!(y.intersect(&z).to_string(), "{}");
+    ///
+    /// let left = Label::from_tags(&["cat", "dir:north", "dir:south", "dog"]);
+    /// let mut right = Label::from_tags(&["dir:*", "dog"]);
+    /// right.accept_wildcards();
+    ///
+    /// assert_eq!(
+    ///     left.intersect(&right).to_string(),
+    ///     "{dog, dir:north, dir:south}" // `dir:*` is eclipsed, but these stay
+    /// );
     /// ```
     #[must_use]
     #[inline]
@@ -670,7 +684,25 @@ impl<'a> Label<'a> {
         match (self, other) {
             (Self::Bottom, _) | (_, Self::Bottom) => Self::Bottom,
             (Self::Tags(left), Self::Tags(right)) => {
-                let new_tags = left & right;
+                let mut new_tags = left & right;
+
+                for tag in left.symmetric_difference(right) {
+                    if let LabelTag::Concrete(concrete) = tag
+                        && let Some(axis) = concrete.axis()
+                    {
+                        let probe = LabelTag::AxisWildcard(Cow::Borrowed(axis));
+
+                        // note that this will not falsely trigger for {a:b} in
+                        // {a:*, a:b} ∩ {cat}, even though it does exist in the
+                        // symmetric difference and one of the sets has the
+                        // matching wildcard, simply because the left label
+                        // cannot ever exist: we explicitly forbid redundant
+                        // wildcard specializations in well-formed labels
+                        if left.contains(&probe) || right.contains(&probe) {
+                            new_tags.insert(tag.clone());
+                        }
+                    }
+                }
 
                 if new_tags.is_empty() {
                     Self::Bottom
@@ -688,6 +720,11 @@ impl<'a> Label<'a> {
     /// For example, `{a, c}` subtracted from `{a, b, c}` yields `{b}`.
     /// If the difference is null, [`Label::Bottom`] is returned as expected.
     ///
+    /// Any [`LabelTag::AxisWildcard`] present eclipses any
+    /// [`LabelTag::Concrete`] bound to the same axis, with neither being
+    /// included in the returned difference set. For example, `{cat, color:*}`
+    /// subtracted from `{boat, cat, color:red}` yields `{boat}`.
+    ///
     /// # Example Usage
     ///
     /// ```
@@ -700,6 +737,13 @@ impl<'a> Label<'a> {
     /// assert_eq!(y.difference(&x).to_string(), "{}");
     /// assert_eq!(x.difference(&Label::Bottom), x);
     /// assert_eq!(Label::Bottom.difference(&x), Label::Bottom);
+    ///
+    /// let left = Label::from_tags(&["cat", "dir:north", "dir:south", "dog"]);
+    /// let mut right = Label::from_tags(&["dir:*", "dog"]);
+    /// right.accept_wildcards();
+    ///
+    /// assert_eq!(left.difference(&right).to_string(), "{cat}");
+    /// assert_eq!(right.difference(&left).to_string(), "{dir:*}");
     /// ```
     #[must_use]
     #[inline]
@@ -708,7 +752,16 @@ impl<'a> Label<'a> {
             (Self::Bottom, _) => Self::Bottom,
             (_, Self::Bottom) => self.clone(),
             (Self::Tags(left), Self::Tags(right)) => {
-                let new_tags = left - right;
+                let mut new_tags = left - right;
+
+                // if left has {a:b} and right has {a:*}, diff cannot have {a:b}
+                new_tags.retain(|tag| {
+                    !matches!(
+                    tag,
+                    LabelTag::Concrete(concrete) if concrete.axis().is_some_and(
+                        |axis| right.contains(&LabelTag::AxisWildcard(Cow::Borrowed(axis)))
+                    ))
+                });
 
                 if new_tags.is_empty() {
                     Self::Bottom
@@ -728,6 +781,11 @@ impl<'a> Label<'a> {
     /// all [`Label`]s (including itself), but no [`Label`] is a subset of
     /// [`Label::Bottom`] except for itself.
     ///
+    /// Any [`LabelTag::AxisWildcard`] present in `other` allows any
+    /// [`LabelTag::Concrete`] bound to the same axis in `self` to count towards
+    /// `self` being a subset of `other`. For example, `{cat, color:red}` is a
+    /// subset of `{boat, cat, color:*}`.
+    ///
     /// For example, `{a, c}` is a subset of `{a, b, c}` but not of `{a, b, d}`.
     ///
     /// # Example Usage
@@ -746,6 +804,13 @@ impl<'a> Label<'a> {
     /// assert!(!z.is_subset_of(&y));
     /// assert!(Label::Bottom.is_subset_of(&x));
     /// assert!(!x.is_subset_of(&Label::Bottom));
+    ///
+    /// let left = Label::from_tags(&["cat", "dir:north", "dir:south"]);
+    /// let mut right = Label::from_tags(&["cat", "dir:*"]);
+    /// right.accept_wildcards();
+    ///
+    /// assert!(left.is_subset_of(&right));
+    /// assert!(!right.is_subset_of(&left));
     /// ```
     #[must_use]
     #[inline]
@@ -754,7 +819,15 @@ impl<'a> Label<'a> {
             Self::Bottom => true,
             Self::Tags(sub) => match other {
                 Self::Bottom => false,
-                Self::Tags(sup) => sub.is_subset(sup),
+                Self::Tags(sup) => sub.iter().all(|tag| {
+                    sup.contains(tag)
+                        || matches!(
+                            tag,
+                            LabelTag::Concrete(concrete) if concrete.axis().is_some_and(
+                                |axis| sup.contains(&LabelTag::AxisWildcard(Cow::Borrowed(axis)))
+                            )
+                        )
+                }),
             },
         }
     }
@@ -763,6 +836,11 @@ impl<'a> Label<'a> {
     ///
     /// For example, `{a, b, c}` contains `c` but not `d`. If `self` is
     /// [`Label::Bottom`], it is considered not to contain any tag, as expected.
+    ///
+    /// Any [`LabelTag::AxisWildcard`] in `self` allows any
+    /// [`LabelTag::Concrete`] bound to the same axis to be considered as
+    /// containing to `self`. For example, `{color:red}` is contained in
+    /// `{cat, color:*}`.
     ///
     /// # Example Usage
     ///
@@ -784,7 +862,18 @@ impl<'a> Label<'a> {
     pub fn contains(&self, tag: &LabelTag<'a>) -> bool {
         match self {
             Self::Bottom => false,
-            Self::Tags(tags) => tags.contains(tag),
+            Self::Tags(tags) => {
+                if tags.contains(tag) {
+                    true
+                } else if let LabelTag::Concrete(concrete) = tag
+                    && let Some(axis) = concrete.axis()
+                {
+                    // {a:*} contains {a:b}
+                    tags.contains(&LabelTag::AxisWildcard(Cow::Borrowed(axis)))
+                } else {
+                    false
+                }
+            }
         }
     }
 
