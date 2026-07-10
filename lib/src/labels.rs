@@ -1079,23 +1079,19 @@ impl PartialOrd for Label<'_> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         if self == other {
-            return Some(cmp::Ordering::Equal);
-        }
-
-        match (self, other) {
-            (Self::Bottom, _) => Some(cmp::Ordering::Less), // {} < {a, ...}
-            (_, Self::Bottom) => Some(cmp::Ordering::Greater), // {a, ...} > {}
-            (Self::Tags(left), Self::Tags(right)) => {
-                if left.is_subset(right) {
-                    // e.g., {a, b} < {a, b, c}
-                    Some(cmp::Ordering::Less)
-                } else if right.is_subset(left) {
-                    // e.g., {a, b, c} > {a, b}
-                    Some(cmp::Ordering::Greater)
-                } else {
-                    None // not comparable
-                }
-            }
+            Some(cmp::Ordering::Equal)
+        } else if self.is_subset_of(other) {
+            // e.g., {} < {a, ...}
+            // e.g., {a, b} < {a, b, c}
+            // e.g., {cat, dir:north, dir:south} < {cat, dir:*}
+            Some(cmp::Ordering::Less)
+        } else if other.is_subset_of(self) {
+            // e.g., {a, ...} > {}
+            // e.g., {a, b, c} > {a, b}
+            // e.g., {cat, dir:*} > {cat, dir:north, dir:south}
+            Some(cmp::Ordering::Greater)
+        } else {
+            None // not comparable
         }
     }
 }
