@@ -316,26 +316,47 @@ pub struct BlanketDirectiveTarget {
 }
 
 impl BlanketDirectiveTarget {
-    /// Constructs a new target.
+    /// Constructs a new target for a blanket source.
     ///
     /// In most cases, it is more convenient to use the existing [`FromStr`]
     /// implementation instead of invoking this method directly (or, if the
     /// `toml-config` Cargo feature is enabled, automatically deserializing
     /// from a string via `serde`).
     #[inline]
-    pub fn new(
+    pub fn new_for_source(
         package_path: impl Into<FullPackagePath>,
         type_name: Option<impl Into<String>>,
         member_name: impl Into<String>,
-        arg_index: Option<usize>,
         arg_predicate: Option<BlanketSourceArgPredicate>,
     ) -> Self {
         Self {
             package_path: package_path.into(),
             type_name: type_name.map(Into::into),
             member_name: member_name.into(),
-            arg_index,
+            arg_index: None,
             arg_predicate,
+        }
+    }
+
+    /// Constructs a new target for a blanket sink.
+    ///
+    /// In most cases, it is more convenient to use the existing [`FromStr`]
+    /// implementation instead of invoking this method directly (or, if the
+    /// `toml-config` Cargo feature is enabled, automatically deserializing
+    /// from a string via `serde`).
+    #[inline]
+    pub fn new_for_sink(
+        package_path: impl Into<FullPackagePath>,
+        type_name: Option<impl Into<String>>,
+        member_name: impl Into<String>,
+        arg_index: Option<usize>,
+    ) -> Self {
+        Self {
+            package_path: package_path.into(),
+            type_name: type_name.map(Into::into),
+            member_name: member_name.into(),
+            arg_index,
+            arg_predicate: None,
         }
     }
 }
@@ -672,7 +693,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.Remove".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("os", None::<String>, "Remove", None, None)
+            BlanketDirectiveTarget::new_for_sink("os", None::<String>, "Remove", None)
         );
     }
 
@@ -681,7 +702,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.WriteFile#1".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1), None)
+            BlanketDirectiveTarget::new_for_sink("os", None::<String>, "WriteFile", Some(1))
         );
     }
 
@@ -690,7 +711,12 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "example.com/a/b/pkg.Fn#0".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("example.com/a/b/pkg", None::<String>, "Fn", Some(0), None)
+            BlanketDirectiveTarget::new_for_sink(
+                "example.com/a/b/pkg",
+                None::<String>,
+                "Fn",
+                Some(0)
+            )
         );
     }
 
@@ -699,7 +725,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "database/sql.DB.Query".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", None, None)
+            BlanketDirectiveTarget::new_for_sink("database/sql", Some("DB"), "Query", None)
         );
     }
 
@@ -708,7 +734,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "database/sql.DB.Query#0".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("database/sql", Some("DB"), "Query", Some(0), None)
+            BlanketDirectiveTarget::new_for_sink("database/sql", Some("DB"), "Query", Some(0))
         );
     }
 
@@ -718,7 +744,7 @@ mod target_tests {
         let target: BlanketDirectiveTarget = "os.File.Read".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new("os", Some("File"), "Read", None, None)
+            BlanketDirectiveTarget::new_for_sink("os", Some("File"), "Read", None)
         );
     }
 
@@ -728,12 +754,11 @@ mod target_tests {
             "github.com/gin-gonic/gin.Context.Query".parse().unwrap();
         assert_eq!(
             target,
-            BlanketDirectiveTarget::new(
+            BlanketDirectiveTarget::new_for_sink(
                 "github.com/gin-gonic/gin",
                 Some("Context"),
                 "Query",
                 None,
-                None
             )
         );
     }

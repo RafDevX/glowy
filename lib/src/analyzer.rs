@@ -603,11 +603,10 @@ impl Analyzer {
         arg_predicate: Option<BlanketSourceArgPredicate>,
         label: Label<'static>,
     ) {
-        let target = BlanketDirectiveTarget::new(
+        let target = BlanketDirectiveTarget::new_for_source(
             package_path.into(),
             type_name.map(Into::into),
             member_name.into(),
-            None, // argument targeting is meaningless for sources
             arg_predicate,
         );
 
@@ -644,11 +643,10 @@ impl Analyzer {
     ///
     /// // applies to every argument passed to `SomeFunc`
     /// analyzer.add_blanket_sink(
-    ///     BlanketDirectiveTarget::new(
+    ///     BlanketDirectiveTarget::new_for_sink(
     ///         "example.com/company-name/proj/sub",
     ///         None::<String>,
     ///         "SomeFunc",
-    ///         None,
     ///         None,
     ///     ),
     ///     false,
@@ -657,7 +655,7 @@ impl Analyzer {
     ///
     /// // applies only to the second argument of `WriteFile`
     /// analyzer.add_blanket_sink(
-    ///     BlanketDirectiveTarget::new("os", None::<String>, "WriteFile", Some(1), None),
+    ///     BlanketDirectiveTarget::new_for_sink("os", None::<String>, "WriteFile", Some(1)),
     ///     false,
     ///     Label::from_tags(&["untrusted"]),
     /// );
