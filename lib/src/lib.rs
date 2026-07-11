@@ -298,10 +298,10 @@ pub struct AnalysisConfig {
     /// [`BlanketDirectiveTarget`], which deserializes from a string of the form
     /// `pkg.func` (applying to every access) or `pkg.func#N=value` (applying
     /// only when the argument at 0-indexed position `N` is not provably
-    /// different from `value`). Each associated [`Vec<String>`] value
-    /// represents a [`Label`](labels::Label), with each individual [`String`]
-    /// element corresponding to a
-    /// [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    /// different from `value`, optionally employing fuzzy matching with `~=`).
+    /// Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sources: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Targets universally recognized as blanket whitelist-based sinks.
     ///

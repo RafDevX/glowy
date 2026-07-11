@@ -45,7 +45,8 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 /// `arg_index`. For example, the string `database/sql.DB.Query#0` corresponds
 /// to a target with defined `package_path`, `type_name`, `member_name`, and
 /// `arg_index`. For source directives only, `#N=value` additionally records a
-/// call-time equality predicate.
+/// call-time equality predicate, and `~=` can be used instead of `=` to enable
+/// fuzzy matching.
 ///
 /// This struct implements [`FromStr`] following this specification, and (if the
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
@@ -151,6 +152,12 @@ impl FromStr for BlanketDirectiveTarget {
                 .split_once('=')
                 .map_or((arg_spec, None), |(arg_str, value)| (arg_str, Some(value)));
 
+            let (arg_str, fuzzy) = if let Some(stripped) = arg_str.strip_suffix('~') {
+                (stripped, true)
+            } else {
+                (arg_str, false)
+            };
+
             let arg_index: usize = arg_str
                 .parse()
                 .map_err(BlanketDirectiveTargetParseError::InvalidArgIndex)?;
@@ -158,7 +165,7 @@ impl FromStr for BlanketDirectiveTarget {
             let arg_predicate = arg_value_str
                 .map(BlanketSourcePredicateValue::from_str)
                 .transpose()?
-                .map(|value| BlanketSourceArgPredicate::new(arg_index, value));
+                .map(|value| BlanketSourceArgPredicate::new(arg_index, value, fuzzy));
 
             let arg_index = if arg_predicate.is_some() {
                 None
@@ -254,16 +261,26 @@ impl<'de> serde::Deserialize<'de> for BlanketDirectiveTarget {
 pub struct BlanketSourceArgPredicate {
     arg_index: usize,
     value: BlanketSourcePredicateValue,
+    fuzzy: bool,
 }
 
 impl BlanketSourceArgPredicate {
     /// Constructs a new argument predicate for the given call argument index.
+    ///
+    /// If `fuzzy` is `true`, matching is performed much more loosely: an
+    /// argument value is considered to match if the predicate value is a
+    /// case-insensitive substring of the argument's string representation.
     #[must_use]
     #[inline]
-    pub fn new(arg_index: usize, value: impl Into<BlanketSourcePredicateValue>) -> Self {
+    pub fn new(
+        arg_index: usize,
+        value: impl Into<BlanketSourcePredicateValue>,
+        fuzzy: bool,
+    ) -> Self {
         Self {
             arg_index,
             value: value.into(),
+            fuzzy,
         }
     }
 
@@ -281,8 +298,19 @@ impl BlanketSourceArgPredicate {
         &self.value
     }
 
+    /// Returns whether this predicate uses fuzzy matching.
+    #[must_use]
+    #[inline]
+    pub fn fuzzy(&self) -> bool {
+        self.fuzzy
+    }
+
     pub(crate) fn matches_const(&self, actual: &SimpleConstValue) -> bool {
-        self.value.matches_const(actual)
+        if self.fuzzy {
+            self.value.matches_fuzzy(actual)
+        } else {
+            self.value.matches(actual)
+        }
     }
 }
 
@@ -315,7 +343,7 @@ pub enum BlanketSourcePredicateValue {
 }
 
 impl BlanketSourcePredicateValue {
-    pub(crate) fn matches_const(&self, actual: &SimpleConstValue) -> bool {
+    pub(crate) fn matches(&self, actual: &SimpleConstValue) -> bool {
         match self {
             Self::Typed(expected) => expected == actual,
             Self::Raw(expected) => match actual {
@@ -326,6 +354,13 @@ impl BlanketSourcePredicateValue {
                 SimpleConstValue::String(actual) => expected == actual,
             },
         }
+    }
+
+    pub(crate) fn matches_fuzzy(&self, actual: &SimpleConstValue) -> bool {
+        let actual = actual.to_string().to_lowercase();
+        let expected = self.to_string().to_lowercase();
+
+        actual.contains(&expected)
     }
 }
 
