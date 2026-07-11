@@ -196,12 +196,13 @@ pub fn apply_call<'a>(
         None => None,
     };
 
-    let capture_concretes = captures::apply_capture_mutations_and_merge_capture_backtraces(
-        ctx,
-        func,
-        &with_backtraces_ref,
-        &call_location,
-    );
+    let capture_concretes =
+        captures::call_site::apply_capture_mutations_and_merge_capture_backtraces(
+            ctx,
+            func,
+            &with_backtraces_ref,
+            &call_location,
+        );
 
     let call_realization = CallRealization {
         receiver: receiver.as_ref().map(Option::as_ref),
@@ -283,7 +284,7 @@ fn visit_blackbox_call<'a>(
     // initialized) variables in an effort to make them self-recursive, as the
     // whole point of closure capturing is that outer symbols are only really
     // "evaluated" when the closure is invoked
-    captures::apply_capture_mutations(ctx, func, args, call_location);
+    captures::call_site::apply_capture_mutations(ctx, func, args, call_location);
 
     let bt = LabelBacktrace::fold(
         args.iter()
@@ -414,8 +415,12 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
-    let call_branch =
-        super::calc_effective_call_site_branch_backtrace_for(ctx, func, call.location);
+    #[rustfmt::skip]
+    let call_branch = super::calc_effective_call_site_branch_backtrace_for(
+        ctx,
+        func,
+        call.location
+    );
 
     deferred_checks = deferred_checks
         .iter()
@@ -597,7 +602,7 @@ pub fn calculate_concrete_backtrace<'a>(
         // could trigger an upgrade even when we know the param type is not a
         // function, leading to incorrect behavior
         if matches!(r#type, TypeNode::Function { .. }) {
-            captures::derive_hybrid_value_backtrace(
+            captures::realization::derive_hybrid_value_backtrace(
                 ctx,
                 value,
                 Some(cached_backtrace.cloned()),
