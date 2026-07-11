@@ -14,7 +14,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{Symbol, SymbolRef},
-    taint::mutation,
+    taint::{funcs::call_application, mutation},
     values::{
         CaptureBinding, FunctionRef, FunctionValue, Mergeable, SelfAwareBacktraceContainer,
         ValueRef,
@@ -49,7 +49,7 @@ impl<'a> CallSiteConcretes<'a> {
                 .iter()
                 .enumerate()
                 .map(|(index, param)| {
-                    super::calculate_concrete_backtrace(
+                    call_application::calculate_concrete_backtrace(
                         ctx,
                         index,
                         param.ids.first(),

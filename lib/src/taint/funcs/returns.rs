@@ -1,0 +1,155 @@
+use std::borrow::Cow;
+
+use parser::{
+    Location,
+    ast::{ExprNode, FunctionResultNode, FunctionSignatureNode},
+};
+
+use crate::{
+    context::{AnalysisContext, DeferTarget},
+    errors::AnalysisErrorKind,
+    labels::LabelBacktraceKind,
+    taint::exprs,
+    values::{Mergeable, SelfAwareBacktraceContainer, ValueRef},
+};
+
+pub fn visit_return<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    exprs: &[ExprNode<'a>],
+    location: &Location,
+) {
+    let Some(mut value) = ctx.current_function() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
+            location: location.clone(),
+        });
+
+        return;
+    };
+
+    let Some(func) = value.as_function() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
+            location: location.clone(),
+        });
+
+        return;
+    };
+
+    // unfortunately we need to do this as otherwise we'd get a runtime borrow
+    // error since calculate_outcome must be able to borrow func as mutable, and
+    // that's not possible if we're still holding a ref to it
+    let signature = func.signature().cloned();
+    let existing_outcome = func.outcome().cloned();
+    drop(func);
+
+    let outcome = calculate_outcome(ctx, signature.as_ref(), exprs, location);
+
+    // merge with existing outcome, if any
+    // (this allows for multiple return statements within the same function)
+    let outcome = if let Some(existing) = existing_outcome.as_deref() {
+        merge_outcomes(ctx, existing, outcome, location)
+    } else {
+        outcome
+    };
+
+    let Some(mut func_mut) = value.as_function_mut() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
+            location: location.clone(),
+        });
+
+        return;
+    };
+
+    func_mut.set_outcome(outcome);
+
+    ctx.defer_branch_backtrace(DeferTarget::Function, location.clone());
+}
+
+fn calculate_outcome<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    signature: Option<&FunctionSignatureNode<'a>>,
+    exprs: &[ExprNode<'a>],
+    location: &Location,
+) -> Vec<ValueRef<'a>> {
+    // if there's a single expression with a single function call, then nothing
+    // below applies and that function call's outcome is the final outcome
+    // (case 2 from https://go.dev/ref/spec#Return_statements)
+    if let [ExprNode::Call(call)] = exprs {
+        let raw = super::visit_call(ctx, call);
+
+        return if let Some(sig) = signature
+            && let [single] = raw.as_slice()
+            && single.is_mobius()
+        {
+            // expand Möbius to the correct cardinality expected for a call to
+            // this current outer function, adapting what the inner one returned
+            single.try_expand_to(sig.result.len()).unwrap_or(raw)
+        } else {
+            raw
+        };
+    }
+
+    let raw_values: Vec<ValueRef<'a>> = if exprs.is_empty()
+        && let Some(sig) = signature
+        && let FunctionResultNode::Params(result) = &sig.result
+    {
+        // naked returns
+
+        result
+            .iter()
+            .flat_map(|param| &param.ids)
+            .map(|id| {
+                if id.content() == "_" {
+                    // still takes up a position, we can't just skip it
+                    ValueRef::new_bottom(ctx.pin(id.location()), None)
+                } else {
+                    exprs::visit_single_expr(ctx, &ExprNode::Name(*id))
+                }
+            })
+            .collect()
+    } else {
+        exprs
+            .iter()
+            .map(|expr| exprs::visit_single_expr(ctx, expr))
+            .collect()
+    };
+
+    let pinned_location = ctx.pin(location.clone());
+    let branch_backtrace = ctx.branch_backtrace();
+
+    raw_values
+        .into_iter()
+        .map(|value| {
+            value.nest_backtrace(
+                LabelBacktraceKind::Return,
+                None,
+                pinned_location.clone(),
+                branch_backtrace.cloned(),
+            )
+        })
+        .collect()
+}
+
+fn merge_outcomes<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    existing: &[ValueRef<'a>],
+    new: Vec<ValueRef<'a>>,
+    location: &Location,
+) -> Vec<ValueRef<'a>> {
+    if new.len() != existing.len() {
+        ctx.report_error(AnalysisErrorKind::MismatchingReturnCardinality {
+            expected: existing.len(),
+            found: new.len(),
+            location: location.clone(),
+        });
+    }
+
+    let pinned = ctx.pin(location.clone());
+    let mut merged = Vec::with_capacity(new.len());
+
+    #[expect(clippy::shadow_unrelated, reason = "False positive")]
+    for (existing, new) in existing.iter().zip(new) {
+        merged.push(new.merge_with(existing, LabelBacktraceKind::Return, Cow::Borrowed(&pinned)));
+    }
+
+    merged
+}
