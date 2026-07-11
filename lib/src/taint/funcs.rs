@@ -991,28 +991,24 @@ fn apply_call<'a>(
         None => None,
     };
 
-    captures::apply_capture_mutations(ctx, func, &with_backtraces_ref, &node.location);
-
-    let receiver_ref = receiver.as_ref().map(Option::as_ref);
-
-    handle_deferred_checks(
+    let capture_concretes = captures::apply_capture_mutations_and_merge_capture_backtraces(
         ctx,
         func,
-        receiver_ref,
-        &ids,
         &with_backtraces_ref,
-        &node.location,
+        &call_location,
     );
 
-    let mut result = calculate_call_result(
-        ctx,
-        func,
-        receiver_ref,
-        &ids,
-        outcome,
-        &with_backtraces_ref,
-        &node.location,
-    );
+    let call_realization = CallRealization {
+        receiver: receiver.as_ref().map(Option::as_ref),
+        ids: &ids,
+        args: &with_backtraces_ref,
+        capture_concretes: &capture_concretes,
+        location: &node.location,
+    };
+
+    handle_deferred_checks(ctx, func, &call_realization);
+
+    let mut result = calculate_call_result(ctx, func, outcome, &call_realization);
 
     apply_call_conditional_blanket_sources(func, &node.args, &call_location, &mut result);
 
@@ -1341,29 +1337,30 @@ fn is_incompatible_cardinality_method<'a>(
     args_len != cardinality && !(variadic && args_len >= cardinality.saturating_sub(1))
 }
 
-#[expect(
-    clippy::option_option,
-    reason = "Conveniently represent a receiver's presence/absence"
-)]
+#[expect(clippy::option_option, reason = "Represent receiver absent vs Bottom")]
+struct CallRealization<'call, 'a> {
+    receiver: Option<Option<&'call LabelBacktrace<'a>>>,
+    ids: &'call [(Option<&'call Span<'a>>, bool, &'call TypeNode<'a>)],
+    args: &'call [(ValueRef<'a>, Option<&'call LabelBacktrace<'a>>)],
+    capture_concretes: &'call [(usize, Option<LabelBacktrace<'a>>)],
+    location: &'call Location,
+}
+
 fn handle_deferred_checks<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
-    receiver: Option<Option<&LabelBacktrace<'a>>>,
-    ids: &[(Option<&Span<'a>>, bool, &TypeNode<'a>)],
-    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
-    location: &Location,
+    call: &CallRealization<'_, 'a>,
 ) {
     let mut deferred_checks = Vec::from(func.deferred_checks());
-    let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
 
-    if let Some(receiver) = receiver {
+    if let Some(receiver) = call.receiver {
         deferred_checks = deferred_checks
             .iter()
             .filter_map(|check| check.realize(func.r#ref(), SyntheticSlot::Receiver, receiver))
             .collect();
     }
 
-    for (index, (id, variadic, r#type)) in ids.iter().copied().enumerate() {
+    for (index, (id, variadic, r#type)) in call.ids.iter().copied().enumerate() {
         #[rustfmt::skip]
         let concrete = calculate_concrete_backtrace(
             ctx,
@@ -1371,8 +1368,8 @@ fn handle_deferred_checks<'a>(
             id,
             variadic,
             r#type,
-            args,
-            location
+            call.args,
+            call.location
         );
 
         deferred_checks = deferred_checks
@@ -1383,7 +1380,7 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
-    for (index, concrete) in &capture_concretes {
+    for (index, concrete) in call.capture_concretes {
         deferred_checks = deferred_checks
             .iter()
             .filter_map(|check| {
@@ -1402,7 +1399,7 @@ fn handle_deferred_checks<'a>(
         call_branch = calculate_effective_call_site_branch_backtrace_for(
             ctx,
             func,
-            ctx.pin(location.clone()),
+            ctx.pin(call.location.clone()),
         );
     };
 
@@ -1431,26 +1428,18 @@ fn handle_deferred_checks<'a>(
     }
 }
 
-#[expect(
-    clippy::option_option,
-    reason = "Conveniently represent a receiver's presence/absence"
-)]
 fn calculate_call_result<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
-    receiver: Option<Option<&LabelBacktrace<'a>>>,
-    ids: &[(Option<&Span<'a>>, bool, &TypeNode<'a>)],
     outcome: &Vec<ValueRef<'a>>,
-    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
-    location: &Location,
+    call: &CallRealization<'_, 'a>,
 ) -> Vec<ValueRef<'a>> {
     let mut result = vec![];
-    let capture_concretes = captures::derive_best_backtraces_for_captures(ctx, func);
 
     'components: for component in outcome {
         let mut realized = component.clone();
 
-        if let Some(receiver) = receiver {
+        if let Some(receiver) = call.receiver {
             realized = realized.realize(func.r#ref(), SyntheticSlot::Receiver, receiver);
         }
 
@@ -1468,7 +1457,7 @@ fn calculate_call_result<'a>(
         //     })
         //     .enumerate();
 
-        for (index, (id, variadic, r#type)) in ids.iter().copied().enumerate() {
+        for (index, (id, variadic, r#type)) in call.ids.iter().copied().enumerate() {
             if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 
@@ -1484,8 +1473,8 @@ fn calculate_call_result<'a>(
                 id,
                 variadic,
                 r#type,
-                args,
-                location
+                call.args,
+                call.location
             );
 
             #[rustfmt::skip]
@@ -1498,7 +1487,7 @@ fn calculate_call_result<'a>(
             };
         }
 
-        for (index, concrete) in &capture_concretes {
+        for (index, concrete) in call.capture_concretes {
             if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 

@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use parser::{
     Location, Span,
@@ -116,6 +116,16 @@ pub fn apply_capture_mutations<'a>(
 ) {
     let capture_backtraces = derive_best_backtraces_for_captures(ctx, func);
 
+    apply_capture_mutations_with(ctx, func, args, &capture_backtraces, location);
+}
+
+pub fn apply_capture_mutations_with<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
+    capture_backtraces: &[(usize, Option<LabelBacktrace<'a>>)],
+    location: &Location,
+) {
     // calculate the concrete call-site backtrace for each real parameter, which
     // is later needed to realize capture labels after a function call with the
     // actual argument values; this is necessary because a capture may
@@ -187,7 +197,7 @@ pub fn apply_capture_mutations<'a>(
             ));
         }
 
-        for (index, backtrace) in &capture_backtraces {
+        for (index, backtrace) in capture_backtraces {
             realized = Cow::Owned(realized.realize(
                 func.r#ref(),
                 SyntheticSlot::Capture(*index),
@@ -249,6 +259,80 @@ pub fn apply_capture_mutations<'a>(
 
         outer_symbol.borrow_mut().set_value(final_value);
     }
+}
+
+pub fn apply_capture_mutations_and_merge_capture_backtraces<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
+    location: &Pinned<'a, Location>,
+) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
+    let before_mutation = derive_best_backtraces_for_captures(ctx, func);
+
+    apply_capture_mutations_with(ctx, func, args, &before_mutation, location.inner());
+
+    let after_mutation = derive_best_backtraces_for_captures(ctx, func);
+
+    merge_call_entry_and_exit_capture_backtraces(before_mutation, after_mutation, location)
+}
+
+fn merge_call_entry_and_exit_capture_backtraces<'a>(
+    entry: Vec<(usize, Option<LabelBacktrace<'a>>)>,
+    exit: Vec<(usize, Option<LabelBacktrace<'a>>)>,
+    location: &Pinned<'a, Location>,
+) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
+    // each captured variable has only one assigned synthetic slot, which means
+    // that different reads of the same captured variable are indistinguishable
+    // during realization: all <0> become {concrete}, and there is nothing else
+    // that can be done. however, if a closure mutates a captured variable
+    // between reads, those 2 reads are supposed to yield different labels, but
+    // our model does not support it since both are <0> and so both will become
+    // {concrete} (which concrete? probably the one at the end of the function
+    // body, post-mutations)
+
+    // to solve this, we conservatively merge all possible read results by
+    // merging the calculated concretes for the captured variable as determined
+    // for the start and for the end of the closure body (i.e., before and after
+    // capture mutations are applied), so as to obtain sound concretes for
+    // realization that actually are representative of all the capture's reads
+
+    // we start by populating the map with all the entry backtraces
+    let mut by_capture_index: BTreeMap<_, _> = entry.into_iter().collect();
+
+    for (index, exit_bt) in exit {
+        let Some(entry_bt) = by_capture_index.remove(&index) else {
+            // this index was not in the map, so there is no entry backtrace,
+            // meaning there is nothing to merge - we just insert exit's
+
+            by_capture_index.insert(index, exit_bt);
+
+            continue;
+        };
+
+        // there is both an entry and an exit backtrace, so merge them
+        let merged = merge_capture_binding_backtrace(entry_bt, exit_bt, location);
+
+        by_capture_index.insert(index, merged);
+    }
+
+    by_capture_index.into_iter().collect()
+}
+
+fn merge_capture_binding_backtrace<'a>(
+    entry: Option<LabelBacktrace<'a>>,
+    exit: Option<LabelBacktrace<'a>>,
+    location: &Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    if entry == exit {
+        return entry;
+    }
+
+    LabelBacktrace::combine_options(
+        entry,
+        exit,
+        LabelBacktraceKind::ClosureCaptureBinding,
+        Cow::Borrowed(location),
+    )
 }
 
 pub fn derive_best_backtraces_for_captures<'a>(
