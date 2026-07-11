@@ -15,11 +15,11 @@
 //! ## Example Usage
 //!
 //! ```no_run
-//! let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+//! let analyzer = glowy::Analyzer::from_directory("./proj")?;
 //!
 //! let result = analyzer.analyze();
 //! #
-//! # Ok::<(), std::io::Error>(())
+//! # Ok::<(), glowy::AnalyzerFromDirectoryError>(())
 //! ```
 
 // Clippy lint configuration
@@ -147,7 +147,7 @@
 
 use std::{borrow::Cow, cmp, collections::HashSet, fmt, path::Path, sync::LazyLock};
 
-pub use analyzer::Analyzer;
+pub use analyzer::{Analyzer, AnalyzerFromDirectoryError};
 pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
 pub use files::SourceFile;
 use indexmap::IndexMap;

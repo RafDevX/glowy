@@ -13,19 +13,28 @@ pub fn analyze_single<P: AsRef<Path>>(
     strict: bool,
     time_analysis: bool,
 ) -> (usize, usize) {
-    let analyzer = glowy::Analyzer::from_directory(path)
-        .unwrap_or_else(|_| {
-            fatal(
-                "IO error occurred when reading the specified directory.",
-                "Does a `go.mod` file exist?",
-            )
-        })
-        .unwrap_or_else(|| {
-            fatal(
-                "Unknown module path.",
-                "No `module` directive was found in the specified directory's `go.mod` file.",
-            )
-        });
+    let analyzer = glowy::Analyzer::from_directory(path).unwrap_or_else(|err| match err {
+        glowy::AnalyzerFromDirectoryError::FileSystem(error) => fatal(
+            "IO error occurred when reading the specified directory.",
+            "Please try running Glowy again.",
+            Some(error),
+        ),
+        glowy::AnalyzerFromDirectoryError::GoModFileNotFound => fatal(
+            "No `go.mod` file found in the root of the specified directory",
+            "Does a `go.mod` file exist?",
+            None::<&str>,
+        ),
+        glowy::AnalyzerFromDirectoryError::UnknownModulePath => fatal(
+            "Unknown module path.",
+            "No `module` directive was found in the specified directory's `go.mod` file.",
+            None::<&str>,
+        ),
+        glowy::AnalyzerFromDirectoryError::ConfigFileDeserializationFailure(error) => fatal(
+            "Configuration file failed to deserialize.",
+            "Is the `glowy.toml` file well-formed TOML structured how Glowy expects it to be?",
+            Some(error),
+        ),
+    });
 
     let start = Instant::now();
 
@@ -79,7 +88,8 @@ fn analyze_multi(mut modules: Vec<PathBuf>, strict: bool, time_analysis: bool) -
     if modules.is_empty() {
         fatal(
             "No directories found in the specified modules directory.",
-            "Is the path provided correct?",
+            "Is the provided path correct?",
+            None::<&str>,
         )
     }
 
@@ -215,10 +225,11 @@ pub fn analyze_multi_suites<P: AsRef<Path>>(
 fn list_dirs_in_dir<P: AsRef<Path>>(path: P) -> impl Iterator<Item = PathBuf> {
     fs::read_dir(path)
         .and_then(Iterator::collect::<Result<Vec<_>, io::Error>>)
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|err| {
             fatal(
                 "IO error occurred when reading the specified directory.",
-                "Does the path provided exist?",
+                "Does the provided path exist?",
+                Some(err),
             )
         })
         .into_iter()

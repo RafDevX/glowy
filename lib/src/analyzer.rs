@@ -62,11 +62,11 @@ static ANALYSIS_POOL: sync::LazyLock<rayon::ThreadPool> = sync::LazyLock::new(||
 /// # Example Usage
 ///
 /// ```no_run
-/// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+/// let analyzer = glowy::Analyzer::from_directory("./proj")?;
 ///
 /// let result = analyzer.analyze();
 ///
-/// # Ok::<(), std::io::Error>(())
+/// # Ok::<(), glowy::AnalyzerFromDirectoryError>(())
 /// ```
 pub struct Analyzer {
     /// Go module path base, such as `example.com/company-name/proj`.
@@ -284,8 +284,6 @@ impl Analyzer {
     ///
     /// Internally, this method uses [`Analyzer::from_go_mod`] and
     /// [`SourceFile::read_from_disk`], so their respective conditions apply.
-    /// In particular, this method returns `Ok(None)` if no valid `module`
-    /// directive was found in the `go.mod` file.
     ///
     /// Using this method to construct [`Analyzer`] brings the added advantage
     /// of [`Analyzer::new_with_config`] being automatically invoked if a
@@ -293,30 +291,26 @@ impl Analyzer {
     /// to what [`Analyzer::new_with_config_file`] would accomplish if passed
     /// the corresponding path. However, this is only possible if TOML
     /// deserialization is available, i.e., if Cargo feature `toml-config` is
-    /// enabled. In order to ensure signature parity across Cargo features, if
-    /// TOML deserialization fails, `Ok(None)` is returned; detailed error
-    /// information ([`toml::de::Error`]) can be obtained by manually invoking
-    /// [`Analyzer::new_with_config_file`].
+    /// enabled.
     ///
     /// # Errors
     ///
-    /// An [`std::io::Error`] is returned if any filesystem operation fails,
-    /// including (but not limited to):
-    ///     - if the specified path does not correspond to an (accessible)
-    ///       directory;
-    ///     - if no `go.mod` file exists or could be opened;
-    ///     - if a file with `.go` extension could not be read or contains
-    ///       invalid UTF-8 sequences.
+    /// Due to how many varied tasks it orchestrates, this method can fail for
+    /// several different reasons. These situations are aggregated by
+    /// [`AnalyzerFromDirectoryError`]; see its documentation for
+    /// variant-specific details.
     ///
     /// # Example Usage
     ///
     /// ```no_run
-    /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+    /// let analyzer = glowy::Analyzer::from_directory("./proj")?;
     ///
-    /// # Ok::<(), std::io::Error>(())
+    /// # Ok::<(), glowy::AnalyzerFromDirectoryError>(())
     /// ```
     #[inline]
-    pub fn from_directory<P: AsRef<path::Path>>(path: P) -> io::Result<Option<Self>> {
+    pub fn from_directory<P: AsRef<path::Path>>(
+        path: P,
+    ) -> Result<Self, AnalyzerFromDirectoryError> {
         #[cfg(not(feature = "toml-config"))]
         let config = None;
 
@@ -326,22 +320,29 @@ impl Analyzer {
             // conditions, so we just try it and see if it fails
             match Self::read_config_file(path.as_ref().join("glowy.toml")) {
                 Ok(Ok(config)) => Some(config), // great
-                Ok(Err(_)) => return Ok(None),  // deserialization error
+                // deserialization error
+                Ok(Err(err)) => return Err(err.into()),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => {
                     // no such file, so we just ignore this (don't report error)
                     None
                 }
-                Err(err) => return Err(err), // something else; report
+                // something else; report
+                Err(err) => return Err(err.into()),
             }
         };
 
-        let Some(mut analyzer) = Self::from_go_mod(path.as_ref().join("go.mod"), config)? else {
-            return Ok(None);
+        let mut analyzer = match Self::from_go_mod(path.as_ref().join("go.mod"), config) {
+            Ok(Some(analyzer)) => analyzer,
+            Ok(None) => return Err(AnalyzerFromDirectoryError::UnknownModulePath),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(AnalyzerFromDirectoryError::GoModFileNotFound);
+            }
+            Err(err) => return Err(err.into()),
         };
 
         analyzer.add_directory_recurs(path::Component::RootDir, path)?;
 
-        Ok(Some(analyzer))
+        Ok(analyzer)
     }
 
     /// Constructs a new instance of [`Analyzer`] based on a `go.mod` file.
@@ -756,7 +757,7 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```no_run
-    /// let analyzer = glowy::Analyzer::from_directory("./proj")?.expect("module path");
+    /// let analyzer = glowy::Analyzer::from_directory("./proj")?;
     ///
     /// if let Err(errors) = analyzer.analyze() {
     ///     for error in errors {
@@ -764,7 +765,7 @@ impl Analyzer {
     ///     }
     /// }
     ///
-    /// # Ok::<(), std::io::Error>(())
+    /// # Ok::<(), glowy::AnalyzerFromDirectoryError>(())
     /// ```
     #[expect(
         clippy::missing_inline_in_public_items,
@@ -1160,6 +1161,51 @@ impl Analyzer {
             Ok(()) => Vec::new(),
             Err(errs) => errs,
         }
+    }
+}
+
+/// Represents an issue arising from a [`Analyzer::from_directory`] invocation.
+#[derive(Debug)]
+pub enum AnalyzerFromDirectoryError {
+    /// Failure to perform a filesystem-level operation.
+    ///
+    /// This variant is returned if a file could not be opened, could not be
+    /// read, or contains invalid UTF-8 sequences, among other several more
+    /// cases for possible I/O exceptions. This applies to `go.mod`,
+    /// `glowy.toml`, or any file with a `.go` extension found in the
+    /// repository.
+    ///
+    /// In addition, this variant is returned if the specified path does not
+    /// correspond to an (accessible) directory.
+    ///
+    /// An [`io::Error`], which this variant wraps, is typically triggered by
+    /// the Operating System.
+    FileSystem(io::Error),
+    /// No `go.mod` file exists or could be opened from the directory root.
+    GoModFileNotFound,
+    /// No valid `module` directive found in the directory's `go.mod` file.
+    UnknownModulePath,
+    /// Failure to TOML-deserialize the directory's `glowy.toml` file.
+    ///
+    /// This can happen because the file does not contain valid TOML, or because
+    /// its contents do not adhere to the structure expected by Glowy in order
+    /// to unmarshall them into an instance of [`AnalysisConfig`].
+    #[cfg(feature = "toml-config")]
+    ConfigFileDeserializationFailure(toml::de::Error),
+}
+
+impl From<io::Error> for AnalyzerFromDirectoryError {
+    #[inline]
+    fn from(err: io::Error) -> Self {
+        Self::FileSystem(err)
+    }
+}
+
+#[cfg(feature = "toml-config")]
+impl From<toml::de::Error> for AnalyzerFromDirectoryError {
+    #[inline]
+    fn from(err: toml::de::Error) -> Self {
+        Self::ConfigFileDeserializationFailure(err)
     }
 }
 

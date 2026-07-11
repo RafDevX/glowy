@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process};
+use std::{fmt, path::PathBuf, process};
 
 use clap::Parser;
 use colored::Colorize;
@@ -49,11 +49,18 @@ struct Config {
     time_analysis: bool,
 }
 
-fn fatal(msg: &str, hint: &str) -> ! {
+fn fatal(msg: &str, hint: &str, error: Option<impl fmt::Display>) -> ! {
+    let error_section = if let Some(error) = error {
+        format!("\n\n{}", error.to_string().trim())
+    } else {
+        String::new()
+    };
+
     eprintln!(
-        "{} {}\n\n\t{}",
+        "{} {}{}\n\n\t{}",
         "[FATAL]".bold().bright_red(),
         msg.bright_red(),
+        error_section,
         hint.italic().cyan()
     );
     process::exit(1)
