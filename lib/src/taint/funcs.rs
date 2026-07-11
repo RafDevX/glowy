@@ -956,7 +956,6 @@ fn apply_call<'a>(
             func,
             &with_backtraces_ref,
             &call_location,
-            &node.location,
             func.signature(),
         );
 
@@ -1003,7 +1002,7 @@ fn apply_call<'a>(
         ids: &ids,
         args: &with_backtraces_ref,
         capture_concretes: &capture_concretes,
-        location: &node.location,
+        location: &call_location,
     };
 
     handle_deferred_checks(ctx, func, &call_realization);
@@ -1043,9 +1042,6 @@ fn apply_call<'a>(
     }
 
     result
-
-    // TODO: test calling variadic fn, like `f(string, ...int)` with
-    // `f("hello", 1, 2, 3)`
 }
 
 fn collect_param_id_slots<'sig, 'a>(
@@ -1206,7 +1202,6 @@ fn visit_blackbox_call<'a>(
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     call_location: &Pinned<'a, Location>,
-    node_location: &Location,
     signature_hint: Option<&FunctionSignatureNode<'a>>,
 ) -> Vec<ValueRef<'a>> {
     // note that this case is still possible even if func is a closure, since
@@ -1214,7 +1209,7 @@ fn visit_blackbox_call<'a>(
     // initialized) variables in an effort to make them self-recursive, as the
     // whole point of closure capturing is that outer symbols are only really
     // "evaluated" when the closure is invoked
-    captures::apply_capture_mutations(ctx, func, args, node_location);
+    captures::apply_capture_mutations(ctx, func, args, call_location);
 
     let bt = LabelBacktrace::fold(
         args.iter()
@@ -1343,7 +1338,7 @@ struct CallRealization<'call, 'a> {
     ids: &'call [(Option<&'call Span<'a>>, bool, &'call TypeNode<'a>)],
     args: &'call [(ValueRef<'a>, Option<&'call LabelBacktrace<'a>>)],
     capture_concretes: &'call [(usize, Option<LabelBacktrace<'a>>)],
-    location: &'call Location,
+    location: &'call Pinned<'a, Location>,
 }
 
 fn handle_deferred_checks<'a>(
@@ -1369,7 +1364,7 @@ fn handle_deferred_checks<'a>(
             variadic,
             r#type,
             call.args,
-            call.location
+            Cow::Borrowed(call.location),
         );
 
         deferred_checks = deferred_checks
@@ -1393,15 +1388,7 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
-    let call_branch;
-    // block to force correct formatting
-    {
-        call_branch = calculate_effective_call_site_branch_backtrace_for(
-            ctx,
-            func,
-            ctx.pin(call.location.clone()),
-        );
-    };
+    let call_branch = calc_effective_call_site_branch_backtrace_for(ctx, func, call.location);
 
     deferred_checks = deferred_checks
         .iter()
@@ -1474,7 +1461,7 @@ fn calculate_call_result<'a>(
                 variadic,
                 r#type,
                 call.args,
-                call.location
+                Cow::Borrowed(call.location)
             );
 
             #[rustfmt::skip]
@@ -1529,14 +1516,14 @@ fn calculate_concrete_backtrace<'a>(
     variadic: bool,
     r#type: &TypeNode<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
-    location: &Location,
+    location: Cow<Pinned<'a, Location>>,
 ) -> Option<LabelBacktrace<'a>> {
     if variadic {
         LabelBacktrace::fold(
             args[index..].iter().flat_map(|(_, bt)| bt).copied(),
             LabelBacktraceKind::FunctionVariadicAggregation,
             id.map(Span::content),
-            ctx.pin(location.clone()),
+            location.into_owned(),
         )
     } else {
         let (value, cached_backtrace) = &args[index];
@@ -1563,10 +1550,10 @@ fn calculate_concrete_backtrace<'a>(
     }
 }
 
-pub fn calculate_effective_call_site_branch_backtrace_for<'a>(
+pub fn calc_effective_call_site_branch_backtrace_for<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
-    at_location: Pinned<'a, Location>,
+    at_location: &Pinned<'a, Location>,
 ) -> Option<LabelBacktrace<'a>> {
     let call_branch = ctx.branch_backtrace().cloned();
     let func_branch = func.backtrace().and_then(|bt| {
@@ -1581,6 +1568,6 @@ pub fn calculate_effective_call_site_branch_backtrace_for<'a>(
         call_branch,
         func_branch,
         LabelBacktraceKind::Branch,
-        Cow::Owned(at_location),
+        Cow::Borrowed(at_location),
     )
 }

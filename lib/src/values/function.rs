@@ -337,13 +337,15 @@ impl<'a> FunctionValue<'a> {
         Some(count)
     }
 
-    pub fn captures(&self) -> impl Iterator<Item = (Pinned<'a, Span<'a>>, &CaptureBinding<'a>)> {
+    pub fn captures(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (Pinned<'a, Span<'a>>, &CaptureBinding<'a>)> {
         self.captures.iter().map(|(k, v)| (*k, v))
     }
 
     pub fn captures_mut(
         &mut self,
-    ) -> impl Iterator<Item = (Pinned<'a, Span<'a>>, &mut CaptureBinding<'a>)> {
+    ) -> impl ExactSizeIterator<Item = (Pinned<'a, Span<'a>>, &mut CaptureBinding<'a>)> {
         self.captures.iter_mut().map(|(k, v)| (*k, v))
     }
 
@@ -366,6 +368,34 @@ impl<'a> FunctionValue<'a> {
 
             capture_index
         }
+    }
+
+    pub fn record_capture_mutation(
+        &mut self,
+        local_decl: Pinned<'a, Span<'a>>,
+        mutation_backtrace: &LabelBacktrace<'a>,
+        location: Pinned<'a, Location>,
+    ) {
+        let Some(binding) = self
+            .captures
+            .values_mut()
+            .find(|binding| binding.local_decl() == local_decl)
+        else {
+            return;
+        };
+
+        // the entry snapshot already accounts for the capture's value before
+        // the mutation, and will eventually be unioned with this value, but for
+        // now we need to get rid of the capture synthetic, as otherwise the
+        // capture-concrete fixed point could try to realize a capture with a
+        // concrete that still contains itself
+        let realized = mutation_backtrace.realize(
+            &self.r#ref,
+            SyntheticSlot::Capture(binding.index()),
+            None, // just get rid of it
+        );
+
+        binding.record_mutation_backtrace(realized, location);
     }
 
     pub fn call_count(&self) -> usize {
@@ -747,6 +777,11 @@ pub struct CaptureBinding<'a> {
         reason = "Conveniently represent the presence/absence of an Option<LabelBacktrace>"
     )]
     hybrid_fallback: Option<Option<LabelBacktrace<'a>>>,
+    // union of backtraces observed after mutating the fake local capture symbol
+    // over the course of the function body, so all reads see all possible
+    // mutations (conservatively merged) rather than just the last, when the
+    // capture synthetics are realized at the end
+    mutation_backtrace: Option<LabelBacktrace<'a>>,
 }
 
 impl<'a> CaptureBinding<'a> {
@@ -755,6 +790,7 @@ impl<'a> CaptureBinding<'a> {
             index,
             local_decl,
             hybrid_fallback: None,
+            mutation_backtrace: None,
         }
     }
 
@@ -778,6 +814,23 @@ impl<'a> CaptureBinding<'a> {
         self.hybrid_fallback = Some(hybrid_fallback);
     }
 
+    pub fn mutation_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
+        self.mutation_backtrace.as_ref()
+    }
+
+    pub fn record_mutation_backtrace(
+        &mut self,
+        mutation_backtrace: Option<LabelBacktrace<'a>>,
+        location: Pinned<'a, Location>,
+    ) {
+        self.mutation_backtrace = LabelBacktrace::combine_options(
+            self.mutation_backtrace.take(),
+            mutation_backtrace,
+            LabelBacktraceKind::ClosureCaptureBinding,
+            Cow::Owned(location),
+        );
+    }
+
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
@@ -792,6 +845,10 @@ impl<'a> CaptureBinding<'a> {
             binding.set_hybrid_fallback(realized);
         }
 
+        binding.mutation_backtrace = binding
+            .mutation_backtrace
+            .and_then(|backtrace| backtrace.realize(from_func, from_slot, concrete));
+
         binding
     }
 }
@@ -803,6 +860,9 @@ impl SnapshotAware for CaptureBinding<'_> {
             && self
                 .hybrid_fallback
                 .snapshot_aware_eq(&other.hybrid_fallback)
+            && self
+                .mutation_backtrace
+                .snapshot_aware_eq(&other.mutation_backtrace)
     }
 }
 

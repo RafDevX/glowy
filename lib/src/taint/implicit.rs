@@ -15,7 +15,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::Symbol,
-    taint::{explicit, exprs, mutation::LeftValue},
+    taint::{explicit, exprs, funcs, mutation::LeftValue},
     values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -506,11 +506,7 @@ fn get_iter_function_range_values<'a>(
             .collect();
     }
 
-    let call_branch = super::funcs::calculate_effective_call_site_branch_backtrace_for(
-        ctx,
-        func,
-        location.clone(),
-    );
+    let call_branch = funcs::calc_effective_call_site_branch_backtrace_for(ctx, func, location);
 
     yield_acc
         .iter()

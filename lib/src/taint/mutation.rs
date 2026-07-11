@@ -326,7 +326,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
     fn mutate_target(
         &self,
         ctx: &mut AnalysisContext<'a>,
-        _assignment_location: &Location,
+        assignment_location: &Location,
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
     ) {
         let Some(symbol) = exprs::resolve_operand_name(ctx, *self, None) else {
@@ -334,7 +334,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
             return;
         };
 
-        mutate_through_symbol(ctx, &symbol, *self, mutator);
+        mutate_through_symbol(ctx, &symbol, *self, assignment_location, mutator);
     }
 }
 
@@ -342,6 +342,7 @@ fn mutate_through_symbol<'a>(
     ctx: &mut AnalysisContext<'a>,
     symbol: &SymbolRef<'a>,
     name: Span<'a>,
+    assignment_location: &Location,
     mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
 ) {
     if !symbol.borrow().mutable() {
@@ -358,7 +359,38 @@ fn mutate_through_symbol<'a>(
         return;
     };
 
+    record_current_function_capture_mutation(ctx, symbol, &mutated, assignment_location);
+
     symbol.borrow_mut().set_value(mutated);
+}
+
+fn record_current_function_capture_mutation<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    symbol: &SymbolRef<'a>,
+    mutated: &ValueRef<'a>,
+    assignment_location: &Location,
+) {
+    let Some(mutation_backtrace) = mutated.backtrace() else {
+        // we don't need to record anything if the new backtrace is Bottom,
+        // since the pre-mutation value is already necessarily more conservative
+        return;
+    };
+
+    let local_decl = symbol.borrow().declared_name();
+
+    let Some(mut current_function) = ctx.current_function() else {
+        return;
+    };
+
+    let Some(mut func) = current_function.as_function_mut() else {
+        return;
+    };
+
+    func.record_capture_mutation(
+        local_decl,
+        &mutation_backtrace,
+        ctx.pin(assignment_location.clone()),
+    );
 }
 
 impl<'a> LeftValue<'a> for IndexingNode<'a> {
@@ -556,7 +588,13 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 .get_qualified_symbol(qualifier.content(), self.selector.content())
             {
                 QualifiedSymbolResolutionResult::Success(symbol) => {
-                    mutate_through_symbol(ctx, &symbol, self.selector, mutator);
+                    mutate_through_symbol(
+                        ctx,
+                        &symbol,
+                        self.selector,
+                        assignment_location,
+                        mutator,
+                    );
                 }
                 // package source is unavailable (blackbox) or has not yet been
                 // analyzed in this pass -- the write target is invisible to us,

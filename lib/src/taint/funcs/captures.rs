@@ -19,6 +19,75 @@ use crate::{
 
 mod collector;
 
+struct CallSiteConcretes<'a> {
+    params: Vec<Option<LabelBacktrace<'a>>>,
+    branch: Option<LabelBacktrace<'a>>,
+}
+
+impl<'a> CallSiteConcretes<'a> {
+    fn new(
+        ctx: &AnalysisContext<'a>,
+        func: &FunctionValue<'a>,
+        args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
+        location: &Pinned<'a, Location>,
+    ) -> Self {
+        // calculate the concrete call-site backtrace for each real parameter,
+        // which is later needed to realize capture labels after a function call
+        // with the actual argument values; this is necessary because a capture
+        // may indirectly depend on any argument, so we must resolve each
+        // capture against each parameter position
+
+        let params = if let Some(signature) = func.signature() {
+            signature
+                .params
+                .iter()
+                .enumerate()
+                .map(|(index, param)| {
+                    super::calculate_concrete_backtrace(
+                        ctx,
+                        index,
+                        param.ids.first(),
+                        param.variadic,
+                        &param.r#type,
+                        args,
+                        Cow::Borrowed(location),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let branch = super::calc_effective_call_site_branch_backtrace_for(ctx, func, location);
+
+        Self { params, branch }
+    }
+
+    fn realize_backtrace_for_params(
+        &self,
+        func: &FunctionRef<'a>,
+        initial: Option<LabelBacktrace<'a>>,
+    ) -> Option<LabelBacktrace<'a>> {
+        let Some(mut current) = initial else {
+            // nothing to realize
+            return None;
+        };
+
+        for (param_index, concrete) in self.params.iter().enumerate() {
+            if let Some(realized) =
+                current.realize(func, SyntheticSlot::Param(param_index), concrete.as_ref())
+            {
+                current = realized;
+            } else {
+                // nothing left to realize
+                return None;
+            }
+        }
+
+        current.realize(func, SyntheticSlot::CallSiteBranch, self.branch.as_ref())
+    }
+}
+
 pub fn register_closure_captures<'a>(
     ctx: &mut AnalysisContext<'a>,
     r#ref: &FunctionRef<'a>,
@@ -103,7 +172,7 @@ pub fn record_closure_capture_fallbacks<'a>(ctx: &AnalysisContext<'a>, value: &m
             continue;
         };
 
-        let hybrid = derive_hybrid_symbol_backtrace(ctx, &outer_symbol);
+        let hybrid = derive_hybrid_symbol_backtrace(ctx, &outer_symbol, &[]);
         binding.set_hybrid_fallback(hybrid);
     }
 }
@@ -112,55 +181,21 @@ pub fn apply_capture_mutations<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
-    location: &Location,
+    location: &Pinned<'a, Location>,
 ) {
-    let capture_backtraces = derive_best_backtraces_for_captures(ctx, func);
+    let call_site_concretes = CallSiteConcretes::new(ctx, func, args, location);
 
-    apply_capture_mutations_with(ctx, func, args, &capture_backtraces, location);
+    let capture_backtraces = derive_best_backtraces_for_captures(ctx, func, &call_site_concretes);
+
+    apply_capture_mutations_with(ctx, func, &call_site_concretes, &capture_backtraces);
 }
 
-pub fn apply_capture_mutations_with<'a>(
+fn apply_capture_mutations_with<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
-    args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
+    call_site_concretes: &CallSiteConcretes<'a>,
     capture_backtraces: &[(usize, Option<LabelBacktrace<'a>>)],
-    location: &Location,
 ) {
-    // calculate the concrete call-site backtrace for each real parameter, which
-    // is later needed to realize capture labels after a function call with the
-    // actual argument values; this is necessary because a capture may
-    // indirectly depend on any argument, so we must resolve each capture
-    // against each parameter position
-    let arg_concretes = if let Some(signature) = func.signature() {
-        signature
-            .params
-            .iter()
-            .enumerate()
-            .map(|(index, param)| {
-                (
-                    index,
-                    super::calculate_concrete_backtrace(
-                        ctx,
-                        index,
-                        param.ids.first(),
-                        param.variadic,
-                        &param.r#type,
-                        args,
-                        location,
-                    ),
-                )
-            })
-            .collect::<Vec<_>>()
-    } else {
-        vec![]
-    };
-
-    let call_branch = super::calculate_effective_call_site_branch_backtrace_for(
-        ctx,
-        func,
-        ctx.pin(location.clone()),
-    );
-
     for (outer_decl, binding) in func.captures() {
         let local_symbol = ctx
             .symtab()
@@ -189,10 +224,10 @@ pub fn apply_capture_mutations_with<'a>(
 
         let mut realized = Cow::Borrowed(&local_value);
 
-        for (index, concrete) in &arg_concretes {
+        for (index, concrete) in call_site_concretes.params.iter().enumerate() {
             realized = Cow::Owned(realized.realize(
                 func.r#ref(),
-                SyntheticSlot::Param(*index),
+                SyntheticSlot::Param(index),
                 concrete.as_ref(),
             ));
         }
@@ -205,14 +240,11 @@ pub fn apply_capture_mutations_with<'a>(
             ));
         }
 
-        // block to force correct formatting
-        {
-            realized = Cow::Owned(realized.realize(
-                func.r#ref(),
-                SyntheticSlot::CallSiteBranch,
-                call_branch.as_ref(),
-            ));
-        };
+        realized = Cow::Owned(realized.realize(
+            func.r#ref(),
+            SyntheticSlot::CallSiteBranch,
+            call_site_concretes.branch.as_ref(),
+        ));
 
         if *realized == local_value {
             // no realization happened; ensure compliance with AssumedImmutable
@@ -267,20 +299,6 @@ pub fn apply_capture_mutations_and_merge_capture_backtraces<'a>(
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
 ) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
-    let before_mutation = derive_best_backtraces_for_captures(ctx, func);
-
-    apply_capture_mutations_with(ctx, func, args, &before_mutation, location.inner());
-
-    let after_mutation = derive_best_backtraces_for_captures(ctx, func);
-
-    merge_call_entry_and_exit_capture_backtraces(before_mutation, after_mutation, location)
-}
-
-fn merge_call_entry_and_exit_capture_backtraces<'a>(
-    entry: Vec<(usize, Option<LabelBacktrace<'a>>)>,
-    exit: Vec<(usize, Option<LabelBacktrace<'a>>)>,
-    location: &Pinned<'a, Location>,
-) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
     // each captured variable has only one assigned synthetic slot, which means
     // that different reads of the same captured variable are indistinguishable
     // during realization: all <0> become {concrete}, and there is nothing else
@@ -296,21 +314,40 @@ fn merge_call_entry_and_exit_capture_backtraces<'a>(
     // capture mutations are applied), so as to obtain sound concretes for
     // realization that actually are representative of all the capture's reads
 
-    // we start by populating the map with all the entry backtraces
-    let mut by_capture_index: BTreeMap<_, _> = entry.into_iter().collect();
+    // if there are multiple read+mutation+read gadgets, intermediate mutation
+    // backtraces would not be represented in either the start nor the end value
+    // of the capture's local fake symbol, but we already keep track of
+    // mutations in CaptureBinding and merge them into the concrete at the end
+    // of `derive_concrete_backtrace_or_fallback`, so nothing is lost
 
-    for (index, exit_bt) in exit {
-        let Some(entry_bt) = by_capture_index.remove(&index) else {
-            // this index was not in the map, so there is no entry backtrace,
-            // meaning there is nothing to merge - we just insert exit's
+    let call_site = CallSiteConcretes::new(ctx, func, args, location);
 
-            by_capture_index.insert(index, exit_bt);
+    let before_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
+
+    apply_capture_mutations_with(ctx, func, &call_site, &before_mutation);
+
+    let after_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
+
+    merge_capture_backtrace_snapshots(before_mutation, after_mutation, location)
+}
+
+fn merge_capture_backtrace_snapshots<'a>(
+    before: Vec<(usize, Option<LabelBacktrace<'a>>)>,
+    after: Vec<(usize, Option<LabelBacktrace<'a>>)>,
+    location: &Pinned<'a, Location>,
+) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
+    let mut by_capture_index: BTreeMap<_, _> = before.into_iter().collect();
+
+    for (index, after_bt) in after {
+        let Some(before_bt) = by_capture_index.remove(&index) else {
+            // this index was not in the map, so there is no `before` backtrace,
+            // meaning there is nothing to merge - we just insert `after`'s
+            by_capture_index.insert(index, after_bt);
 
             continue;
         };
 
-        // there is both an entry and an exit backtrace, so merge them
-        let merged = merge_capture_binding_backtrace(entry_bt, exit_bt, location);
+        let merged = merge_capture_binding_backtraces(before_bt, after_bt, location);
 
         by_capture_index.insert(index, merged);
     }
@@ -318,33 +355,54 @@ fn merge_call_entry_and_exit_capture_backtraces<'a>(
     by_capture_index.into_iter().collect()
 }
 
-fn merge_capture_binding_backtrace<'a>(
-    entry: Option<LabelBacktrace<'a>>,
-    exit: Option<LabelBacktrace<'a>>,
+fn merge_capture_binding_backtraces<'a>(
+    before: Option<LabelBacktrace<'a>>,
+    after: Option<LabelBacktrace<'a>>,
     location: &Pinned<'a, Location>,
 ) -> Option<LabelBacktrace<'a>> {
-    if entry == exit {
-        return entry;
+    if before == after {
+        return before;
     }
 
     LabelBacktrace::combine_options(
-        entry,
-        exit,
+        before,
+        after,
         LabelBacktraceKind::ClosureCaptureBinding,
         Cow::Borrowed(location),
     )
 }
 
-pub fn derive_best_backtraces_for_captures<'a>(
+fn derive_best_backtraces_for_captures<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
+    call_site_concretes: &CallSiteConcretes<'a>,
 ) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
+    // bootstrap a stable view of the closure's own captures before deriving
+    // them again; nested closure values can then realize sibling capture
+    // synthetics from this snapshot instead of rereading the mutable outer
+    // symbol table and preserving stale synthetics
+    let capture_env_snapshot: Vec<_> = func
+        .captures()
+        .map(|(outer_decl, binding)| {
+            (
+                outer_decl,
+                derive_concrete_backtrace_or_fallback(ctx, func.r#ref(), outer_decl, binding, &[]),
+            )
+        })
+        .collect();
+
     let mut concretes: Vec<_> = func
         .captures()
         .map(|(outer_decl, binding)| {
             (
                 binding.index(),
-                derive_concrete_backtrace_or_fallback(ctx, outer_decl, binding),
+                derive_concrete_backtrace_or_fallback(
+                    ctx,
+                    func.r#ref(),
+                    outer_decl,
+                    binding,
+                    &capture_env_snapshot,
+                ),
             )
         })
         .collect();
@@ -395,38 +453,72 @@ pub fn derive_best_backtraces_for_captures<'a>(
         }
     }
 
+    // finally, we need to realize the captures' backtraces to get rid of any
+    // references coming from function params, since we have each param's
+    // concrete already calculated
+    for (_, concrete) in &mut concretes {
+        *concrete = call_site_concretes.realize_backtrace_for_params(func.r#ref(), concrete.take());
+    }
+
     concretes
 }
 
 fn derive_concrete_backtrace_or_fallback<'a>(
     ctx: &AnalysisContext<'a>,
+    func: &FunctionRef<'a>,
     outer_decl: Pinned<'a, Span<'a>>,
     binding: &CaptureBinding<'a>,
+    capture_env_snapshot: &[(Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>)],
 ) -> Option<LabelBacktrace<'a>> {
     let symbol = ctx.symtab().get_symbol_by_declaration(outer_decl).unwrap();
 
-    let hybrid = derive_hybrid_symbol_backtrace(ctx, &symbol);
+    let value_location = symbol.borrow().value().get().location().clone();
+
+    let hybrid = derive_hybrid_symbol_backtrace(ctx, &symbol, capture_env_snapshot);
 
     // we should prefer the hybrid even when not fully concrete when its
     // synthetics refer to functions still in the call stack (meaning that they
     // will be realized later), as the fallback would be less useful here, so we
     // only need to check whether there are *inactive* synthetics
-    if hybrid
+    let concrete = if hybrid
         .as_ref()
         .map(LabelBacktrace::label)
-        .is_some_and(|label| has_inactive_synthetics(ctx, label))
+        .is_some_and(|label| has_inactive_synthetics(ctx, label, func))
         && let Some(fallback) = binding.hybrid_fallback()
     {
-        return fallback.cloned();
-    }
+        fallback.cloned()
+    } else {
+        hybrid
+    };
 
-    hybrid
+    // finally, we need to merge the concrete with all other intermediate
+    // possible values for the capture, based on whatever mutations took place
+    // during the function body so that we can properly support read+mutate+read
+    // gadgets; see `apply_capture_mutations_and_merge_capture_backtraces`
+    LabelBacktrace::combine_options(
+        concrete,
+        binding.mutation_backtrace().cloned(),
+        LabelBacktraceKind::ClosureCaptureBinding,
+        Cow::Borrowed(&value_location),
+    )
 }
 
-fn has_inactive_synthetics<'a>(ctx: &AnalysisContext<'a>, label: &Label<'a>) -> bool {
+fn has_inactive_synthetics<'a>(
+    ctx: &AnalysisContext<'a>,
+    label: &Label<'a>,
+    realizable_func: &FunctionRef<'a>,
+) -> bool {
     label.tags().any(|tag| {
         if let LabelTag::Synthetic { func, .. } = tag {
-            !ctx.is_function_in_call_stack(func)
+            // `func == realizable_func` means that the function is realizable
+            // here, which is not necessarily covered by the other check
+            // (`ctx.is_function_in_call_stack`) since `apply_call` can be
+            // invoked from outside the function's body (and usually is)
+
+            // `ctx.is_function_in_call_stack` means that the synthetic is
+            // realizable later, since we are inside the function body
+
+            func != realizable_func && !ctx.is_function_in_call_stack(func)
         } else {
             false
         }
@@ -437,16 +529,18 @@ fn has_inactive_synthetics<'a>(ctx: &AnalysisContext<'a>, label: &Label<'a>) -> 
 fn derive_hybrid_symbol_backtrace<'a>(
     ctx: &AnalysisContext<'a>,
     symbol: &SymbolRef<'a>,
+    capture_env_snapshot: &[(Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>)],
 ) -> Option<LabelBacktrace<'a>> {
     let borrowed = symbol.borrow();
     let declared_name = borrowed.declared_name();
     let value = borrowed.value().get();
     drop(borrowed);
 
-    derive_hybrid_value_backtrace(
+    derive_hybrid_value_backtrace_in_capture_environment(
         ctx,
         &value,
         None,
+        capture_env_snapshot,
         Some(declared_name.content()),
         declared_name.pinned_location(),
     )
@@ -461,6 +555,28 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
     ctx: &AnalysisContext<'a>,
     value: &ValueRef<'a>,
     cached_backtrace: Option<Option<LabelBacktrace<'a>>>,
+    symbol: Option<&'a str>,
+    location: Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    derive_hybrid_value_backtrace_in_capture_environment(
+        ctx,
+        value,
+        cached_backtrace,
+        &[],
+        symbol,
+        location,
+    )
+}
+
+#[expect(
+    clippy::option_option,
+    reason = "Conveniently represent a backtrace's presence/absence"
+)]
+fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
+    ctx: &AnalysisContext<'a>,
+    value: &ValueRef<'a>,
+    cached_backtrace: Option<Option<LabelBacktrace<'a>>>,
+    capture_env_snapshot: &[(Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>)],
     symbol: Option<&'a str>,
     location: Pinned<'a, Location>,
 ) -> Option<LabelBacktrace<'a>> {
@@ -488,32 +604,48 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
             break;
         };
 
-        let live_concrete = ctx
-            .symtab()
-            .get_symbol_by_declaration(outer_decl)
-            .and_then(|sym| sym.borrow().value().get().backtrace());
-
-        let capture_concrete = if live_concrete
-            .as_ref()
-            .is_some_and(|bt| bt.label().has_any_synthetic())
+        let capture_concrete = if let Some(r#override) = capture_env_snapshot
+            .iter()
+            .find(|(override_decl, _)| *override_decl == outer_decl)
+            .map(|(_, r#override)| r#override)
         {
-            // up-to-date outer symbol value is labeled with synthetic tags,
-            // so we cannot use it in LabelBacktrace::realize, or otherwise the
-            // synthetics will never be realized and eventually escape their
-            // respective function -- so we must use the fallback, which might
-            // be unsound if it has become stale
-
-            binding.hybrid_fallback().unwrap()
+            // this function's outcome may contain synthetics for captures that
+            // also belong to the closure whose captures we are currently
+            // realizing (i.e., sibling captures). we use that closure's stable
+            // per-capture snapshot instead of rereading the mutable symbol
+            // table, otherwise sibling capture synthetics can survive this
+            // inner function realization
+            r#override.as_ref().map(Cow::Borrowed)
         } else {
-            // up-to-date outer symbol value is fully concrete, so we can use it
+            let live_concrete = ctx
+                .symtab()
+                .get_symbol_by_declaration(outer_decl)
+                .and_then(|sym| sym.borrow().value().get().backtrace());
 
-            live_concrete.as_ref()
+            if live_concrete
+                .as_ref()
+                .is_some_and(|bt| bt.label().has_any_synthetic())
+            {
+                // up-to-date outer symbol value is labeled with synthetic
+                // tags, so we cannot use it in LabelBacktrace::realize, or
+                // otherwise the synthetics will never be realized and
+                // eventually escape their respective function -- so we must
+                // use the fallback, which might be unsound if it has become
+                // stale
+
+                binding.hybrid_fallback().unwrap().map(Cow::Borrowed)
+            } else {
+                // up-to-date outer symbol value is fully concrete, so we can
+                // use it
+
+                live_concrete.map(Cow::Owned)
+            }
         };
 
         hybrid = backtrace.realize(
             func.r#ref(),
             SyntheticSlot::Capture(binding.index()),
-            capture_concrete,
+            capture_concrete.as_deref(),
         );
     }
 
