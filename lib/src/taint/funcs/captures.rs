@@ -11,6 +11,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::{Symbol, SymbolRef},
+    taint::mutation,
     values::{
         CaptureBinding, FunctionRef, FunctionValue, Mergeable, SelfAwareBacktraceContainer,
         ValueRef,
@@ -187,7 +188,13 @@ pub fn apply_capture_mutations<'a>(
 
     let capture_backtraces = derive_best_backtraces_for_captures(ctx, func, &call_site_concretes);
 
-    apply_capture_mutations_with(ctx, func, &call_site_concretes, &capture_backtraces);
+    apply_capture_mutations_with(
+        ctx,
+        func,
+        &call_site_concretes,
+        &capture_backtraces,
+        location,
+    );
 }
 
 fn apply_capture_mutations_with<'a>(
@@ -195,6 +202,7 @@ fn apply_capture_mutations_with<'a>(
     func: &FunctionValue<'a>,
     call_site_concretes: &CallSiteConcretes<'a>,
     capture_backtraces: &[(usize, Option<LabelBacktrace<'a>>)],
+    call_location: &Pinned<'a, Location>,
 ) {
     for (outer_decl, binding) in func.captures() {
         let local_symbol = ctx
@@ -289,6 +297,13 @@ fn apply_capture_mutations_with<'a>(
                 realized.into_owned()
             };
 
+        mutation::record_active_function_capture_mutation(
+            ctx,
+            &outer_symbol,
+            &final_value,
+            call_location,
+        );
+
         outer_symbol.borrow_mut().set_value(final_value);
     }
 }
@@ -324,7 +339,7 @@ pub fn apply_capture_mutations_and_merge_capture_backtraces<'a>(
 
     let before_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
 
-    apply_capture_mutations_with(ctx, func, &call_site, &before_mutation);
+    apply_capture_mutations_with(ctx, func, &call_site, &before_mutation, location);
 
     let after_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
 

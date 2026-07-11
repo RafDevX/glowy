@@ -370,18 +370,19 @@ impl<'a> FunctionValue<'a> {
         }
     }
 
+    #[must_use]
     pub fn record_capture_mutation(
         &mut self,
         local_decl: Pinned<'a, Span<'a>>,
         mutation_backtrace: &LabelBacktrace<'a>,
-        location: Pinned<'a, Location>,
-    ) {
+        location: Cow<Pinned<'a, Location>>,
+    ) -> bool {
         let Some(binding) = self
             .captures
             .values_mut()
             .find(|binding| binding.local_decl() == local_decl)
         else {
-            return;
+            return false;
         };
 
         // the entry snapshot already accounts for the capture's value before
@@ -396,6 +397,8 @@ impl<'a> FunctionValue<'a> {
         );
 
         binding.record_mutation_backtrace(realized, location);
+
+        true
     }
 
     pub fn call_count(&self) -> usize {
@@ -821,13 +824,13 @@ impl<'a> CaptureBinding<'a> {
     pub fn record_mutation_backtrace(
         &mut self,
         mutation_backtrace: Option<LabelBacktrace<'a>>,
-        location: Pinned<'a, Location>,
+        location: Cow<Pinned<'a, Location>>,
     ) {
         self.mutation_backtrace = LabelBacktrace::combine_options(
             self.mutation_backtrace.take(),
             mutation_backtrace,
             LabelBacktraceKind::ClosureCaptureBinding,
-            Cow::Owned(location),
+            location,
         );
     }
 

@@ -359,16 +359,21 @@ fn mutate_through_symbol<'a>(
         return;
     };
 
-    record_current_function_capture_mutation(ctx, symbol, &mutated, assignment_location);
+    record_active_function_capture_mutation(
+        ctx,
+        symbol,
+        &mutated,
+        &ctx.pin(assignment_location.clone()),
+    );
 
     symbol.borrow_mut().set_value(mutated);
 }
 
-fn record_current_function_capture_mutation<'a>(
-    ctx: &mut AnalysisContext<'a>,
+pub fn record_active_function_capture_mutation<'a>(
+    ctx: &AnalysisContext<'a>,
     symbol: &SymbolRef<'a>,
     mutated: &ValueRef<'a>,
-    assignment_location: &Location,
+    location: &Pinned<'a, Location>,
 ) {
     let Some(mutation_backtrace) = mutated.backtrace() else {
         // we don't need to record anything if the new backtrace is Bottom,
@@ -378,19 +383,21 @@ fn record_current_function_capture_mutation<'a>(
 
     let local_decl = symbol.borrow().declared_name();
 
-    let Some(mut current_function) = ctx.current_function() else {
-        return;
-    };
+    // the mutated symbol may be a fake capture-local owned by any enclosing
+    // function, not just the innermost function currently being visited, so we
+    // have to find the right one by traversing all active functions from
+    // innermost to outermost until one of them has a registered capture
+    // matching this symbol (if any), so we can record the mutation there
+    for mut active_function in ctx.active_functions() {
+        let Some(mut func) = active_function.as_function_mut() else {
+            return;
+        };
 
-    let Some(mut func) = current_function.as_function_mut() else {
-        return;
-    };
-
-    func.record_capture_mutation(
-        local_decl,
-        &mutation_backtrace,
-        ctx.pin(assignment_location.clone()),
-    );
+        if func.record_capture_mutation(local_decl, &mutation_backtrace, Cow::Borrowed(location)) {
+            // this function matched, so we can stop here
+            break;
+        }
+    }
 }
 
 impl<'a> LeftValue<'a> for IndexingNode<'a> {

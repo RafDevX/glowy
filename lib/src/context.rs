@@ -234,6 +234,11 @@ impl<'a> AnalysisContext<'a> {
         self.funcs.last().cloned()
     }
 
+    pub fn active_functions(&self) -> impl Iterator<Item = ValueRef<'a>> {
+        // innermost to outermost
+        self.funcs.iter().rev().cloned()
+    }
+
     pub fn push_function(&mut self, func: ValueRef<'a>) {
         self.funcs.push(func);
 
