@@ -130,6 +130,12 @@ impl<T: SnapshotAware> SnapshotAware for Option<T> {
     }
 }
 
+impl<T: SnapshotAware, U: SnapshotAware> SnapshotAware for (T, U) {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.0.snapshot_aware_eq(&other.0) && self.1.snapshot_aware_eq(&other.1)
+    }
+}
+
 impl<T: SnapshotAware> SnapshotAware for Vec<T> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         if self.len() != other.len() {
@@ -150,3 +156,22 @@ impl<K: Eq + hash::Hash, V: SnapshotAware> SnapshotAware for HashMap<K, V> {
                 .all(|(key, value)| other.get(key).snapshot_aware_eq(&Some(value)))
     }
 }
+
+// trivial implementations for some basic types
+// (cannot have a blanket impl for T: Copy because &refs are Copy too)
+
+macro_rules! impl_trivial_snapshot_aware {
+    ($($type:ty),* $(,)?) => {
+        $(impl SnapshotAware for $type {
+            fn snapshot_aware_eq(&self, other: &Self) -> bool {
+                self == other
+            }
+        })*
+    };
+}
+
+impl_trivial_snapshot_aware!(
+    u8, u16, u32, u64, u128, usize, // unsigned
+    i8, i16, i32, i64, i128, isize, // signed
+    f32, f64, bool, char, // others
+);

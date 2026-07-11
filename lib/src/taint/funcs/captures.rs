@@ -1,4 +1,7 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
 
 use parser::{
     Location, Span,
@@ -19,6 +22,8 @@ use crate::{
 };
 
 mod collector;
+
+type CaptureConcretes<'a> = Vec<(usize, Option<LabelBacktrace<'a>>)>;
 
 struct CallSiteConcretes<'a> {
     params: Vec<Option<LabelBacktrace<'a>>>,
@@ -173,7 +178,12 @@ pub fn record_closure_capture_fallbacks<'a>(ctx: &AnalysisContext<'a>, value: &m
             continue;
         };
 
-        let hybrid = derive_hybrid_symbol_backtrace(ctx, &outer_symbol, &[]);
+        let hybrid = derive_hybrid_symbol_backtrace(
+            ctx,
+            &outer_symbol,
+            &CaptureEnvSnapshot::empty(), // no overrides
+        );
+
         binding.set_hybrid_fallback(hybrid);
     }
 }
@@ -391,33 +401,18 @@ fn derive_best_backtraces_for_captures<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     call_site_concretes: &CallSiteConcretes<'a>,
-) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
-    // bootstrap a stable view of the closure's own captures before deriving
-    // them again; nested closure values can then realize sibling capture
-    // synthetics from this snapshot instead of rereading the mutable outer
-    // symbol table and preserving stale synthetics
-    let capture_env_snapshot: Vec<_> = func
-        .captures()
-        .map(|(outer_decl, binding)| {
-            (
-                outer_decl,
-                derive_concrete_backtrace_or_fallback(ctx, func.r#ref(), outer_decl, binding, &[]),
-            )
-        })
-        .collect();
+) -> CaptureConcretes<'a> {
+    let capture_env_snapshot = CaptureEnvSnapshot::derive_new_stable(ctx, func);
 
-    let mut concretes: Vec<_> = func
+    let mut concretes: CaptureConcretes<'a> = func
         .captures()
         .map(|(outer_decl, binding)| {
             (
                 binding.index(),
-                derive_concrete_backtrace_or_fallback(
-                    ctx,
-                    func.r#ref(),
-                    outer_decl,
-                    binding,
-                    &capture_env_snapshot,
-                ),
+                capture_env_snapshot
+                    .get(&outer_decl)
+                    .cloned()
+                    .expect("capture snapshot must contain every registered capture"),
             )
         })
         .collect();
@@ -463,7 +458,7 @@ fn derive_best_backtraces_for_captures<'a>(
             *concrete = Some(realized.into_owned());
         }
 
-        if concretes == previous {
+        if concretes.snapshot_aware_eq(&previous) {
             break;
         }
     }
@@ -483,7 +478,7 @@ fn derive_concrete_backtrace_or_fallback<'a>(
     func: &FunctionRef<'a>,
     outer_decl: Pinned<'a, Span<'a>>,
     binding: &CaptureBinding<'a>,
-    capture_env_snapshot: &[(Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>)],
+    capture_env_snapshot: &CaptureEnvSnapshot<'a>,
 ) -> Option<LabelBacktrace<'a>> {
     let symbol = ctx.symtab().get_symbol_by_declaration(outer_decl).unwrap();
 
@@ -544,7 +539,7 @@ fn has_inactive_synthetics<'a>(
 fn derive_hybrid_symbol_backtrace<'a>(
     ctx: &AnalysisContext<'a>,
     symbol: &SymbolRef<'a>,
-    capture_env_snapshot: &[(Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>)],
+    capture_env_snapshot: &CaptureEnvSnapshot<'a>,
 ) -> Option<LabelBacktrace<'a>> {
     let borrowed = symbol.borrow();
     let declared_name = borrowed.declared_name();
@@ -577,7 +572,7 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
         ctx,
         value,
         cached_backtrace,
-        &[],
+        &CaptureEnvSnapshot::empty(),
         symbol,
         location,
     )
@@ -591,7 +586,7 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
     ctx: &AnalysisContext<'a>,
     value: &ValueRef<'a>,
     cached_backtrace: Option<Option<LabelBacktrace<'a>>>,
-    capture_env_snapshot: &[(Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>)],
+    capture_env_snapshot: &CaptureEnvSnapshot<'a>,
     symbol: Option<&'a str>,
     location: Pinned<'a, Location>,
 ) -> Option<LabelBacktrace<'a>> {
@@ -619,11 +614,7 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
             break;
         };
 
-        let capture_concrete = if let Some(r#override) = capture_env_snapshot
-            .iter()
-            .find(|(override_decl, _)| *override_decl == outer_decl)
-            .map(|(_, r#override)| r#override)
-        {
+        let capture_concrete = if let Some(r#override) = capture_env_snapshot.get(&outer_decl) {
             // this function's outcome may contain synthetics for captures that
             // also belong to the closure whose captures we are currently
             // realizing (i.e., sibling captures). we use that closure's stable
@@ -712,4 +703,66 @@ fn realize_function_parameter_synthetics<'a>(
     concrete = concrete.realize(func.r#ref(), SyntheticSlot::CallSiteBranch, None)?;
 
     Some(concrete)
+}
+
+struct CaptureEnvSnapshot<'a>(HashMap<Pinned<'a, Span<'a>>, Option<LabelBacktrace<'a>>>);
+
+impl<'a> CaptureEnvSnapshot<'a> {
+    fn empty() -> Self {
+        // HashMap does not allocate until first inserted into
+        Self(HashMap::new())
+    }
+
+    fn derive_new_stable(ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
+        let mut current = Self::empty();
+
+        loop {
+            let next = current.derive_next_step(ctx, func);
+
+            if next.snapshot_aware_eq(&current) {
+                return current; // stabilization achieved
+            }
+
+            current = next;
+        }
+    }
+
+    fn derive_next_step(&self, ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
+        let mut snapshot: Vec<_> = func
+            .captures()
+            .map(|(outer_decl, binding)| {
+                (
+                    binding.index(),
+                    outer_decl,
+                    derive_concrete_backtrace_or_fallback(
+                        ctx,
+                        func.r#ref(),
+                        outer_decl,
+                        binding,
+                        self,
+                    ),
+                )
+            })
+            .collect();
+
+        // for determinism
+        snapshot.sort_by_key(|(index, _, _)| *index);
+
+        let map = snapshot
+            .into_iter()
+            .map(|(_, outer_decl, backtrace)| (outer_decl, backtrace))
+            .collect();
+
+        Self(map)
+    }
+
+    fn get(&self, outer_decl: &Pinned<'a, Span<'a>>) -> Option<&Option<LabelBacktrace<'a>>> {
+        self.0.get(outer_decl)
+    }
+}
+
+impl SnapshotAware for CaptureEnvSnapshot<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.0.snapshot_aware_eq(&other.0)
+    }
 }
