@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
 };
 
 use parser::{
@@ -541,19 +541,46 @@ fn derive_hybrid_symbol_backtrace<'a>(
     symbol: &SymbolRef<'a>,
     capture_env_snapshot: &CaptureEnvSnapshot<'a>,
 ) -> Option<LabelBacktrace<'a>> {
+    derive_hybrid_symbol_backtrace_with_active(
+        ctx,
+        symbol,
+        capture_env_snapshot,
+        &mut HashSet::new(),
+    )
+}
+
+// as much as possible is made concrete, but some synthetics might persist
+fn derive_hybrid_symbol_backtrace_with_active<'a>(
+    ctx: &AnalysisContext<'a>,
+    symbol: &SymbolRef<'a>,
+    capture_env_snapshot: &CaptureEnvSnapshot<'a>,
+    active_symbols: &mut HashSet<Pinned<'a, Span<'a>>>,
+) -> Option<LabelBacktrace<'a>> {
     let borrowed = symbol.borrow();
     let declared_name = borrowed.declared_name();
     let value = borrowed.value().get();
     drop(borrowed);
 
-    derive_hybrid_value_backtrace_in_capture_environment(
+    if !active_symbols.insert(declared_name) {
+        // function-valued captures can form cycles (such as a closure capturing
+        // the variable to which it is assigned), so we need to prevent infinite
+        // recursion by returning an approximation if re-queried
+        return value.backtrace();
+    }
+
+    let result = derive_hybrid_value_backtrace_in_capture_environment(
         ctx,
         &value,
         None,
         capture_env_snapshot,
         Some(declared_name.content()),
         declared_name.pinned_location(),
-    )
+        active_symbols,
+    );
+
+    active_symbols.remove(&declared_name);
+
+    result
 }
 
 // as much as possible is made concrete, but some synthetics might persist
@@ -575,6 +602,7 @@ pub(super) fn derive_hybrid_value_backtrace<'a>(
         &CaptureEnvSnapshot::empty(),
         symbol,
         location,
+        &mut HashSet::new(),
     )
 }
 
@@ -589,6 +617,7 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
     capture_env_snapshot: &CaptureEnvSnapshot<'a>,
     symbol: Option<&'a str>,
     location: Pinned<'a, Location>,
+    active_symbols: &mut HashSet<Pinned<'a, Span<'a>>>,
 ) -> Option<LabelBacktrace<'a>> {
     let cached_backtrace = cached_backtrace.unwrap_or_else(|| value.backtrace());
 
@@ -623,10 +652,18 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
             // inner function realization
             r#override.as_ref().map(Cow::Borrowed)
         } else {
-            let live_concrete = ctx
-                .symtab()
-                .get_symbol_by_declaration(outer_decl)
-                .and_then(|sym| sym.borrow().value().get().backtrace());
+            let live_concrete =
+                ctx.symtab()
+                    .get_symbol_by_declaration(outer_decl)
+                    .and_then(|sym| {
+                        // take into account transitive captures
+                        derive_hybrid_symbol_backtrace_with_active(
+                            ctx,
+                            &sym,
+                            capture_env_snapshot,
+                            active_symbols,
+                        )
+                    });
 
             if live_concrete
                 .as_ref()
