@@ -1,4 +1,4 @@
-use std::iter;
+use std::{iter, rc::Rc};
 
 use parser::{
     Annotation, Location, Span,
@@ -16,6 +16,7 @@ use crate::{
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::Symbol,
     taint::{self, annotations, funcs::captures, goto},
+    types::TypeInfo,
     values::{FunctionValue, InherentSink, Value, ValueRef},
 };
 
@@ -254,10 +255,17 @@ fn build_function_value<'a>(
         }
     }
 
+    // we need to pre-resolve the results' declared types at definition-time,
+    // since they may rely on contextual information only present here + now
+    // and no longer available at invocation time, especially for unqualified
+    // types used in functions defined in a different file than its invokers
+    let declared_result_types = resolve_declared_result_types(ctx, &signature.result);
+
     let mut func_val = FunctionValue::new(
         r#ref.clone(),
         Some(signature.clone()),
         receiver.is_some(),
+        declared_result_types,
         explicit_backtrace,
         sanitizer,
     );
@@ -319,6 +327,26 @@ fn build_function_value<'a>(
 
     // function value is now fully constructed, so just return it
     func_val
+}
+
+fn resolve_declared_result_types<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    result: &FunctionResultNode<'a>,
+) -> Vec<Option<Rc<TypeInfo<'a>>>> {
+    let mut resolve = |r#type: &TypeNode<'a>| {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, r#type)
+    };
+
+    match result {
+        FunctionResultNode::None => Vec::new(),
+        FunctionResultNode::Single(r#type) => vec![resolve(r#type)],
+        FunctionResultNode::Params(params) => params
+            .iter()
+            .flat_map(|param| iter::repeat_n(resolve(&param.r#type), param.ids.len().max(1)))
+            .collect(),
+    }
 }
 
 // sets up plumbing to allow for naked returns

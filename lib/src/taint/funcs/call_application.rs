@@ -1,8 +1,8 @@
-use std::{borrow::Cow, iter};
+use std::{borrow::Cow, iter, rc::Rc};
 
 use parser::{
     Location, Span,
-    ast::{CallNode, ExprNode, FunctionResultNode, FunctionSignatureNode, TypeNode},
+    ast::{CallNode, ExprNode, FunctionSignatureNode, TypeNode},
 };
 
 use crate::{
@@ -237,7 +237,7 @@ pub fn apply_call<'a>(
 
     // the result's static type is necessarily what the signature declares, not
     // what was passed to `return`, per Go semantics, so we should override
-    tag_results_with_declared_types(ctx, func.signature(), &mut result);
+    tag_results_with_declared_types(func, &mut result);
 
     // re-borrow as mutable
     drop(value_func);
@@ -322,7 +322,7 @@ fn visit_blackbox_call<'a>(
     };
 
     // even if we don't have an implementation, we might have a signature
-    tag_results_with_declared_types(ctx, signature_hint, &mut result);
+    tag_results_with_declared_types(func, &mut result);
 
     result
 }
@@ -541,35 +541,18 @@ fn calculate_call_result<'a>(
     result
 }
 
-fn tag_results_with_declared_types<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    signature: Option<&FunctionSignatureNode<'a>>,
-    results: &mut [ValueRef<'a>],
-) {
-    let Some(signature) = signature else {
-        // nothing we can do here
-        return;
-    };
+fn tag_results_with_declared_types<'a>(func: &FunctionValue<'a>, results: &mut [ValueRef<'a>]) {
+    // we already pre-resolved the results' declared types at definition-time,
+    // since they may rely on contextual information only present at that time
+    // and no longer available here at call-time, especially for unqualified
+    // types used in functions defined in a different file than its invokers
 
-    let type_iter: Box<dyn Iterator<Item = &TypeNode<'a>>> = match &signature.result {
-        FunctionResultNode::None => Box::new(iter::empty()),
-        FunctionResultNode::Single(r#type) => Box::new(iter::once(r#type)),
-        FunctionResultNode::Params(params) => Box::new(
-            params
-                .iter()
-                .flat_map(|param| iter::repeat_n(&param.r#type, param.ids.len().max(1))),
-        ),
-    };
+    // note that if FunctionValue::declared_result_types is not set (i.e., empty
+    // Vec), this just comes a no-op as intended, since zip will yield nothing
 
-    for (result, type_node) in results.iter_mut().zip(type_iter) {
-        let resolved = {
-            let (types, symtab) = ctx.types_mut_with_symtab();
-
-            types.resolve(symtab, type_node)
-        };
-
-        if let Some(r#type) = resolved {
-            result.set_declared_type(r#type);
+    for (result, declared_type) in results.iter_mut().zip(func.declared_result_types()) {
+        if let Some(r#type) = declared_type {
+            result.set_declared_type(Rc::clone(r#type));
         }
     }
 }
