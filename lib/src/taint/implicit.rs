@@ -547,10 +547,15 @@ fn is_integer_range_expr<'a>(ctx: &AnalysisContext<'a>, expr: &ExprNode<'a>) -> 
 
             // must resolve to the predeclared builtin (not a user shadow)
             let Some(symbol) = ctx.symtab().get_symbol(func_name) else {
-                return false;
+                // since we already whitelisted the function name above to
+                // predeclared functions, symbol lookup failing means that this
+                // is a (not shadowed) builtin with special handling
+                return true;
             };
+
             let borrow = symbol.borrow();
             let value = borrow.value().get();
+
             let Some(func) = value.as_function() else {
                 return false;
             };

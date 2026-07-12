@@ -19,7 +19,10 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     // then they were already spotted and differentiated by the parser, but
     // otherwise we need to here identify all remaining built-in functions and
     // trigger their special handling, aborting function call handling on match
-    if let ExprNode::Name(id) = &*node.func {
+    if let ExprNode::Name(id) = &*node.func
+        && ctx.symtab().get_symbol(id.content()).is_none()
+    // ^^ check that the name has not been shadowed
+    {
         match id.content() {
             "append" => return CallResolution::Final(vec![builtins::visit_append(ctx, node)]),
             "copy" => return CallResolution::Final(vec![builtins::visit_copy(ctx, node)]),
