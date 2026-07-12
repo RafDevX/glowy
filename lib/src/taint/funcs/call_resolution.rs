@@ -99,7 +99,11 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
         return CallResolution::Final(vec![super::visit_type_conversion(
             ctx,
             node,
-            value_func.target_type().cloned(),
+            value_func
+                .declared_result_types()
+                .first()
+                .cloned()
+                .flatten(),
         )]);
     }
 

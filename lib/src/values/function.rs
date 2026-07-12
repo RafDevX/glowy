@@ -37,8 +37,6 @@ pub struct FunctionValue<'a> {
     // composite literals such as `T{...` to the correct shape interpretation
     // when X is array/slice/map rather than struct
     known_underlying_type: Option<TypeNode<'a>>, // None if unknown/not a type
-    // if this is a type constructor, a ref to the registered TypeInfo, if known
-    target_type: Option<Rc<TypeInfo<'a>>>,
     // expected result yielded by invoking this function (with synthetics)
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
@@ -94,7 +92,6 @@ impl<'a> FunctionValue<'a> {
             declared_result_types,
             is_type_constructor: false,
             known_underlying_type: None,
-            target_type: None,
             outcome: None,
             backtrace,
             sanitizer,
@@ -180,14 +177,13 @@ impl<'a> FunctionValue<'a> {
             r#ref,
             Some(signature), // never actually used for analysis, so dummy values are ok
             false,
-            vec![target_type.clone()],
+            vec![target_type],
             None,
             Label::Bottom,
         );
 
         value.is_type_constructor = true;
         value.known_underlying_type = underlying;
-        value.target_type = target_type;
 
         value
     }
@@ -227,10 +223,6 @@ impl<'a> FunctionValue<'a> {
 
     pub fn known_underlying_type(&self) -> Option<&TypeNode<'a>> {
         self.known_underlying_type.as_ref()
-    }
-
-    pub fn target_type(&self) -> Option<&Rc<TypeInfo<'a>>> {
-        self.target_type.as_ref()
     }
 
     pub fn outcome(&self) -> Option<&Vec<ValueRef<'a>>> {
@@ -581,7 +573,6 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             declared_result_types: self.declared_result_types.clone(),
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
-            target_type: self.target_type.clone(), // cheap
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -616,7 +607,6 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             declared_result_types: self.declared_result_types.clone(),
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
-            target_type: self.target_type.clone(), // cheap
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
@@ -648,7 +638,6 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.declared_result_types == other.declared_result_types
             && self.is_type_constructor == other.is_type_constructor
             && self.known_underlying_type == other.known_underlying_type
-            && self.target_type == other.target_type
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer
