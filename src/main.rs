@@ -16,6 +16,10 @@ const DOCS_ROOT_URL: &str = concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tar
 fn main() {
     let config = Config::parse();
 
+    diagnostics::N_CONTEXT_LINES
+        .set(config.context_lines)
+        .unwrap(); // impossible for cell to already be initialized
+
     let (_warnings, errors) = if config.multi_suites {
         orchestration::analyze_multi_suites(&config.directory, config.strict, config.time_analysis)
     } else if config.suite {
@@ -38,6 +42,9 @@ struct Config {
     /// Upgrade all warnings to errors before reporting them.
     #[arg(long)]
     strict: bool,
+    /// How many lines to show before and after error snippet annotations.
+    #[arg(long, default_value = "1")]
+    context_lines: usize,
     /// Analyze a directory of directories with Go modules, vs. just one module.
     #[arg(long, alias("multi"))]
     suite: bool,

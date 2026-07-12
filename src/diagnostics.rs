@@ -1,8 +1,11 @@
-use std::{borrow::Cow, path::Path};
+use std::{borrow::Cow, num::NonZeroUsize, path::Path, sync::OnceLock};
 
 use glowy::errors::AnalysisError;
 
 use crate::errors;
+
+// in each direction (N before and N after)
+pub static N_CONTEXT_LINES: OnceLock<usize> = OnceLock::new();
 
 pub fn error_to_group<'a>(
     error: &'a AnalysisError<'a>,
@@ -121,16 +124,25 @@ impl<'a> From<StructuredSnippet<'a>>
     for annotate_snippets::Snippet<'a, annotate_snippets::Annotation<'a>>
 {
     fn from(snippet: StructuredSnippet<'a>) -> Self {
-        // we inject Visible annotations to provide some context surrounding
-        // each actual annotation
-        let context = snippet
-            .annotations
-            .iter()
-            .map(|annotation| {
-                annotate_snippets::AnnotationKind::Visible
-                    .span(calc_context_lines(&snippet.source, &annotation.location))
-            })
-            .collect::<Vec<_>>();
+        let context =
+            if let Some(n_lines) = N_CONTEXT_LINES.get().copied().and_then(NonZeroUsize::new) {
+                // we inject Visible annotations to provide some context
+                // surrounding each actual annotation unless N_CONTEXT_LINES = 0
+
+                snippet
+                    .annotations
+                    .iter()
+                    .map(|annotation| {
+                        annotate_snippets::AnnotationKind::Visible.span(calc_context_lines(
+                            &snippet.source,
+                            &annotation.location,
+                            n_lines,
+                        ))
+                    })
+                    .collect()
+            } else {
+                Vec::new() // does not allocate since it has no elements
+            };
 
         annotate_snippets::Snippet::source(snippet.source)
             .path(snippet.path)
@@ -144,7 +156,11 @@ impl<'a> From<StructuredSnippet<'a>>
     }
 }
 
-fn calc_context_lines(source: &str, location: &glowy::Location) -> glowy::Location {
+fn calc_context_lines(
+    source: &str,
+    location: &glowy::Location,
+    n_lines: NonZeroUsize,
+) -> glowy::Location {
     let bytes = source.as_bytes();
     let start = location.start.min(bytes.len());
 
@@ -154,7 +170,7 @@ fn calc_context_lines(source: &str, location: &glowy::Location) -> glowy::Locati
         .rev()
         .filter(|(_, byte)| **byte == b'\n')
         .map(|(index, _)| index + 1) // advance newline
-        .nth(1) // 0th would be where annotation line begins
+        .nth(n_lines.into()) // 0th would be where annotation line begins
         .unwrap_or(0);
 
     let last_annotated_byte = location.end.saturating_sub(1).min(bytes.len());
@@ -166,7 +182,7 @@ fn calc_context_lines(source: &str, location: &glowy::Location) -> glowy::Locati
         .enumerate()
         .filter(|(_, byte)| **byte == b'\n')
         .map(|(index, _)| last_annotated_byte + index + 1) // advance newline
-        .nth(1) // 0th would be where annotation line ends
+        .nth(n_lines.into()) // 0th would be where annotation line ends
         .unwrap_or(bytes.len().saturating_add(1));
 
     context_start..context_end
