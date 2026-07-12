@@ -121,10 +121,55 @@ impl<'a> From<StructuredSnippet<'a>>
     for annotate_snippets::Snippet<'a, annotate_snippets::Annotation<'a>>
 {
     fn from(snippet: StructuredSnippet<'a>) -> Self {
+        // we inject Visible annotations to provide some context surrounding
+        // each actual annotation
+        let context = snippet
+            .annotations
+            .iter()
+            .map(|annotation| {
+                annotate_snippets::AnnotationKind::Visible
+                    .span(calc_context_lines(&snippet.source, &annotation.location))
+            })
+            .collect::<Vec<_>>();
+
         annotate_snippets::Snippet::source(snippet.source)
             .path(snippet.path)
-            .annotations(snippet.annotations.into_iter().map(Into::into))
+            .annotations(
+                snippet
+                    .annotations
+                    .into_iter()
+                    .map(Into::into)
+                    .chain(context),
+            )
     }
+}
+
+fn calc_context_lines(source: &str, location: &glowy::Location) -> glowy::Location {
+    let bytes = source.as_bytes();
+    let start = location.start.min(bytes.len());
+
+    let context_start = bytes[..start]
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, byte)| **byte == b'\n')
+        .map(|(index, _)| index + 1) // advance newline
+        .nth(1) // 0th would be where annotation line begins
+        .unwrap_or(0);
+
+    let last_annotated_byte = location.end.saturating_sub(1).min(bytes.len());
+    // ^^ we use [length - 1] because Range::end is exclusive and the rendering
+    // library allows specifying buffer ranges up to [length + 1]
+
+    let context_end = bytes[last_annotated_byte..]
+        .iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'\n')
+        .map(|(index, _)| last_annotated_byte + index + 1) // advance newline
+        .nth(1) // 0th would be where annotation line ends
+        .unwrap_or(bytes.len().saturating_add(1));
+
+    context_start..context_end
 }
 
 // intermediate representation (vs. Annotation directly) so we can perform some
