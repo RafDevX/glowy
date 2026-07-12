@@ -72,6 +72,21 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         self.known_len
     }
 
+    pub fn len_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
+        if self.known_len.is_some() {
+            // if the length is statically known, values stored at constant keys
+            // do not affect it, but the dynamic backtrace still applies, as it
+            // carries aggregate information introduced by control flow and
+            // assignments that could have had an influence on the length
+
+            self.r#dyn.backtrace_at_location(location)
+        } else {
+            // if the exact length is unknown, we have to be conservative
+
+            self.backtrace_at_location(location)
+        }
+    }
+
     pub fn get_const(&self, key: &K, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(key).cloned() {
             Some(value) => value,
@@ -426,6 +441,11 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
             self.set_at_unknown_key(&value, at_location);
         }
     }
+
+    fn length_backtrace_at_location(
+        &self,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>>;
 }
 
 // trivial implementation
@@ -453,6 +473,13 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
 
     fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.set_dyn(value, at_location);
+    }
+
+    fn length_backtrace_at_location(
+        &self,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        self.len_backtrace(location)
     }
 }
 
@@ -489,5 +516,12 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
 
     fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.set_dyn(value, at_location);
+    }
+
+    fn length_backtrace_at_location(
+        &self,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        self.len_backtrace(location)
     }
 }

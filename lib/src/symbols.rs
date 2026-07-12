@@ -736,7 +736,6 @@ impl<'a> Scope<'a> {
         predeclared_constant!("iota");
         predeclared_constant!("nil"); // not really a constant, but close enough
 
-        predeclared_function!("len", &["s"], false, 1);
         predeclared_function!("cap", &["s"], false, 1);
         predeclared_function!("min", &["n"], true, 1);
         predeclared_function!("max", &["n"], true, 1);

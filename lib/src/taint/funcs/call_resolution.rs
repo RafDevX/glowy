@@ -41,6 +41,9 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
 
                 return CallResolution::Final(vec![]);
             }
+            "len" => {
+                return CallResolution::Final(vec![builtins::visit_len(ctx, node)]);
+            }
             _ => {} // nothing to do, it's a real function call
         }
     }

@@ -160,6 +160,13 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Map(_))
     }
 
+    pub fn is_composite(&self) -> bool {
+        matches!(
+            *self.value.borrow(),
+            Value::Array(_) | Value::Slice(_) | Value::Map(_) | Value::Struct(_)
+        )
+    }
+
     pub fn is_function(&self) -> bool {
         matches!(*self.value.borrow(), Value::Function(_))
     }

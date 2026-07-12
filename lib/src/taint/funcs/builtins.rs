@@ -352,7 +352,7 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     // close doesn't actually do anything except if there's a branch backtrace
     // set, so we assign to None to essentially mix in the branch backtrace
 
-    // Note: `clear` has no return value.
+    // Note: `close` has no return value.
 
     let [arg] = node.args.as_slice() else {
         ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
@@ -422,4 +422,34 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
             Some(value)
         },
     );
+}
+
+pub fn visit_len<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+    let location = ctx.pin(node.location.clone());
+
+    let [arg] = node.args.as_slice() else {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 1,
+            found: node.args.len(),
+            location: node.location.clone(),
+        });
+
+        return ValueRef::new_bottom(location, None);
+    };
+
+    let value = exprs::visit_single_expr(ctx, arg);
+
+    // check with `is_composite` before casting with `as_composite` to avoid
+    // triggering an upgrade, as `len` can also operate on strings and channels
+    // and we don't want to mis-upgrade them to an array, especially since the
+    // upgrade would be useless to us here (wouldn't have known length anyway)
+    let backtrace = if value.is_composite()
+        && let Some(composite) = value.as_composite()
+    {
+        composite.length_backtrace_at_location(location.clone())
+    } else {
+        value.backtrace()
+    };
+
+    ValueRef::from_backtrace_or_bottom_at(backtrace, || location)
 }
