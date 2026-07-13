@@ -45,8 +45,8 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 /// `arg_index`. For example, the string `database/sql.DB.Query#0` corresponds
 /// to a target with defined `package_path`, `type_name`, `member_name`, and
 /// `arg_index`. For source directives only, `#N=value` additionally records a
-/// call-time equality predicate, and `~=` can be used instead of `=` to enable
-/// fuzzy matching.
+/// call-time (case-insensitive) equality predicate, and `~=` can be used
+/// instead of `=` to enable fuzzy matching (substring-based).
 ///
 /// This struct implements [`FromStr`] following this specification, and (if the
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
@@ -345,13 +345,20 @@ pub enum BlanketSourcePredicateValue {
 impl BlanketSourcePredicateValue {
     pub(crate) fn matches(&self, actual: &SimpleConstValue) -> bool {
         match self {
+            Self::Typed(SimpleConstValue::String(expected))
+                if let SimpleConstValue::String(actual) = actual =>
+            {
+                expected.to_lowercase() == actual.to_lowercase()
+            }
             Self::Typed(expected) => expected == actual,
             Self::Raw(expected) => match actual {
                 SimpleConstValue::Boolean(actual) => *expected == actual.to_string(),
                 SimpleConstValue::Integer(actual) => expected
                     .parse::<u64>()
                     .is_ok_and(|expected| expected == *actual),
-                SimpleConstValue::String(actual) => expected == actual,
+                SimpleConstValue::String(actual) => {
+                    expected.to_lowercase() == actual.to_lowercase()
+                }
             },
         }
     }
