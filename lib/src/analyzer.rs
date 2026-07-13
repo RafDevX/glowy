@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     env, fs,
     io::{self, BufRead},
     path,
@@ -22,7 +22,7 @@ use crate::{
     labels::Label,
     policy::{
         BlanketDirective, BlanketDirectiveKind, BlanketDirectiveTarget, BlanketDirectives,
-        BlanketSourceArgPredicate, PackageBlanketDirectives,
+        PackageBlanketDirectives,
     },
     taint,
 };
@@ -589,11 +589,12 @@ impl Analyzer {
     /// constant, or a struct field), all accesses to it will analogously yield
     /// the provided [`Label`].
     ///
-    /// The package path (`package_path`) is expected to be a well-formed,
-    /// fully qualified Go package path of where the member is accessible,
-    /// and `member_name` its declared symbol, method, or field name.
+    /// The `target` argument identifies which symbol, method, or field (and,
+    /// optionally, which specific function/method return value) this source
+    /// applies to. It can be constructed manually or derived from a [`String`].
+    /// See [`BlanketDirectiveTarget`] for more information.
     ///
-    /// Each invocation to this function extends the blanket directives
+    /// Each invocation of this method extends the blanket directives
     /// associated with the member path, meaning that previous versions are
     /// not overwritten. For sources, labels accumulate (union), so two source
     /// registrations for `{a}` and `{b}` are effectively equivalent to one
@@ -602,38 +603,24 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```
-    /// # use glowy::labels::Label;
+    /// # use glowy::{labels::Label, policy::BlanketDirectiveTarget};
     /// # use std::collections::BTreeSet;
     /// #
     /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
     ///
     /// analyzer.add_blanket_source(
-    ///     "example.com/company-name/proj/sub",
-    ///     None::<String>,
-    ///     "SomeFunc",
-    ///     BTreeSet::new(),
-    ///     None,
+    ///     BlanketDirectiveTarget::new_for_source_or_revocation(
+    ///         "os",
+    ///         None::<String>,
+    ///         "ReadFile",
+    ///         BTreeSet::new(),
+    ///         None,
+    ///     ),
     ///     Label::from_tags(&["secret"]),
     /// );
     /// ```
     #[inline]
-    pub fn add_blanket_source<'f>(
-        &mut self,
-        package_path: impl Into<Cow<'f, str>>,
-        type_name: Option<impl Into<Cow<'f, str>>>,
-        member_name: impl Into<Cow<'f, str>>,
-        result_selector: BTreeSet<usize>,
-        arg_predicate: Option<BlanketSourceArgPredicate>,
-        label: Label<'static>,
-    ) {
-        let target = BlanketDirectiveTarget::new_for_source(
-            package_path.into(),
-            type_name.map(Into::into),
-            member_name.into(),
-            result_selector,
-            arg_predicate,
-        );
-
+    pub fn add_blanket_source(&mut self, target: BlanketDirectiveTarget, label: Label<'static>) {
         self.add_blanket_directive(BlanketDirectiveKind::Source, target, label);
     }
 
@@ -651,8 +638,9 @@ impl Analyzer {
     /// The `target` argument identifies which symbol, method, or field (and,
     /// optionally, which specific function/method argument position) this sink
     /// applies to. It can be constructed manually or derived from a [`String`].
+    /// See [`BlanketDirectiveTarget`] for more information.
     ///
-    /// Each invocation to this function extends the blanket directives
+    /// Each invocation of this method extends the blanket directives
     /// associated with the target, meaning that previous versions are not
     /// overwritten. For sinks, each invocation defines an independent policy
     /// check, so two sink registrations for `{a}` and `{b}` are treated
