@@ -16,16 +16,26 @@ const DOCS_ROOT_URL: &str = concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tar
 fn main() {
     let config = Config::parse();
 
+    if let Some(Command::BaseSecurityPolicy) = config.command {
+        print!("{}", glowy::policy::BASE_SECURITY_POLICY);
+
+        return;
+    }
+
+    let directory = config
+        .directory
+        .expect("clap requires a directory when no subcommand is provided");
+
     diagnostics::N_CONTEXT_LINES
         .set(config.context_lines)
         .unwrap(); // impossible for cell to already be initialized
 
     let (_warnings, errors) = if config.multi_suites {
-        orchestration::analyze_multi_suites(&config.directory, config.strict, config.time_analysis)
+        orchestration::analyze_multi_suites(&directory, config.strict, config.time_analysis)
     } else if config.suite {
-        orchestration::analyze_suite(&config.directory, config.strict, config.time_analysis)
+        orchestration::analyze_suite(&directory, config.strict, config.time_analysis)
     } else {
-        orchestration::analyze_single(&config.directory, config.strict, config.time_analysis)
+        orchestration::analyze_single(&directory, config.strict, config.time_analysis)
     };
 
     if errors > 0 {
@@ -34,11 +44,11 @@ fn main() {
 }
 
 #[derive(clap::Parser)]
-#[command(version, about)]
+#[command(version, about, subcommand_negates_reqs = true)]
 struct Config {
     /// Path to a directory containing a Go module, including a `go.mod` file.
-    directory: PathBuf,
-    // ^ positional because no #[arg]
+    #[arg(required = true)] // positional
+    directory: Option<PathBuf>,
     /// Upgrade all warnings to errors before reporting them.
     #[arg(long)]
     strict: bool,
@@ -54,6 +64,15 @@ struct Config {
     /// Report elapsed time for the entire analysis process (including parsing).
     #[arg(long)]
     time_analysis: bool,
+    /// Additional auxiliary commands, in alternative to analysis.
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Print the base security policy.
+    BaseSecurityPolicy,
 }
 
 fn fatal(msg: &str, hint: &str, error: Option<impl fmt::Display>) -> ! {
