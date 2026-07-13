@@ -16,7 +16,7 @@ use crate::{
         funcs::{ResolvedCall, captures},
     },
     values::{
-        BacktraceContainer, FunctionValue, InherentSource, MobiusValue,
+        BacktraceContainer, FunctionValue, InherentSourceOrRevocation, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
@@ -166,6 +166,7 @@ pub fn apply_call<'a>(
         );
 
         apply_call_blanket_sources(func, &node.args, &call_location, &mut result);
+        apply_call_blanket_revocations(func, &node.args, &mut result);
 
         return result;
     };
@@ -230,6 +231,8 @@ pub fn apply_call<'a>(
             );
         }
     }
+
+    apply_call_blanket_revocations(func, &node.args, &mut result);
 
     for realized in &mut result {
         *realized = realized.with_location(call_location.clone());
@@ -371,7 +374,7 @@ fn apply_call_blanket_sources<'a>(
                 )
             } else {
                 single
-                    .try_override_expand_indices(
+                    .try_nest_override_expand_indices(
                         source.result_selector().iter().copied(),
                         LabelBacktraceKind::Expression,
                         None,
@@ -390,7 +393,7 @@ fn apply_call_blanket_sources<'a>(
             .iter()
             .filter(|source| source.applies_to_result(index))
             .copied()
-            .map(InherentSource::label)
+            .map(InherentSourceOrRevocation::label)
             .sum();
 
         let Some(backtrace) = new_source_backtrace(blanket_label) else {
@@ -403,6 +406,53 @@ fn apply_call_blanket_sources<'a>(
             call_location.clone(),
             [backtrace],
         );
+    }
+}
+
+fn apply_call_blanket_revocations<'a>(
+    func: &FunctionValue<'a>,
+    args: &[ExprNode<'a>],
+    result: &mut [ValueRef<'a>],
+) {
+    let revocations: Vec<_> = func
+        .revocations()
+        .iter()
+        .filter(|revocation| !revocation.label().is_bottom())
+        .filter(|revocation| revocation.applies_to_args(args))
+        .collect();
+
+    if revocations.is_empty() {
+        return;
+    }
+
+    if let [single] = result
+        && single.supports_overriding_expand_indices()
+    {
+        for revocation in revocations {
+            if revocation.result_selector().is_empty() {
+                single.subtract_label(revocation.label());
+            } else {
+                *single = single
+                    .try_subtract_override_expand_indices(
+                        revocation.result_selector().iter().copied(),
+                        revocation.label(),
+                    )
+                    .unwrap();
+            }
+        }
+
+        return;
+    }
+
+    for (index, value) in result.iter_mut().enumerate() {
+        let blanket_label: Label<'_> = revocations
+            .iter()
+            .filter(|revocation| revocation.applies_to_result(index))
+            .copied()
+            .map(InherentSourceOrRevocation::label)
+            .sum();
+
+        value.subtract_label(&blanket_label);
     }
 }
 

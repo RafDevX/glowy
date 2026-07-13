@@ -41,7 +41,7 @@ impl<'a> MobiusValue<'a> {
         (0..len).map(|index| self.value_at(index).clone()).collect()
     }
 
-    pub(super) fn override_expand_indices(
+    pub(super) fn nest_override_expand_indices(
         &self,
         indices: impl IntoIterator<Item = usize>,
         nest_with_kind: LabelBacktraceKind,
@@ -63,6 +63,24 @@ impl<'a> MobiusValue<'a> {
         }
 
         nested
+    }
+
+    pub(super) fn subtract_override_expand_indices(
+        &self,
+        indices: impl IntoIterator<Item = usize>,
+        subtract: &Label<'a>,
+    ) -> Self {
+        let mut subtracted = self.clone();
+
+        for index in indices {
+            let mut value = subtracted.value_at(index).clone_inner();
+
+            value.subtract_label(subtract);
+
+            subtracted.overrides.insert(index, value);
+        }
+
+        subtracted
     }
 }
 

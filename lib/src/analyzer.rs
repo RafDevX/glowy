@@ -196,6 +196,7 @@ impl Analyzer {
 
             analyzer.ingest_blanket_directives(
                 base.sources,
+                base.revocations,
                 base.allow_sinks,
                 base.deny_sinks,
                 &config.excluded_base_blanket_directives,
@@ -204,6 +205,7 @@ impl Analyzer {
 
         analyzer.ingest_blanket_directives(
             config.sources,
+            config.revocations,
             config.allow_sinks,
             config.deny_sinks,
             &HashSet::new(), // doesn't allocate, not expensive
@@ -568,9 +570,9 @@ impl Analyzer {
 
         let directive = BlanketDirective::new(
             kind,
-            result_selector, // source-only
+            result_selector, // source/revocation-only
             arg_index,       // sink-only
-            arg_predicate,   // source-only
+            arg_predicate,   // source/revocation-only
             label,
         );
 
@@ -622,6 +624,57 @@ impl Analyzer {
     #[inline]
     pub fn add_blanket_source(&mut self, target: BlanketDirectiveTarget, label: Label<'static>) {
         self.add_blanket_directive(BlanketDirectiveKind::Source, target, label);
+    }
+
+    /// Universally registers a symbol/method/field as revoking a label.
+    ///
+    /// This instructs the analyzer to always consider all calls to the given
+    /// function or method as never yielding any tag in the provided [`Label`],
+    /// despite what is otherwise derived from the function. If the specified
+    /// symbol is not a function nor a method (i.e., if it is a variable, a
+    /// constant, or a struct field), all accesses to it will analogously not
+    /// yield the provided [`Label`].
+    ///
+    /// This is accomplished through the subtraction of the provided label from
+    /// the one calculated for the value in question.
+    ///
+    /// The `target` argument identifies which symbol, method, or field (and,
+    /// optionally, which specific function/method return value) this revocation
+    /// applies to. It can be constructed manually or derived from a [`String`].
+    /// See [`BlanketDirectiveTarget`] for more information.
+    ///
+    /// Each invocation of this method extends the blanket directives
+    /// associated with the member path, meaning that previous versions are
+    /// not overwritten. For revocations, labels accumulate (union), so two
+    /// revocation registrations for `{a}` and `{b}` are effectively equivalent
+    /// to one registration for `{a, b}`.
+    ///
+    /// # Example Usage
+    ///
+    /// ```
+    /// # use glowy::{labels::Label, policy::BlanketDirectiveTarget};
+    /// # use std::collections::BTreeSet;
+    /// #
+    /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
+    ///
+    /// analyzer.add_blanket_revocation(
+    ///     BlanketDirectiveTarget::new_for_source_or_revocation(
+    ///         "os",
+    ///         None::<String>,
+    ///         "ReadFile",
+    ///         BTreeSet::new(),
+    ///         None,
+    ///     ),
+    ///     Label::from_tags(&["secret"]),
+    /// );
+    /// ```
+    #[inline]
+    pub fn add_blanket_revocation(
+        &mut self,
+        target: BlanketDirectiveTarget,
+        label: Label<'static>,
+    ) {
+        self.add_blanket_directive(BlanketDirectiveKind::Revocation, target, label);
     }
 
     /// Universally registers a symbol/method/field as an information sink.
@@ -691,6 +744,7 @@ impl Analyzer {
     fn ingest_blanket_directives(
         &mut self,
         sources: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
+        revocations: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
         allow_sinks: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
         deny_sinks: impl IntoIterator<Item = (BlanketDirectiveTarget, Vec<String>)>,
         exclude: &HashSet<BlanketDirectiveTarget>,
@@ -698,6 +752,11 @@ impl Analyzer {
         let blanket_directives = sources
             .into_iter()
             .map(|(target, tags)| (BlanketDirectiveKind::Source, target, tags))
+            .chain(
+                revocations
+                    .into_iter()
+                    .map(|(target, tags)| (BlanketDirectiveKind::Revocation, target, tags)),
+            )
             .chain(
                 allow_sinks
                     .into_iter()

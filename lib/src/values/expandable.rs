@@ -33,7 +33,7 @@ impl<'a> ExpandableValue<'a> {
             .collect()
     }
 
-    pub(super) fn override_expand_indices(
+    pub(super) fn nest_override_expand_indices(
         &self,
         indices: impl IntoIterator<Item = usize>,
         nest_with_kind: LabelBacktraceKind,
@@ -62,6 +62,30 @@ impl<'a> ExpandableValue<'a> {
         }
 
         nested
+    }
+
+    pub(super) fn subtract_override_expand_indices(
+        &self,
+        indices: impl IntoIterator<Item = usize>,
+        subtract: &Label<'a>,
+    ) -> Self {
+        let mut subtracted = self.clone();
+
+        for index in indices {
+            let r#ref = if index == 0 {
+                &mut subtracted.primary
+            } else if let Some(r#ref) = subtracted.secondary.get_mut(index - 1) {
+                r#ref
+            } else {
+                // unexpected index doesn't exist here, so we just ignore it
+                continue;
+            };
+
+            *r#ref = r#ref.clone_inner();
+            r#ref.subtract_label(subtract);
+        }
+
+        subtracted
     }
 }
 

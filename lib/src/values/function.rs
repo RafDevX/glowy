@@ -51,7 +51,9 @@ pub struct FunctionValue<'a> {
     // Label to be subtracted from realized result at call (revocation)
     sanitizer: Label<'a>,
     // blanket sources that need to be applied to selected results at call time
-    sources: Vec<InherentSource<'a>>,
+    sources: Vec<InherentSourceOrRevocation<'a>>,
+    // blanket revocations to apply to the selected results at call time
+    revocations: Vec<InherentSourceOrRevocation<'a>>,
     // inherent sinks that any call to this function implicitly triggers
     sinks: Vec<InherentSink<'a>>,
     // from sinks within the function, to which synthetic tags were passed
@@ -103,6 +105,7 @@ impl<'a> FunctionValue<'a> {
             backtrace,
             sanitizer,
             sources: Vec::new(),
+            revocations: Vec::new(),
             sinks: Vec::new(),
             deferred_checks: vec![],
             captures: HashMap::new(),
@@ -248,13 +251,23 @@ impl<'a> FunctionValue<'a> {
         &self.sanitizer
     }
 
-    pub fn sources(&self) -> &[InherentSource<'a>] {
+    pub fn sources(&self) -> &[InherentSourceOrRevocation<'a>] {
         &self.sources
     }
 
-    pub(crate) fn add_source(&mut self, source: InherentSource<'a>) {
+    pub fn add_source(&mut self, source: InherentSourceOrRevocation<'a>) {
         if !self.sources.contains(&source) {
             self.sources.push(source);
+        }
+    }
+
+    pub fn revocations(&self) -> &[InherentSourceOrRevocation<'a>] {
+        &self.revocations
+    }
+
+    pub fn add_revocation(&mut self, revocation: InherentSourceOrRevocation<'a>) {
+        if !self.revocations.contains(&revocation) {
+            self.revocations.push(revocation);
         }
     }
 
@@ -262,7 +275,7 @@ impl<'a> FunctionValue<'a> {
         &self.sinks
     }
 
-    pub(crate) fn add_sink(&mut self, sink: InherentSink<'a>) {
+    pub fn add_sink(&mut self, sink: InherentSink<'a>) {
         if !self.sinks.contains(&sink) {
             self.sinks.push(sink);
         }
@@ -276,12 +289,22 @@ impl<'a> FunctionValue<'a> {
             match directive.kind() {
                 BlanketDirectiveKind::Source => {
                     if directive.should_resolve_at_call_time() {
-                        self.add_source(InherentSource {
+                        self.add_source(InherentSourceOrRevocation {
                             label: directive.label().clone(),
                             predicate: directive.arg_predicate().cloned(),
                             result_selector: directive.result_selector().clone(),
                         });
                     }
+                }
+                BlanketDirectiveKind::Revocation => {
+                    let mut label = directive.label().clone();
+                    label.accept_wildcards();
+
+                    self.add_revocation(InherentSourceOrRevocation {
+                        label,
+                        predicate: directive.arg_predicate().cloned(),
+                        result_selector: directive.result_selector().clone(),
+                    });
                 }
                 BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
                     let mut label = directive.label().clone();
@@ -519,6 +542,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
             && self.outcome.is_none()
             && self.sanitizer.is_bottom()
             && self.sources.is_empty()
+            && self.revocations.is_empty()
             && self.sinks.is_empty()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
@@ -585,6 +609,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             backtrace,
             sanitizer: self.sanitizer.clone(),
             sources: self.sources.clone(),
+            revocations: self.revocations.clone(),
             sinks: self.sinks.clone(),
             deferred_checks,
             captures,
@@ -619,6 +644,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             backtrace,
             sanitizer: self.sanitizer.clone(),
             sources: self.sources.clone(),
+            revocations: self.revocations.clone(),
             sinks: self.sinks.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
@@ -650,6 +676,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer
             && self.sources == other.sources
+            && self.revocations == other.revocations
             && self.sinks == other.sinks
             && self
                 .deferred_checks
@@ -893,13 +920,13 @@ impl SnapshotAware for CaptureBinding<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InherentSource<'a> {
+pub struct InherentSourceOrRevocation<'a> {
     label: Label<'a>,
     result_selector: BTreeSet<usize>,
     predicate: Option<BlanketSourceArgPredicate>,
 }
 
-impl<'a> InherentSource<'a> {
+impl<'a> InherentSourceOrRevocation<'a> {
     pub fn label(&self) -> &Label<'a> {
         &self.label
     }

@@ -71,8 +71,10 @@ impl BlanketDirective {
         label: Label<'static>,
     ) -> Self {
         let (arg_index, arg_predicate, result_selector) = match kind {
-            // sources don't have a meaningful notion of "this arg only"
-            BlanketDirectiveKind::Source => (None, arg_predicate, result_selector),
+            // non-sinks don't have a meaningful notion of "this arg only"
+            BlanketDirectiveKind::Source | BlanketDirectiveKind::Revocation => {
+                (None, arg_predicate, result_selector)
+            }
             // sinks don't have a meaningful notion of "only when this matches"
             // or of selecting only specific function results
             BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
@@ -117,6 +119,7 @@ impl BlanketDirective {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlanketDirectiveKind {
     Source,
+    Revocation,
     AllowSink,
     DenySink,
 }

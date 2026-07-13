@@ -305,6 +305,22 @@ pub struct AnalysisConfig {
     /// [`Label`](labels::Label), with each individual [`String`] element
     /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
     pub sources: IndexMap<BlanketDirectiveTarget, Vec<String>>,
+    /// Targets universally recognized as subject to blanket label revocation.
+    ///
+    /// Every access to one of these targets has the associated label subtracted
+    /// from its calculated value.
+    ///
+    /// An [`IndexMap`] is used to preserve insertion order. Each key is a
+    /// [`BlanketDirectiveTarget`], which deserializes from a string of the form
+    /// `pkg.func` (applying to every access), `pkg.func->R,S,...` (applying
+    /// only to the results at the selected 0-indexed positions, for callable
+    /// revocation targets), or `pkg.func#N=value`/`pkg.func->R,S,...#N=value`
+    /// (additionally requiring that the argument in 0-indexed position `N` is
+    /// not provably different from `value`, optionally employing fuzzy matching
+    /// with `~=`). Each associated [`Vec<String>`] value represents a
+    /// [`Label`](labels::Label), with each individual [`String`] element
+    /// corresponding to a [`LabelTag::Concrete`](labels::LabelTag::Concrete).
+    pub revocations: IndexMap<BlanketDirectiveTarget, Vec<String>>,
     /// Targets universally recognized as blanket whitelist-based sinks.
     ///
     /// These targets will always be considered to accept only values up to
@@ -362,6 +378,7 @@ impl Default for AnalysisConfig {
             #[cfg(feature = "base-security-policy")]
             excluded_base_blanket_directives: HashSet::new(),
             sources: IndexMap::new(),
+            revocations: IndexMap::new(),
             allow_sinks: IndexMap::new(),
             deny_sinks: IndexMap::new(),
             include_tests: false,

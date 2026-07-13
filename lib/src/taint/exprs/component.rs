@@ -9,7 +9,7 @@ use crate::{
     Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{LabelBacktrace, LabelBacktraceKind},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::BlanketDirectiveKind,
     taint::funcs,
     types::{TypeInfo, TypeKind},
@@ -28,6 +28,10 @@ pub fn visit_selection<'a>(
     visit_selection_with_base(ctx, node, &base)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Very tight coupling means it would become more confusing if split up"
+)]
 pub fn visit_selection_with_base<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SelectionNode<'a>,
@@ -55,6 +59,9 @@ pub fn visit_selection_with_base<'a>(
     let blanket_backtrace = type_member_directives
         .and_then(|directives| super::build_blanket_source_backtrace(directives, &location));
 
+    let blanket_revocation =
+        type_member_directives.map_or(Label::Bottom, super::build_blanket_revocation_label);
+
     // ----------
 
     // we employ multiple strategies to determine whether this selection
@@ -69,13 +76,13 @@ pub fn visit_selection_with_base<'a>(
 
     if let Some(r#type) = base.declared_type().cloned() {
         if let Some(method) = r#type.lookup_promoted_method(selector) {
-            let value = funcs::nest_receiver_backtrace(
+            return nest_receiver_backtraces(
                 method.borrow().value().get(),
                 base,
-                location.clone(),
+                blanket_backtrace,
+                &blanket_revocation,
+                location,
             );
-
-            return nest_optional_backtrace(value, blanket_backtrace, location);
         }
 
         // ordering matters: `lookup_promoted_field` already gates on the
@@ -94,6 +101,7 @@ pub fn visit_selection_with_base<'a>(
             return nest_field_backtraces(
                 value,
                 [blanket_backtrace, field.tag_backtrace().cloned()],
+                &blanket_revocation,
                 location,
             );
         }
@@ -116,7 +124,7 @@ pub fn visit_selection_with_base<'a>(
 
         let value = funcs::nest_receiver_backtrace(method_value, base, location.clone());
 
-        return nest_optional_backtrace(value, blanket_backtrace, location);
+        return nest_optional_backtrace(value, blanket_backtrace, &blanket_revocation, location);
     }
 
     // ----------
@@ -162,6 +170,7 @@ pub fn visit_selection_with_base<'a>(
                 blanket_backtrace,
                 lookup_field_tag_backtrace(base, selector),
             ],
+            &blanket_revocation,
             location,
         );
     }
@@ -213,7 +222,9 @@ pub fn visit_selection_with_base<'a>(
             blackbox.absorb_blanket_directives(directives);
         }
 
-        return ValueRef::new(Value::Function(Box::new(blackbox)), location, None);
+        let value = ValueRef::new(Value::Function(Box::new(blackbox)), location, None);
+
+        return super::apply_blanket_revocation(value, &blanket_revocation);
     }
 
     // ----------
@@ -227,12 +238,25 @@ pub fn visit_selection_with_base<'a>(
     ValueRef::new_bottom(location, None)
 }
 
+fn nest_receiver_backtraces<'a>(
+    value: ValueRef<'a>,
+    receiver: &ValueRef<'a>,
+    blanket_source: Option<LabelBacktrace<'a>>,
+    blanket_revocation: &Label<'a>,
+    location: Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    let value = funcs::nest_receiver_backtrace(value, receiver, location.clone());
+
+    nest_optional_backtrace(value, blanket_source, blanket_revocation, location)
+}
+
 fn nest_optional_backtrace<'a>(
     value: ValueRef<'a>,
     backtrace: Option<LabelBacktrace<'a>>,
+    revocation: &Label<'a>,
     at_location: Pinned<'a, Location>,
 ) -> ValueRef<'a> {
-    match backtrace {
+    let value = match backtrace {
         Some(backtrace) => value.nest_backtrace(
             LabelBacktraceKind::Expression,
             None,
@@ -240,7 +264,9 @@ fn nest_optional_backtrace<'a>(
             [backtrace],
         ),
         None => value,
-    }
+    };
+
+    super::apply_blanket_revocation(value, revocation)
 }
 
 fn lookup_field_tag_backtrace<'a>(
@@ -255,16 +281,19 @@ fn lookup_field_tag_backtrace<'a>(
 fn nest_field_backtraces<'a>(
     value: ValueRef<'a>,
     backtraces: impl IntoIterator<Item = Option<LabelBacktrace<'a>>>,
+    revocation: &Label<'a>,
     at_location: Pinned<'a, Location>,
 ) -> ValueRef<'a> {
     let extras: Vec<_> = backtraces.into_iter().flatten().collect();
 
-    if extras.is_empty() {
+    let value = if extras.is_empty() {
         // avoid an unnecessary wrapping node when nothing is being folded in
-        return value;
-    }
+        value
+    } else {
+        value.nest_backtrace(LabelBacktraceKind::Expression, None, at_location, extras)
+    };
 
-    value.nest_backtrace(LabelBacktraceKind::Expression, None, at_location, extras)
+    super::apply_blanket_revocation(value, revocation)
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {

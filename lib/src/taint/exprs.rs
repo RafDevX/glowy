@@ -16,8 +16,8 @@ use crate::{
     policy::{BlanketDirective, BlanketDirectiveKind},
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     values::{
-        ExpandableValue, FunctionValue, PackageRefValue, SelfAwareBacktraceContainer, Value,
-        ValueRef,
+        BacktraceContainer, ExpandableValue, FunctionValue, PackageRefValue,
+        SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
 
@@ -161,15 +161,19 @@ pub fn visit_operand_name<'a>(
     // question for both functions like `os.Getenv` and non-function targets
     // such as `os.Args` and `os.Stdin` which are read directly / never called)
     let blanket_source_bt = build_blanket_source_backtrace_for(ctx, name, qualifier, &location);
+    // calculate blanket revocation label
+    let blanket_revocation = build_blanket_revocation_label_for(ctx, name, qualifier);
 
-    value
+    let value = value
         .nest_backtrace(
             LabelBacktraceKind::Expression,
             Some(name.content()),
             location.clone(),
             blanket_source_bt,
         )
-        .with_location(location)
+        .with_location(location);
+
+    apply_blanket_revocation(value, &blanket_revocation)
 }
 
 /// Reports error for unknown symbol or unknown qualifier, if applicable.
@@ -236,7 +240,9 @@ fn synthesize_fake_symbol_with_blanket_directives<'a>(
     let has_callable_directives = directives.iter().any(|directive| {
         matches!(
             directive.kind(),
-            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink,
+            BlanketDirectiveKind::Revocation
+                | BlanketDirectiveKind::AllowSink
+                | BlanketDirectiveKind::DenySink,
         ) || directive.should_resolve_at_call_time() // e.g. if conditional
     });
 
@@ -304,6 +310,52 @@ fn build_blanket_source_backtrace<'a>(
         None,
         at_location.clone(),
     )
+}
+
+fn build_blanket_revocation_label_for<'a>(
+    ctx: &AnalysisContext<'a>,
+    name: Span<'a>,
+    qualifier: Option<Span<'a>>,
+) -> Label<'a> {
+    let package_path = if let Some(qualifier) = qualifier {
+        ctx.symtab().package_path_for_qualifier(qualifier.content())
+    } else {
+        // FIXME: if current package doesn't have this symbol, pick the first
+        // wildcard import that has it; ignore universe scope
+
+        ctx.symtab().current_package_path()
+    };
+
+    let Some(package_path) = package_path else {
+        return Label::Bottom;
+    };
+
+    // we pass type_name = None because this could never be a method access
+    let directives = ctx.blanket_directives_for(package_path, None, name.content());
+
+    build_blanket_revocation_label(directives)
+}
+
+fn build_blanket_revocation_label<'a>(directives: &'a [BlanketDirective]) -> Label<'a> {
+    let mut label: Label<'a> = directives
+        .iter()
+        .filter(|directive| {
+            // only unconditional blanket revocations matter here
+            directive.kind() == BlanketDirectiveKind::Revocation
+                && !directive.should_resolve_at_call_time()
+        })
+        .map(BlanketDirective::label)
+        .sum();
+
+    label.accept_wildcards();
+
+    label
+}
+
+fn apply_blanket_revocation<'a>(mut value: ValueRef<'a>, revocation: &Label<'a>) -> ValueRef<'a> {
+    value.subtract_label(revocation);
+
+    value
 }
 
 fn visit_type_assertion<'a>(

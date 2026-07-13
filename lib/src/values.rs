@@ -16,7 +16,9 @@ pub use self::{
     channel::ChannelValue,
     composite::{CompositeValue, CompositeValueAdapter},
     expandable::ExpandableValue,
-    function::{CaptureBinding, FunctionRef, FunctionValue, InherentSink, InherentSource},
+    function::{
+        CaptureBinding, FunctionRef, FunctionValue, InherentSink, InherentSourceOrRevocation,
+    },
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,
@@ -254,7 +256,7 @@ impl<'a> ValueRef<'a> {
         )
     }
 
-    pub fn try_override_expand_indices(
+    pub fn try_nest_override_expand_indices(
         &self,
         indices: impl IntoIterator<Item = usize>,
         nest_with_kind: LabelBacktraceKind,
@@ -265,20 +267,53 @@ impl<'a> ValueRef<'a> {
         let borrowed = self.value.borrow();
 
         let new = match &*borrowed {
-            Value::Expandable(expandable) => Value::Expandable(expandable.override_expand_indices(
+            Value::Expandable(expandable) => {
+                Value::Expandable(expandable.nest_override_expand_indices(
+                    indices,
+                    nest_with_kind,
+                    nest_with_symbol,
+                    nest_with_location,
+                    extra_children,
+                ))
+            }
+            Value::Mobius(mobius) => Value::Mobius(mobius.nest_override_expand_indices(
                 indices,
                 nest_with_kind,
                 nest_with_symbol,
                 nest_with_location,
                 extra_children,
             )),
-            Value::Mobius(mobius) => Value::Mobius(mobius.override_expand_indices(
-                indices,
-                nest_with_kind,
-                nest_with_symbol,
-                nest_with_location,
-                extra_children,
-            )),
+            Value::Simple(_)
+            | Value::PackageRef(_)
+            | Value::Channel(_)
+            | Value::Array(_)
+            | Value::Slice(_)
+            | Value::Map(_)
+            | Value::Struct(_)
+            | Value::Function(_) => return None,
+        };
+
+        Some(Self::new(
+            new,
+            self.location.clone(),
+            self.declared_type.clone(),
+        ))
+    }
+
+    pub fn try_subtract_override_expand_indices(
+        &self,
+        indices: impl IntoIterator<Item = usize>,
+        subtract: &Label<'a>,
+    ) -> Option<Self> {
+        let borrowed = self.value.borrow();
+
+        let new = match &*borrowed {
+            Value::Expandable(expandable) => {
+                Value::Expandable(expandable.subtract_override_expand_indices(indices, subtract))
+            }
+            Value::Mobius(mobius) => {
+                Value::Mobius(mobius.subtract_override_expand_indices(indices, subtract))
+            }
             Value::Simple(_)
             | Value::PackageRef(_)
             | Value::Channel(_)

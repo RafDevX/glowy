@@ -12,15 +12,15 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 /// `type_name` (e.g., `(os, None, Remove)`), while type members carry the
 /// receiver type name (e.g., `(database/sql, Some(DB), Query)`).
 ///
-/// Note that non-method symbols are not necessarily functions, as they may
-/// refer to variables and constants (in the case of blanket sources).
-/// Analogously, type members are not necessarily methods, and may refer to
-/// struct fields (e.g., `(net/http, Some(Request), Body)`).
+/// Note that non-method symbols are not necessarily functions, as blanket
+/// sources and revocations may refer to variables and constants. Analogously,
+/// type members are not necessarily methods, and may refer to struct fields
+/// (e.g., `(net/http, Some(Request), Body)`).
 ///
 /// In addition, in the case of functions and methods, sink targets may be
 /// optionally narrowed down to specific argument zero-indexed positions via
-/// [`Self::arg_index`], and source targets may be similarly restricted to apply
-/// only to specific return value zero-indexed positions
+/// [`Self::arg_index`], and source/revocation targets may be similarly
+/// restricted to apply only to specific return value zero-indexed positions
 /// ([`Self::result_selector`]) or when a specific argument at a given
 /// zero-indexed position is not provably different from a given value.
 ///
@@ -42,14 +42,14 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 ///
 /// Optionally, for function and method blanket targets, a `#N` suffix
 /// (zero-indexed) may be included to also specify an `arg_index`. For source
-/// directives only, a `->R,S,...` component may follow the member path to
-/// select one or more result positions by their zero-based indices
-/// (`result_selector`), and the form `#N=value` may be used to record a
+/// and revocation directives only, a `->R,S,...` component may follow the
+/// member path to select one or more result positions by their zero-based
+/// indices (`result_selector`), and the form `#N=value` may be used to record a
 /// call-time (case-insensitive) equality predicate, while `~=` can be used
 /// instead of `=` to enable fuzzy matching (substring-based). For example, the
-/// string `database/sql.DB.Query->0,2#1=users` corresponds to a source
-/// targeting only the first and third results when the second argument could
-/// equal `users`.
+/// string `database/sql.DB.Query->0,2#1=users` corresponds to a source or
+/// revocation targeting only the first and third results when the second
+/// argument could equal `users`.
 ///
 /// Argument predicate values parsed from configuration are intentionally
 /// treated as unquoted constants: `#0=123` matches both the string constant
@@ -77,25 +77,27 @@ pub struct BlanketDirectiveTarget {
     /// Zero-based function result indices affected by this directive.
     ///
     /// If empty, no restriction is imposed. This selector only has meaning
-    /// for blanket sources applied to function or method calls.
+    /// for blanket sources and revocations applied to function or method calls.
     pub result_selector: BTreeSet<usize>,
-    /// Zero-based argument index that this directive applies to, if any.
+    /// Zero-based argument index that this sink directive applies to, if any.
     ///
     /// If `None`, no restriction is imposed.
     pub arg_index: Option<usize>,
     /// Argument-based predicate for conditional application of sources.
+    ///
+    /// While source-oriented, argument predicates also apply to revocations.
     pub arg_predicate: Option<BlanketSourceArgPredicate>,
 }
 
 impl BlanketDirectiveTarget {
-    /// Constructs a new target for a blanket source.
+    /// Constructs a new target for a blanket source or revocation.
     ///
     /// In most cases, it is more convenient to use the existing [`FromStr`]
     /// implementation instead of invoking this method directly (or, if the
     /// `toml-config` Cargo feature is enabled, automatically deserializing
     /// from a string via `serde`).
     #[inline]
-    pub fn new_for_source(
+    pub fn new_for_source_or_revocation(
         package_path: impl Into<FullPackagePath>,
         type_name: Option<impl Into<String>>,
         member_name: impl Into<String>,
@@ -301,6 +303,9 @@ impl<'de> serde::Deserialize<'de> for BlanketDirectiveTarget {
 /// determine that the value did not match `API_TOKEN`. Note that only very
 /// simple value tracking is available, but obvious cases such as
 /// `os.GetEnv("PORT")` will not trigger the blanket source.
+///
+/// Note that while source-oriented, argument predicates are also effective for
+/// conditional revocation blanket directives.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlanketSourceArgPredicate {
     arg_index: usize,
