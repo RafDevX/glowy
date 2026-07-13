@@ -317,52 +317,9 @@ fn derive_best_backtraces_for_captures<'a>(
     // for determinism
     concretes.sort_by_key(|(index, _)| *index);
 
-    // loop until nothing changes
-    loop {
-        let previous = concretes.clone();
-
-        // realize each capture's current best backtrace by that of every other
-        // capture, in case they depend on each other.
-        // for example, if we found out mapping <a> => {secret} and another
-        // capture <b> => {confidential, <a>}, then we can resolve <b> to just
-        // be {confidential, secret}.
-        // we use the previous concretes for realization to maintain stability
-
-        'realization: for (_, concrete) in &mut concretes {
-            let mut realized = if let Some(bt) = concrete.as_ref() {
-                Cow::Borrowed(bt)
-            } else {
-                // nothing to realize; already Bottom
-                continue;
-            };
-
-            for (prev_index, prev_concrete) in &previous {
-                let step = realized.realize(
-                    func.r#ref(),
-                    SyntheticSlot::Capture(*prev_index),
-                    prev_concrete.as_ref(),
-                );
-
-                if let Some(next) = step {
-                    realized = Cow::Owned(next);
-                } else {
-                    // we'll never evolve from Bottom, stop realizing
-                    *concrete = None;
-                    continue 'realization;
-                }
-            }
-
-            *concrete = Some(realized.into_owned());
-        }
-
-        if concretes.snapshot_aware_eq(&previous) {
-            break;
-        }
-    }
-
-    // finally, we need to realize the captures' backtraces to get rid of any
-    // references coming from function params, since we have each param's
-    // concrete already calculated
+    // we need to realize the captures' backtraces to get rid of any references
+    // coming from function params, since we have each param's concrete already
+    // calculated at this point
     for (_, concrete) in &mut concretes {
         *concrete = call_site_concretes.realize_backtrace_for_params(func.r#ref(), concrete.take());
     }

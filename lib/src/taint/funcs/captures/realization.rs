@@ -37,29 +37,44 @@ impl<'a> CaptureEnvSnapshot<'a> {
     }
 
     fn derive_next_step(&self, ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
-        let mut snapshot: Vec<_> = func
-            .captures()
-            .map(|(outer_decl, binding)| {
-                (
-                    binding.index(),
-                    outer_decl,
-                    derive_concrete_backtrace_or_fallback(
-                        ctx,
-                        func.r#ref(),
-                        outer_decl,
-                        binding,
-                        self,
-                    ),
-                )
-            })
-            .collect();
+        let mut captures: Vec<_> = func.captures().collect();
 
         // for determinism
-        snapshot.sort_by_key(|(index, _, _)| *index);
+        captures.sort_by_key(|(_, binding)| binding.index());
 
-        let map = snapshot
-            .into_iter()
-            .map(|(_, outer_decl, backtrace)| (outer_decl, backtrace))
+        let map = captures
+            .iter()
+            .map(|(outer_decl, binding)| {
+                let mut backtrace = derive_concrete_backtrace_or_fallback(
+                    ctx,
+                    func.r#ref(),
+                    *outer_decl,
+                    binding,
+                    self,
+                );
+
+                // capture mutations can introduce mutual dependencies (e.g.,
+                // `x` is mutated under a branch on `y`, while a deferred reset
+                // of `y` executes under a return path that depends on `x`).
+                // initially, the empty starting snapshot supplies Bottom for
+                // each dependency, and then subsequent steps substitute the
+                // previous approximation. by deriving `backtrace` again each
+                // derivation step, this computes the least fixed point instead
+                // of repeatedly expanding a cycle
+                for (dependency_outer_decl, dependency_binding) in &captures {
+                    let dependency = self.get(dependency_outer_decl).and_then(Option::as_ref);
+
+                    backtrace = backtrace.and_then(|current| {
+                        current.realize(
+                            func.r#ref(),
+                            SyntheticSlot::Capture(dependency_binding.index()),
+                            dependency,
+                        )
+                    });
+                }
+
+                (*outer_decl, backtrace)
+            })
             .collect();
 
         Self(map)
