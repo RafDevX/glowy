@@ -513,11 +513,11 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
 
         let realized = borrowed.realize(from_func, from_slot, concrete);
 
-        Self {
-            value: Rc::new(RefCell::new(realized)),
-            location: self.location.clone(),
-            declared_type: self.declared_type.clone(), // cheap
-        }
+        Self::new(
+            realized,
+            self.location.clone(),
+            self.declared_type.clone(), // cheap
+        )
     }
 
     fn nest_backtrace(
@@ -537,11 +537,11 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
             extra_children,
         );
 
-        Self {
-            value: Rc::new(RefCell::new(nested)),
-            location: self.location.clone(),
-            declared_type: self.declared_type.clone(), // cheap
-        }
+        Self::new(
+            nested,
+            self.location.clone(),
+            self.declared_type.clone(), // cheap
+        )
     }
 }
 
@@ -578,11 +578,7 @@ impl<'a> Mergeable<'a> for ValueRef<'a> {
             None
         };
 
-        Self {
-            value: Rc::new(RefCell::new(merged)),
-            location: self.location.clone(),
-            declared_type,
-        }
+        Self::new(merged, self.location.clone(), declared_type)
     }
 }
 
