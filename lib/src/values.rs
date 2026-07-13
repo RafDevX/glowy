@@ -384,7 +384,12 @@ impl<'a> ValueRef<'a> {
 
     // private to force going through Self::try_expand_to
     fn as_mobius(&self) -> Option<Ref<'_, MobiusValue<'a>>> {
-        self.try_upgrade_to(Value::Mobius);
+        if !self.is_mobius() {
+            // if this is already a Möbius, don't try to upgrade, since it'd
+            // also singularize it first, making it lose any per-index overrides
+            // that `self` might carry in its internal state
+            self.try_upgrade_to(Value::Mobius);
+        }
 
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::Mobius)).ok()
     }
