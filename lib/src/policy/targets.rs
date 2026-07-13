@@ -1,4 +1,4 @@
-use std::{error, fmt, num::ParseIntError, str::FromStr};
+use std::{collections::BTreeSet, error, fmt, hash::Hash, num::ParseIntError, str::FromStr};
 
 use crate::{FullPackagePath, values::SimpleConstValue};
 
@@ -17,13 +17,12 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 /// Analogously, type members are not necessarily methods, and may refer to
 /// struct fields (e.g., `(net/http, Some(Request), Body)`).
 ///
-/// In addition, targets may be optionally narrowed down to specific argument
-/// positions via the inclusion of a `#N` suffix (zero-indexed). For instance,
-/// `os.WriteFile#1` targets only its second argument. Source directives may
-/// further use `#N=value`, meaning that the source applies at call time only
-/// when argument `N` is not provably different from `value`. Values parsed from
-/// configuration are intentionally treated as unquoted constants: `#0=123`
-/// matches both the string constant `"123"` and the integer constant `123`.
+/// In addition, in the case of functions and methods, sink targets may be
+/// optionally narrowed down to specific argument zero-indexed positions via
+/// [`Self::arg_index`], and source targets may be similarly restricted to apply
+/// only to specific return value zero-indexed positions
+/// ([`Self::result_selector`]) or when a specific argument at a given
+/// zero-indexed position is not provably different from a given value.
 ///
 /// # Parsing and Deserializing
 ///
@@ -41,12 +40,20 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 /// portion after the final `/` cleanly delimits `pkg[.Type].Member`. Standard
 /// library paths without slashes (e.g., `os`, `net/http`) work analogously.
 ///
-/// Optionally, a `#N` suffix (zero-indexed) may be included to also specify an
-/// `arg_index`. For example, the string `database/sql.DB.Query#0` corresponds
-/// to a target with defined `package_path`, `type_name`, `member_name`, and
-/// `arg_index`. For source directives only, `#N=value` additionally records a
-/// call-time (case-insensitive) equality predicate, and `~=` can be used
-/// instead of `=` to enable fuzzy matching (substring-based).
+/// Optionally, for function and method blanket targets, a `#N` suffix
+/// (zero-indexed) may be included to also specify an `arg_index`. For source
+/// directives only, a `->R,S,...` component may follow the member path to
+/// select one or more result positions by their zero-based indices
+/// (`result_selector`), and the form `#N=value` may be used to record a
+/// call-time (case-insensitive) equality predicate, while `~=` can be used
+/// instead of `=` to enable fuzzy matching (substring-based). For example, the
+/// string `database/sql.DB.Query->0,2#1=users` corresponds to a source
+/// targeting only the first and third results when the second argument could
+/// equal `users`.
+///
+/// Argument predicate values parsed from configuration are intentionally
+/// treated as unquoted constants: `#0=123` matches both the string constant
+/// `"123"` and the integer constant `123`.
 ///
 /// This struct implements [`FromStr`] following this specification, and (if the
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
@@ -67,6 +74,11 @@ pub struct BlanketDirectiveTarget {
     pub type_name: Option<String>,
     /// Declared name of the member (symbol, method, or field) in question.
     pub member_name: String,
+    /// Zero-based function result indices affected by this directive.
+    ///
+    /// If empty, no restriction is imposed. This selector only has meaning
+    /// for blanket sources applied to function or method calls.
+    pub result_selector: BTreeSet<usize>,
     /// Zero-based argument index that this directive applies to, if any.
     ///
     /// If `None`, no restriction is imposed.
@@ -87,12 +99,14 @@ impl BlanketDirectiveTarget {
         package_path: impl Into<FullPackagePath>,
         type_name: Option<impl Into<String>>,
         member_name: impl Into<String>,
+        result_selector: BTreeSet<usize>,
         arg_predicate: Option<BlanketSourceArgPredicate>,
     ) -> Self {
         Self {
             package_path: package_path.into(),
             type_name: type_name.map(Into::into),
             member_name: member_name.into(),
+            result_selector,
             arg_index: None,
             arg_predicate,
         }
@@ -115,6 +129,7 @@ impl BlanketDirectiveTarget {
             package_path: package_path.into(),
             type_name: type_name.map(Into::into),
             member_name: member_name.into(),
+            result_selector: BTreeSet::new(), // only allocates after insertion
             arg_index,
             arg_predicate: None,
         }
@@ -131,6 +146,15 @@ impl fmt::Display for BlanketDirectiveTarget {
         }
 
         write!(f, "{}", self.member_name)?;
+
+        let mut result_selector_iter = self.result_selector.iter();
+        if let Some(first) = result_selector_iter.next() {
+            write!(f, "->{first}")?;
+
+            for index in result_selector_iter {
+                write!(f, ",{index}")?;
+            }
+        }
 
         if let Some(predicate) = &self.arg_predicate {
             write!(f, "#{predicate}")?;
@@ -176,6 +200,25 @@ impl FromStr for BlanketDirectiveTarget {
             (path, arg_index, arg_predicate)
         } else {
             (s, None, None)
+        };
+
+        let (path, result_selector) = if let Some((path, selector)) = path.rsplit_once("->") {
+            if selector.is_empty() {
+                return Err(BlanketDirectiveTargetParseError::EmptyResultSelector);
+            }
+
+            let result_selector = selector
+                .split(',')
+                .map(|index| {
+                    index
+                        .parse()
+                        .map_err(BlanketDirectiveTargetParseError::InvalidResultIndex)
+                })
+                .collect::<Result<_, _>>()?;
+
+            (path, result_selector)
+        } else {
+            (path, BTreeSet::new())
         };
 
         let (before_last_slash, tail) = match path.rsplit_once('/') {
@@ -224,6 +267,7 @@ impl FromStr for BlanketDirectiveTarget {
             package_path,
             type_name: type_name.map(str::to_owned),
             member_name: member_name.to_owned(),
+            result_selector,
             arg_index,
             arg_predicate,
         };
@@ -435,6 +479,10 @@ pub enum BlanketDirectiveTargetParseError {
     EmptyTypeName,
     /// The provided member name is empty.
     EmptyMemberName,
+    /// The provided result selector (after the `->`) has no indices.
+    EmptyResultSelector,
+    /// A result-selector index is not a valid `usize`.
+    InvalidResultIndex(ParseIntError),
     /// The argument-index portion (after the `#`) is not a valid `usize`.
     InvalidArgIndex(ParseIntError),
     /// The provided source argument predicate value is empty.
@@ -466,6 +514,15 @@ impl fmt::Display for BlanketDirectiveTargetParseError {
             Self::EmptyArgPredicateValue => {
                 f.write_str("blanket directive source argument predicate value is empty")
             }
+            Self::EmptyResultSelector => {
+                f.write_str("blanket directive target result selector is empty")
+            }
+            Self::InvalidResultIndex(err) => {
+                write!(
+                    f,
+                    "blanket directive target has invalid result index: {err}"
+                )
+            }
         }
     }
 }
@@ -479,8 +536,9 @@ impl error::Error for BlanketDirectiveTargetParseError {
             | Self::EmptyPackagePath
             | Self::EmptyTypeName
             | Self::EmptyMemberName
+            | Self::EmptyResultSelector
             | Self::EmptyArgPredicateValue => None,
-            Self::InvalidArgIndex(inner) => Some(inner),
+            Self::InvalidArgIndex(inner) | Self::InvalidResultIndex(inner) => Some(inner),
         }
     }
 }

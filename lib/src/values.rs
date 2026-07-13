@@ -16,9 +16,7 @@ pub use self::{
     channel::ChannelValue,
     composite::{CompositeValue, CompositeValueAdapter},
     expandable::ExpandableValue,
-    function::{
-        CaptureBinding, FunctionRef, FunctionValue, InherentConditionalSource, InherentSink,
-    },
+    function::{CaptureBinding, FunctionRef, FunctionValue, InherentSink, InherentSource},
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,
@@ -247,6 +245,55 @@ impl<'a> ValueRef<'a> {
             // requested via `desired_len`!
             self.as_expandable().as_deref().map(ExpandableValue::expand)
         }
+    }
+
+    pub fn supports_overriding_expand_indices(&self) -> bool {
+        matches!(
+            *self.value.borrow(),
+            Value::Expandable(_) | Value::Mobius(_)
+        )
+    }
+
+    pub fn try_override_expand_indices(
+        &self,
+        indices: impl IntoIterator<Item = usize>,
+        nest_with_kind: LabelBacktraceKind,
+        nest_with_symbol: Option<&'a str>,
+        nest_with_location: &Pinned<'a, Location>,
+        extra_children: &[LabelBacktrace<'a>],
+    ) -> Option<Self> {
+        let borrowed = self.value.borrow();
+
+        let new = match &*borrowed {
+            Value::Expandable(expandable) => Value::Expandable(expandable.override_expand_indices(
+                indices,
+                nest_with_kind,
+                nest_with_symbol,
+                nest_with_location,
+                extra_children,
+            )),
+            Value::Mobius(mobius) => Value::Mobius(mobius.override_expand_indices(
+                indices,
+                nest_with_kind,
+                nest_with_symbol,
+                nest_with_location,
+                extra_children,
+            )),
+            Value::Simple(_)
+            | Value::PackageRef(_)
+            | Value::Channel(_)
+            | Value::Array(_)
+            | Value::Slice(_)
+            | Value::Map(_)
+            | Value::Struct(_)
+            | Value::Function(_) => return None,
+        };
+
+        Some(Self::new(
+            new,
+            self.location.clone(),
+            self.declared_type.clone(),
+        ))
     }
 
     pub fn extract_collapsed_single(&self) -> Self {

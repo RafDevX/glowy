@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{FullPackagePath, labels::Label, policy::targets::BlanketSourceArgPredicate};
 
@@ -57,6 +57,7 @@ impl PackageBlanketDirectives {
 pub struct BlanketDirective {
     kind: BlanketDirectiveKind,
     label: Label<'static>,
+    result_selector: BTreeSet<usize>,
     arg_index: Option<usize>,
     arg_predicate: Option<BlanketSourceArgPredicate>,
 }
@@ -64,20 +65,25 @@ pub struct BlanketDirective {
 impl BlanketDirective {
     pub(crate) fn new(
         kind: BlanketDirectiveKind,
+        result_selector: BTreeSet<usize>,
         arg_index: Option<usize>,
         arg_predicate: Option<BlanketSourceArgPredicate>,
         label: Label<'static>,
     ) -> Self {
-        let (arg_index, arg_predicate) = match kind {
+        let (arg_index, arg_predicate, result_selector) = match kind {
             // sources don't have a meaningful notion of "this arg only"
-            BlanketDirectiveKind::Source => (None, arg_predicate),
+            BlanketDirectiveKind::Source => (None, arg_predicate, result_selector),
             // sinks don't have a meaningful notion of "only when this matches"
-            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => (arg_index, None),
+            // or of selecting only specific function results
+            BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
+                (arg_index, None, BTreeSet::new())
+            }
         };
 
         Self {
             kind,
             label,
+            result_selector,
             arg_index,
             arg_predicate,
         }
@@ -91,12 +97,20 @@ impl BlanketDirective {
         &self.label
     }
 
+    pub fn result_selector(&self) -> &BTreeSet<usize> {
+        &self.result_selector
+    }
+
     pub fn arg_index(&self) -> Option<usize> {
         self.arg_index
     }
 
     pub fn arg_predicate(&self) -> Option<&BlanketSourceArgPredicate> {
         self.arg_predicate.as_ref()
+    }
+
+    pub fn should_resolve_at_call_time(&self) -> bool {
+        self.arg_predicate().is_some() || !self.result_selector().is_empty()
     }
 }
 

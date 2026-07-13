@@ -1,4 +1,8 @@
-use std::{collections::HashMap, hash, rc::Rc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    hash,
+    rc::Rc,
+};
 
 use crate::{labels::LabelBacktrace, values::ValueRef};
 
@@ -154,6 +158,17 @@ impl<K: Eq + hash::Hash, V: SnapshotAware> SnapshotAware for HashMap<K, V> {
             && self
                 .iter()
                 .all(|(key, value)| other.get(key).snapshot_aware_eq(&Some(value)))
+    }
+}
+
+impl<K: Eq, V: SnapshotAware> SnapshotAware for BTreeMap<K, V> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.len() == other.len()
+            && self.iter().zip(other.iter()).all(
+                |((left_key, left_value), (right_key, right_value))| {
+                    left_key == right_key && left_value.snapshot_aware_eq(right_value)
+                },
+            )
     }
 }
 

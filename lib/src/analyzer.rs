@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     env, fs,
     io::{self, BufRead},
     path,
@@ -561,11 +561,18 @@ impl Analyzer {
             package_path,
             type_name,
             member_name,
+            result_selector,
             arg_index,
             arg_predicate,
         } = target;
 
-        let directive = BlanketDirective::new(kind, arg_index, arg_predicate, label);
+        let directive = BlanketDirective::new(
+            kind,
+            result_selector, // source-only
+            arg_index,       // sink-only
+            arg_predicate,   // source-only
+            label,
+        );
 
         self.blanket_directives
             .entry(package_path)
@@ -596,6 +603,7 @@ impl Analyzer {
     ///
     /// ```
     /// # use glowy::labels::Label;
+    /// # use std::collections::BTreeSet;
     /// #
     /// let mut analyzer = glowy::Analyzer::new("example.com/company-name/proj");
     ///
@@ -603,6 +611,7 @@ impl Analyzer {
     ///     "example.com/company-name/proj/sub",
     ///     None::<String>,
     ///     "SomeFunc",
+    ///     BTreeSet::new(),
     ///     None,
     ///     Label::from_tags(&["secret"]),
     /// );
@@ -613,6 +622,7 @@ impl Analyzer {
         package_path: impl Into<Cow<'f, str>>,
         type_name: Option<impl Into<Cow<'f, str>>>,
         member_name: impl Into<Cow<'f, str>>,
+        result_selector: BTreeSet<usize>,
         arg_predicate: Option<BlanketSourceArgPredicate>,
         label: Label<'static>,
     ) {
@@ -620,6 +630,7 @@ impl Analyzer {
             package_path.into(),
             type_name.map(Into::into),
             member_name.into(),
+            result_selector,
             arg_predicate,
         );
 

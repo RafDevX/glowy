@@ -32,6 +32,37 @@ impl<'a> ExpandableValue<'a> {
             .chain(self.secondary.iter().cloned())
             .collect()
     }
+
+    pub(super) fn override_expand_indices(
+        &self,
+        indices: impl IntoIterator<Item = usize>,
+        nest_with_kind: LabelBacktraceKind,
+        nest_with_symbol: Option<&'a str>,
+        nest_with_location: &Pinned<'a, Location>,
+        extra_children: &[LabelBacktrace<'a>],
+    ) -> Self {
+        let mut nested = self.clone();
+
+        for index in indices {
+            let r#ref = if index == 0 {
+                &mut nested.primary
+            } else if let Some(r#ref) = nested.secondary.get_mut(index - 1) {
+                r#ref
+            } else {
+                // unexpected index doesn't exist here, so we just ignore it
+                continue;
+            };
+
+            *r#ref = r#ref.nest_backtrace(
+                nest_with_kind,
+                nest_with_symbol,
+                nest_with_location.clone(),
+                extra_children.iter().cloned(),
+            );
+        }
+
+        nested
+    }
 }
 
 impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {

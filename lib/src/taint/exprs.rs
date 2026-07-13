@@ -160,7 +160,7 @@ pub fn visit_operand_name<'a>(
     // blanket directives targeting this symbol (propagates the backtrace in
     // question for both functions like `os.Getenv` and non-function targets
     // such as `os.Args` and `os.Stdin` which are read directly / never called)
-    let blanket_source_bt = build_blanket_source_backtrace(ctx, name, qualifier, &location);
+    let blanket_source_bt = build_blanket_source_backtrace_for(ctx, name, qualifier, &location);
 
     value
         .nest_backtrace(
@@ -237,7 +237,7 @@ fn synthesize_fake_symbol_with_blanket_directives<'a>(
         matches!(
             directive.kind(),
             BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink,
-        ) || directive.arg_predicate().is_some() // conditional on call args
+        ) || directive.should_resolve_at_call_time() // e.g. if conditional
     });
 
     if !has_callable_directives {
@@ -257,7 +257,7 @@ fn synthesize_fake_symbol_with_blanket_directives<'a>(
     Some(Symbol::new_ref(ctx.pin(name), false, value))
 }
 
-fn build_blanket_source_backtrace<'a>(
+fn build_blanket_source_backtrace_for<'a>(
     ctx: &AnalysisContext<'a>,
     name: Span<'a>,
     qualifier: Option<Span<'a>>,
@@ -274,18 +274,27 @@ fn build_blanket_source_backtrace<'a>(
     };
 
     // we pass type_name = None because this could never be a method access
-    let blanket_label: Label<'_> = ctx
-        .blanket_directives_for(package_path, None, name.content())
+    let directives = ctx.blanket_directives_for(package_path, None, name.content());
+
+    build_blanket_source_backtrace(directives, at_location)
+}
+
+fn build_blanket_source_backtrace<'a>(
+    directives: &'a [BlanketDirective],
+    at_location: &Pinned<'a, Location>,
+) -> Option<LabelBacktrace<'a>> {
+    let blanket_label: Label<'_> = directives
         .iter()
         .filter(|directive| {
-            // only unconditional sources matter here
-            directive.kind() == BlanketDirectiveKind::Source && directive.arg_predicate().is_none()
+            // only unconditional blanket sources matter here
+            directive.kind() == BlanketDirectiveKind::Source
+                && !directive.should_resolve_at_call_time()
         })
         .map(BlanketDirective::label)
         .sum();
 
     if blanket_label.is_bottom() {
-        // prevent location cloning below
+        // prevent cloning location below if unnecessary
         return None;
     }
 

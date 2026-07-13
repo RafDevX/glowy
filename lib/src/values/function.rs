@@ -1,4 +1,11 @@
-use std::{borrow::Cow, cell::RefCell, cmp, collections::HashMap, fmt, rc::Rc};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    cmp,
+    collections::{BTreeSet, HashMap},
+    fmt,
+    rc::Rc,
+};
 
 use parser::{
     Location, Span,
@@ -43,8 +50,8 @@ pub struct FunctionValue<'a> {
     backtrace: Option<LabelBacktrace<'a>>,
     // Label to be subtracted from realized result at call (revocation)
     sanitizer: Label<'a>,
-    // call-time source predicates that taint return values when matched
-    conditional_sources: Vec<InherentConditionalSource<'a>>,
+    // blanket sources that need to be applied to selected results at call time
+    sources: Vec<InherentSource<'a>>,
     // inherent sinks that any call to this function implicitly triggers
     sinks: Vec<InherentSink<'a>>,
     // from sinks within the function, to which synthetic tags were passed
@@ -95,7 +102,7 @@ impl<'a> FunctionValue<'a> {
             outcome: None,
             backtrace,
             sanitizer,
-            conditional_sources: Vec::new(),
+            sources: Vec::new(),
             sinks: Vec::new(),
             deferred_checks: vec![],
             captures: HashMap::new(),
@@ -241,13 +248,13 @@ impl<'a> FunctionValue<'a> {
         &self.sanitizer
     }
 
-    pub fn conditional_sources(&self) -> &[InherentConditionalSource<'a>] {
-        &self.conditional_sources
+    pub fn sources(&self) -> &[InherentSource<'a>] {
+        &self.sources
     }
 
-    pub(crate) fn add_conditional_source(&mut self, source: InherentConditionalSource<'a>) {
-        if !self.conditional_sources.contains(&source) {
-            self.conditional_sources.push(source);
+    pub(crate) fn add_source(&mut self, source: InherentSource<'a>) {
+        if !self.sources.contains(&source) {
+            self.sources.push(source);
         }
     }
 
@@ -268,10 +275,11 @@ impl<'a> FunctionValue<'a> {
         for directive in directives {
             match directive.kind() {
                 BlanketDirectiveKind::Source => {
-                    if let Some(predicate) = directive.arg_predicate() {
-                        self.add_conditional_source(InherentConditionalSource {
+                    if directive.should_resolve_at_call_time() {
+                        self.add_source(InherentSource {
                             label: directive.label().clone(),
-                            predicate: predicate.clone(),
+                            predicate: directive.arg_predicate().cloned(),
+                            result_selector: directive.result_selector().clone(),
                         });
                     }
                 }
@@ -510,7 +518,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
         self.signature.is_none()
             && self.outcome.is_none()
             && self.sanitizer.is_bottom()
-            && self.conditional_sources.is_empty()
+            && self.sources.is_empty()
             && self.sinks.is_empty()
             && self.deferred_checks.is_empty()
             && self.call_count() == 0
@@ -576,7 +584,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome,
             backtrace,
             sanitizer: self.sanitizer.clone(),
-            conditional_sources: self.conditional_sources.clone(),
+            sources: self.sources.clone(),
             sinks: self.sinks.clone(),
             deferred_checks,
             captures,
@@ -610,7 +618,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             outcome: self.outcome.clone(),
             backtrace,
             sanitizer: self.sanitizer.clone(),
-            conditional_sources: self.conditional_sources.clone(),
+            sources: self.sources.clone(),
             sinks: self.sinks.clone(),
             deferred_checks: self.deferred_checks.clone(),
             captures: self.captures.clone(),
@@ -641,7 +649,7 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
             && self.sanitizer == other.sanitizer
-            && self.conditional_sources == other.conditional_sources
+            && self.sources == other.sources
             && self.sinks == other.sinks
             && self
                 .deferred_checks
@@ -885,24 +893,37 @@ impl SnapshotAware for CaptureBinding<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InherentConditionalSource<'a> {
+pub struct InherentSource<'a> {
     label: Label<'a>,
-    predicate: BlanketSourceArgPredicate,
+    result_selector: BTreeSet<usize>,
+    predicate: Option<BlanketSourceArgPredicate>,
 }
 
-impl<'a> InherentConditionalSource<'a> {
+impl<'a> InherentSource<'a> {
     pub fn label(&self) -> &Label<'a> {
         &self.label
     }
 
+    pub fn result_selector(&self) -> &BTreeSet<usize> {
+        &self.result_selector
+    }
+
+    pub fn applies_to_result(&self, result_index: usize) -> bool {
+        self.result_selector.is_empty() || self.result_selector.contains(&result_index)
+    }
+
     pub fn applies_to_args(&self, args: &[ExprNode<'_>]) -> bool {
-        let Some(arg) = args.get(self.predicate.arg_index()) else {
+        let Some(predicate) = &self.predicate else {
+            return true;
+        };
+
+        let Some(arg) = args.get(predicate.arg_index()) else {
             return false;
         };
 
         SimpleConstValue::try_resolve_from_expr(arg)
             .as_ref()
-            .is_none_or(|actual| self.predicate.matches_const(actual))
+            .is_none_or(|actual| predicate.matches_const(actual))
         // ^^ if we cannot resolve a SimpleConstValue, we have to be
         // conservative and assume it could match the predicate
     }

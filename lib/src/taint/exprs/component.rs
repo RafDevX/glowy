@@ -9,8 +9,8 @@ use crate::{
     Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    policy::{BlanketDirective, BlanketDirectiveKind},
+    labels::{LabelBacktrace, LabelBacktraceKind},
+    policy::BlanketDirectiveKind,
     taint::funcs,
     types::{TypeInfo, TypeKind},
     values::{
@@ -53,7 +53,7 @@ pub fn visit_selection_with_base<'a>(
         .filter(|slice| !slice.is_empty());
 
     let blanket_backtrace = type_member_directives
-        .and_then(|directives| build_blanket_backtrace(directives, &location));
+        .and_then(|directives| super::build_blanket_source_backtrace(directives, &location));
 
     // ----------
 
@@ -225,32 +225,6 @@ pub fn visit_selection_with_base<'a>(
     });
 
     ValueRef::new_bottom(location, None)
-}
-
-fn build_blanket_backtrace<'a>(
-    directives: &'a [BlanketDirective],
-    at_location: &Pinned<'a, Location>,
-) -> Option<LabelBacktrace<'a>> {
-    let blanket_label: Label<'_> = directives
-        .iter()
-        .filter(|directive| {
-            // only unconditional blanket sources matter here
-            directive.kind() == BlanketDirectiveKind::Source && directive.arg_predicate().is_none()
-        })
-        .map(BlanketDirective::label)
-        .sum();
-
-    if blanket_label.is_bottom() {
-        // prevent cloning location below if unnecessary
-        return None;
-    }
-
-    LabelBacktrace::new_root(
-        LabelBacktraceKind::BlanketSource,
-        blanket_label,
-        None,
-        at_location.clone(),
-    )
 }
 
 fn nest_optional_backtrace<'a>(

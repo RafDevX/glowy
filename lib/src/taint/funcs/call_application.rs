@@ -16,7 +16,7 @@ use crate::{
         funcs::{ResolvedCall, captures},
     },
     values::{
-        BacktraceContainer, FunctionValue, InherentConditionalSource, MobiusValue,
+        BacktraceContainer, FunctionValue, InherentSource, MobiusValue,
         SelfAwareBacktraceContainer, Value, ValueRef,
     },
 };
@@ -165,7 +165,7 @@ pub fn apply_call<'a>(
             func.signature(),
         );
 
-        apply_call_conditional_blanket_sources(func, &node.args, &call_location, &mut result);
+        apply_call_blanket_sources(func, &node.args, &call_location, &mut result);
 
         return result;
     };
@@ -216,7 +216,7 @@ pub fn apply_call<'a>(
 
     let mut result = calculate_call_result(ctx, func, outcome, &call_realization);
 
-    apply_call_conditional_blanket_sources(func, &node.args, &call_location, &mut result);
+    apply_call_blanket_sources(func, &node.args, &call_location, &mut result);
 
     // need to nest the function's backtrace into the result because the
     // function itself was accessed
@@ -327,43 +327,81 @@ fn visit_blackbox_call<'a>(
     result
 }
 
-fn apply_call_conditional_blanket_sources<'a>(
+fn apply_call_blanket_sources<'a>(
     func: &FunctionValue<'a>,
     args: &[ExprNode<'a>],
     call_location: &Pinned<'a, Location>,
     result: &mut [ValueRef<'a>],
 ) {
-    let sources = func.conditional_sources();
+    let sources: Vec<_> = func
+        .sources()
+        .iter()
+        .filter(|source| !source.label().is_bottom())
+        .filter(|source| source.applies_to_args(args))
+        .collect();
 
     if sources.is_empty() {
         return;
     }
 
-    let blanket_label: Label<'_> = sources
-        .iter()
-        .filter(|source| source.applies_to_args(args))
-        .map(InherentConditionalSource::label)
-        .sum();
+    let new_source_backtrace = |label| {
+        LabelBacktrace::new_root(
+            LabelBacktraceKind::BlanketSource,
+            label,
+            None,
+            call_location.clone(),
+        )
+    };
 
-    if blanket_label.is_bottom() {
-        // avoid clones below if unnecessary
+    // handle Möbius/Expandable specially
+    if let [single] = result
+        && single.supports_overriding_expand_indices()
+    {
+        for source in sources {
+            let Some(backtrace) = new_source_backtrace(source.label().clone()) else {
+                continue;
+            };
+
+            *single = if source.result_selector().is_empty() {
+                single.nest_backtrace(
+                    LabelBacktraceKind::Expression,
+                    None,
+                    call_location.clone(),
+                    [backtrace],
+                )
+            } else {
+                single
+                    .try_override_expand_indices(
+                        source.result_selector().iter().copied(),
+                        LabelBacktraceKind::Expression,
+                        None,
+                        call_location,
+                        &[backtrace],
+                    )
+                    .unwrap()
+            };
+        }
+
         return;
     }
 
-    let backtrace = LabelBacktrace::new_root(
-        LabelBacktraceKind::BlanketSource,
-        blanket_label,
-        None,
-        call_location.clone(),
-    )
-    .unwrap(); // we just checked that blanket_label is not Bottom
+    for (index, value) in result.iter_mut().enumerate() {
+        let blanket_label: Label<'_> = sources
+            .iter()
+            .filter(|source| source.applies_to_result(index))
+            .copied()
+            .map(InherentSource::label)
+            .sum();
 
-    for value in result {
+        let Some(backtrace) = new_source_backtrace(blanket_label) else {
+            continue;
+        };
+
         *value = value.nest_backtrace(
             LabelBacktraceKind::Expression,
             None,
             call_location.clone(),
-            [backtrace.clone()],
+            [backtrace],
         );
     }
 }
