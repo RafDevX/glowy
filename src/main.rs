@@ -1,4 +1,4 @@
-use std::{fmt, path::PathBuf, process};
+use std::{fmt, fs, path::PathBuf, process};
 
 use clap::Parser;
 use colored::Colorize;
@@ -16,8 +16,8 @@ const DOCS_ROOT_URL: &str = concat!("file://", env!("CARGO_MANIFEST_DIR"), "/tar
 fn main() {
     let config = Config::parse();
 
-    if let Some(Command::BaseSecurityPolicy) = config.command {
-        print!("{}", glowy::policy::BASE_SECURITY_POLICY);
+    if let Some(Command::BaseSecurityPolicy { eject }) = config.command {
+        base_security_policy(eject);
 
         return;
     }
@@ -72,7 +72,30 @@ struct Config {
 #[derive(clap::Subcommand)]
 enum Command {
     /// Print the base security policy.
-    BaseSecurityPolicy,
+    BaseSecurityPolicy {
+        /// Write the base security policy to `./glowy.toml` instead of stdout.
+        ///
+        /// If the file already exists, this will overwrite its contents
+        /// entirely.
+        #[arg(long)]
+        eject: bool,
+    },
+}
+
+fn base_security_policy(eject: bool) {
+    if eject {
+        fs::write("./glowy.toml", glowy::policy::BASE_SECURITY_POLICY).unwrap_or_else(|error| {
+            fatal(
+                "Failed to eject the base security policy to `./glowy.toml`.",
+                "Do you have permission to write to the current directory?",
+                Some(error),
+            )
+        });
+
+        println!("Successfully ejected the base security policy to `./glowy.toml`!");
+    } else {
+        print!("{}", glowy::policy::BASE_SECURITY_POLICY);
+    }
 }
 
 fn fatal(msg: &str, hint: &str, error: Option<impl fmt::Display>) -> ! {
