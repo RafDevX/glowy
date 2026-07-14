@@ -11,3 +11,27 @@ args = [
     # pass additional args, e.g. `cargo make fmt-unstable --check`
     "${@}",
 ]
+
+[tasks.flamegraph]
+workspace = false
+env = { RUSTFLAGS = "-C force-frame-pointers=yes -C force-unwind-tables=yes" }
+command = "cargo"
+args = [
+    "flamegraph",
+    "--profile",
+    "flamegraph",
+    "--bin",
+    "glowy-cli",
+    # "--freq", # can't actually do it because already in custom command below
+    # Hz, 99 is good for long (>5 min) runs
+    # (should be a prime number to sidestep regular events/timers)
+    # "99",
+    # we need to use a custom command because hardware-level event `cycles:u`
+    # does not work properly on all machines, so parallel tasks can show up as
+    # [unknown]; using software-level `task-clock:u` works (`:u` = user-space)
+    "--cmd",
+    "record -F 99 -g -e task-clock:u",
+    "--",
+    # pass additional args, e.g. `cargo make flamegraph /path/to/some/proj`
+    "${@}",
+]

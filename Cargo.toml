@@ -38,10 +38,17 @@ rust-version = "1.91"
 # (at the cost of a slower compile time, though only for release mode)
 # this applies for all packages in this workspace
 [profile.release]
-lto = true # fat link-time optimizations across all crates
-strip = true # full symbol stripping from generated binary
+lto = true        # fat link-time optimizations across all crates
+strip = true      # full symbol stripping from generated binary
 codegen-units = 1 # no parallelism processing a crate, max optimization
-panic = "abort" # smaller binary since no unwinding mechanism
+panic = "abort"   # smaller binary since no unwinding mechanism
+
+[profile.flamegraph]
+inherits = "release"
+debug = true         # allow resolving to file:line
+lto = "thin"         # less aggressive cross-crate inlining
+strip = "none"       # do not strip symbols
+codegen-units = 16   # less inlining so we get more named frames
 
 [dependencies]
 annotate-snippets = "0.12.10"
