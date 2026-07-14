@@ -472,6 +472,22 @@ impl<'a> SymbolTable<'a> {
         self.current_file_named_imports.get(qualifier)
     }
 
+    pub fn package_path_for_unqualified_symbol(
+        &self,
+        name: &str,
+        resolved: &SymbolRef<'a>,
+    ) -> Option<&FullPackagePath> {
+        self.current_package_path
+            .iter()
+            .chain(&self.current_file_wildcard_imports)
+            .find(|path| {
+                self.package_scopes
+                    .get(*path)
+                    .and_then(|envelope| envelope.scope.borrow().get_local_symbol(name))
+                    .is_some_and(|candidate| Rc::ptr_eq(&candidate, resolved))
+            })
+    }
+
     pub fn current_file_named_imports(&self) -> &HashMap<String, FullPackagePath> {
         &self.current_file_named_imports
     }

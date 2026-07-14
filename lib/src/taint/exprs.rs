@@ -150,14 +150,16 @@ pub fn visit_operand_name<'a>(
         );
     }
 
-    let value = if let Some(symbol) = resolve_operand_name(ctx, name, qualifier) {
+    let symbol = resolve_operand_name(ctx, name, qualifier);
+
+    let value = if let Some(symbol) = &symbol {
         symbol.borrow().value().get()
     } else {
         // error already reported
         ValueRef::new_bottom(location.clone(), None)
     };
 
-    let blanket_directives = blanket_directives_for_operand(ctx, name, qualifier);
+    let blanket_directives = blanket_directives_for_operand(ctx, name, qualifier, symbol.as_ref());
 
     // embed any potential blanket source backtrace if there are any Source
     // blanket directives targeting this symbol (propagates the backtrace in
@@ -282,6 +284,7 @@ fn blanket_directives_for_operand<'a>(
     ctx: &AnalysisContext<'a>,
     name: Span<'a>,
     qualifier: Option<Span<'a>>,
+    resolved_symbol: Option<&SymbolRef<'a>>,
 ) -> &'a [BlanketDirective] {
     let package_path = if let Some(qualifier) = qualifier {
         ctx.symtab()
@@ -289,11 +292,12 @@ fn blanket_directives_for_operand<'a>(
             .map(String::as_str)
     } else if ctx.symtab().resolves_to_predeclared(name.content()) {
         Some(policy::BUILTIN_PACKAGE_PATH)
+    } else if let Some(symbol) = resolved_symbol {
+        ctx.symtab()
+            .package_path_for_unqualified_symbol(name.content(), symbol)
+            .map(String::as_str)
     } else {
-        // FIXME: if current package doesn't have this symbol, pick the first
-        // wildcard import that has it
-
-        ctx.symtab().current_package_path().map(String::as_str)
+        None
     };
 
     let Some(package_path) = package_path else {
