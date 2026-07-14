@@ -179,9 +179,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
                     );
                 }
                 annotations::DeclDirective::Revoke => {
-                    let label = annotations::resolve_revocation_label(ctx, annotation, true);
-
-                    if let Some(label) = label {
+                    if let Some(label) = annotations::resolve_revocation_label(ctx, annotation) {
                         subtract = label;
                     }
                 }
@@ -343,9 +341,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                 );
             }
             annotations::AssignmentDirective::Revoke => {
-                let label = annotations::resolve_revocation_label(ctx, annotation, true);
-
-                if let Some(label) = label {
+                if let Some(label) = annotations::resolve_revocation_label(ctx, annotation) {
                     subtract = label;
                 }
             }

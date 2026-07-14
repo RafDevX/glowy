@@ -90,12 +90,8 @@ pub fn get_structured_error_info<'a>(
             )],
             help: Some("this enforcement check would always pass, for any value"),
         },
-        AnalysisErrorKind::InvalidRevocationSemantics { direct, location } => StructuredErrorInfo {
-            title: format!(
-                "illegal {} annotation with Bottom label",
-                if *direct { "revoke" } else { "sanitizer" }
-            )
-            .into(),
+        AnalysisErrorKind::InvalidRevocationSemantics { location } => StructuredErrorInfo {
+            title: "illegal revocation annotation with Bottom label".into(),
             code: "S004".into(),
             snippets: vec![builder.snippet().annotate(
                 StructuredAnnotation::primary(location.clone()).label(

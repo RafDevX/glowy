@@ -231,8 +231,8 @@ fn build_function_value<'a>(
                     value_location.clone(),
                 );
             }
-            annotations::FunctionDirective::Sanitizer => {
-                if let Some(label) = annotations::resolve_revocation_label(ctx, annotation, false) {
+            annotations::FunctionDirective::Revoke => {
+                if let Some(label) = annotations::resolve_revocation_label(ctx, annotation) {
                     decl_revocation = Some(InherentSourceOrRevocation::new_unconditional(label));
                 }
             }

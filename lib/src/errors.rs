@@ -143,17 +143,10 @@ pub enum AnalysisErrorKind<'a> {
     /// meaning that revoking Bottom (i.e., { }) is meaningless. This error
     /// probably indicates an incorrect usage of the revocation feature, hence
     /// it being reported as an error for enhanced clarity and visibility.
-    ///
-    /// This error is reported not only for invalid direct revocation
-    /// annotations, but also for invalid deferred revocation as declared
-    /// by an analogously illegal sanitizer annotation with Bottom label.
     InvalidRevocationSemantics {
-        /// Whether the error stems from direct (vs. deferred) revocation.
-        direct: bool,
         /// The offending annotation's location.
         location: Location,
     },
-
     /// Insecure value passed into security sink.
     ///
     /// A value with incompatible label was fed into a sink without abiding the

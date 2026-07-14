@@ -15,10 +15,8 @@ use crate::{context::AnalysisContext, errors::AnalysisErrorKind, labels::Label};
 pub enum AnnotationDirective {
     #[subenum(DeclDirective, AssignmentDirective, SendDirective, FunctionDirective)]
     Label,
-    #[subenum(DeclDirective, AssignmentDirective, SendDirective)]
+    #[subenum(DeclDirective, AssignmentDirective, SendDirective, FunctionDirective)]
     Revoke,
-    #[subenum(FunctionDirective)]
-    Sanitizer,
     #[subenum(
         DeclDirective,
         AssignmentDirective,
@@ -50,7 +48,6 @@ impl AnnotationDirective {
         match raw {
             "label" => Some(Self::Label),
             "revoke" => Some(Self::Revoke),
-            "sanitizer" => Some(Self::Sanitizer),
             "allow" => Some(Self::AllowSink),
             "deny" => Some(Self::DenySink),
             "assert" => Some(Self::Assert),
@@ -82,11 +79,9 @@ pub fn parse_supported_directive<'a, S: TryFrom<AnnotationDirective>>(
 pub fn resolve_revocation_label<'a>(
     ctx: &mut AnalysisContext<'a>,
     annotation: &Annotation<'a>,
-    direct: bool,
 ) -> Option<Label<'a>> {
     if annotation.tags.is_empty() {
         ctx.report_error(AnalysisErrorKind::InvalidRevocationSemantics {
-            direct,
             location: annotation.location.clone(),
         });
 

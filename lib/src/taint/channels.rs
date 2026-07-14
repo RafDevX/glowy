@@ -101,9 +101,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                 );
             }
             annotations::SendDirective::Revoke => {
-                let label = annotations::resolve_revocation_label(ctx, annotation, true);
-
-                if let Some(label) = label {
+                if let Some(label) = annotations::resolve_revocation_label(ctx, annotation) {
                     subtract = label;
                 }
             }
