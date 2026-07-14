@@ -2,12 +2,18 @@ use std::{collections::BTreeSet, error, fmt, hash::Hash, num::ParseIntError, str
 
 use crate::{FullPackagePath, values::SimpleConstValue};
 
-/// Canonical pseudo-package path for Go's predeclared identifiers.
+/// Canonical pseudo-package path for Go's predeclared symbols.
 ///
-/// The Go documentation presents these identifiers under package `builtin`,
-/// even though it is not an importable package. Blanket directive target
-/// deserialization accepts either this explicit namespace (`builtin.len`) or
-/// the shorthand of omitting a package path entirely (`len`).
+/// The Go documentation presents these symbols under package `builtin`,
+/// even though it is not an importable package. Blanket directive targets
+/// employ this explicit namespace as a package name to refer to predeclared
+/// symbols (e.g., `builtin.len`).
+///
+/// Specifying the bare member name (e.g., `len`) is not supported as a
+/// shorthand during deserialization because it could lead to silent confusion,
+/// as invokers could assume that specifying no package would mean the current
+/// root package under analysis. It is thus better to report an error when there
+/// is no package qualification rather than make assumptions on unknown intent.
 pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
 
 /// Fully-qualified target of a blanket directive.
@@ -32,12 +38,14 @@ pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
 /// ([`Self::result_selector`]) or when a specific argument at a given
 /// zero-indexed position is not provably different from a given value.
 ///
+/// In order to target Go builtins and predeclared symbols that would otherwise
+/// have no package qualification, [`BUILTIN_PACKAGE_PATH`] should be used as a
+/// placeholder in [`Self::package_path`] in order to refer to such cases.
+///
 /// # Parsing and Deserializing
 ///
-/// Often, it is simplest to specify a target as a well-formed [`String`]. Three
+/// Often, it is simplest to specify a target as a well-formed [`String`]. Two
 /// syntactic forms are supported:
-/// - `name`: a predeclared identifier from Go's universe block (shorthand for
-///   `builtin.name`);
 /// - `pkg/path.Func`: a package-level symbol (usually a function); or
 /// - `pkg/path.Type.Method`: a method or struct field associated to a named
 ///   receiver type declared in the specified package.
@@ -252,17 +260,16 @@ impl FromStr for BlanketDirectiveTarget {
             return Err(BlanketDirectiveTargetParseError::TooManyMemberSegments);
         }
 
-        let (is_builtin, type_name, member_name) = match (mid_segment, last_segment) {
-            (Some(member_name), None) => (false, None, member_name),
-            (Some(type_name), Some(method_name)) => (false, Some(type_name), method_name),
-            (None, None) if before_last_slash.is_none() => (true, None, subpackage),
+        let (type_name, member_name) = match (mid_segment, last_segment) {
+            (Some(member_name), None) => (None, member_name),
+            (Some(type_name), Some(method_name)) => (Some(type_name), method_name),
             (None, _) => {
                 // no `.` at all after the last `/`
                 return Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator);
             }
         };
 
-        if before_last_slash.is_some_and(str::is_empty) || (subpackage.is_empty() && !is_builtin) {
+        if before_last_slash.is_some_and(str::is_empty) || subpackage.is_empty() {
             return Err(BlanketDirectiveTargetParseError::EmptyPackagePath);
         }
 
@@ -274,12 +281,9 @@ impl FromStr for BlanketDirectiveTarget {
             return Err(BlanketDirectiveTargetParseError::EmptyTypeName);
         }
 
-        let package_path = if is_builtin {
-            BUILTIN_PACKAGE_PATH.to_owned()
-        } else if let Some(prefix) = before_last_slash {
-            format!("{prefix}/{subpackage}")
-        } else {
-            subpackage.to_owned()
+        let package_path = match before_last_slash {
+            Some(prefix) => format!("{prefix}/{subpackage}"),
+            None => subpackage.to_owned(),
         };
 
         let target = Self {
@@ -579,17 +583,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_predeclared_identifier_shorthand() {
-        let shorthand: BlanketDirectiveTarget = "len".parse().unwrap();
-        let explicit: BlanketDirectiveTarget = "builtin.len".parse().unwrap();
-
-        assert_eq!(shorthand, explicit);
-        assert_eq!(shorthand.package_path, BUILTIN_PACKAGE_PATH);
-        assert_eq!(shorthand.member_name, "len");
-        assert_eq!(shorthand.to_string(), "builtin.len");
-    }
-
-    #[test]
     fn parses_arg_targeted_function_path() {
         let target: BlanketDirectiveTarget = "os.WriteFile#1".parse().unwrap();
         assert_eq!(
@@ -692,14 +685,6 @@ mod tests {
         assert!(matches!(
             "example.com/pkg".parse::<BlanketDirectiveTarget>(),
             Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator)
-        ));
-    }
-
-    #[test]
-    fn rejects_empty_predeclared_member_name() {
-        assert!(matches!(
-            "#0".parse::<BlanketDirectiveTarget>(),
-            Err(BlanketDirectiveTargetParseError::EmptyMemberName)
         ));
     }
 
