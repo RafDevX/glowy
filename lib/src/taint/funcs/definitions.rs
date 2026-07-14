@@ -17,7 +17,7 @@ use crate::{
     symbols::Symbol,
     taint::{self, annotations, funcs::captures, goto},
     types::TypeInfo,
-    values::{FunctionValue, InherentSink, Value, ValueRef},
+    values::{FunctionValue, InherentSink, InherentSourceOrRevocation, Value, ValueRef},
 };
 
 #[expect(
@@ -216,7 +216,7 @@ fn build_function_value<'a>(
     value_location: &Pinned<'a, Location>,
 ) -> FunctionValue<'a> {
     let mut explicit_backtrace = None;
-    let mut sanitizer = Label::Bottom;
+    let mut decl_revocation = None;
     let mut decl_sink = None;
 
     if let Some(annotation) = annotation
@@ -232,10 +232,8 @@ fn build_function_value<'a>(
                 );
             }
             annotations::FunctionDirective::Sanitizer => {
-                let label = annotations::resolve_revocation_label(ctx, annotation, false);
-
-                if let Some(label) = label {
-                    sanitizer = label;
+                if let Some(label) = annotations::resolve_revocation_label(ctx, annotation, false) {
+                    decl_revocation = Some(InherentSourceOrRevocation::new_unconditional(label));
                 }
             }
             annotations::FunctionDirective::AllowSink
@@ -267,8 +265,11 @@ fn build_function_value<'a>(
         receiver.is_some(),
         declared_result_types,
         explicit_backtrace,
-        sanitizer,
     );
+
+    if let Some(revocation) = decl_revocation {
+        func_val.add_revocation(revocation);
+    }
 
     if let Some(sink) = decl_sink {
         func_val.add_sink(sink);

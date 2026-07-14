@@ -619,13 +619,6 @@ fn calculate_call_result<'a>(
         result.push(realized);
     }
 
-    // if this is a sanitizer, apply revocation
-    if !func.sanitizer().is_bottom() {
-        for realized in &mut result {
-            realized.subtract_label(func.sanitizer());
-        }
-    }
-
     result
 }
 

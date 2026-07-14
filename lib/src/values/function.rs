@@ -48,11 +48,9 @@ pub struct FunctionValue<'a> {
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
     backtrace: Option<LabelBacktrace<'a>>,
-    // Label to be subtracted from realized result at call (revocation)
-    sanitizer: Label<'a>,
     // blanket sources that need to be applied to selected results at call time
     sources: Vec<InherentSourceOrRevocation<'a>>,
-    // blanket revocations to apply to the selected results at call time
+    // revocations to apply to the selected results at call time
     revocations: Vec<InherentSourceOrRevocation<'a>>,
     // inherent sinks that any call to this function implicitly triggers
     sinks: Vec<InherentSink<'a>>,
@@ -92,7 +90,6 @@ impl<'a> FunctionValue<'a> {
         has_receiver: bool,
         declared_result_types: Vec<Option<Rc<TypeInfo<'a>>>>,
         backtrace: Option<LabelBacktrace<'a>>,
-        sanitizer: Label<'a>,
     ) -> Self {
         Self {
             r#ref,
@@ -103,7 +100,6 @@ impl<'a> FunctionValue<'a> {
             known_underlying_type: None,
             outcome: None,
             backtrace,
-            sanitizer,
             sources: Vec::new(),
             revocations: Vec::new(),
             sinks: Vec::new(),
@@ -153,14 +149,7 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(
-            r#ref,
-            Some(signature),
-            false,
-            vec![None; n_returned],
-            None,
-            Label::Bottom,
-        )
+        Self::new(r#ref, Some(signature), false, vec![None; n_returned], None)
     }
 
     pub fn new_type_constructor(
@@ -189,7 +178,6 @@ impl<'a> FunctionValue<'a> {
             false,
             vec![target_type],
             None,
-            Label::Bottom,
         );
 
         value.is_type_constructor = true;
@@ -201,14 +189,7 @@ impl<'a> FunctionValue<'a> {
     pub fn new_unknown(backtrace: Option<LabelBacktrace<'a>>, has_receiver: bool) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(
-            r#ref,
-            None,
-            has_receiver,
-            Vec::new(),
-            backtrace,
-            Label::Bottom,
-        )
+        Self::new(r#ref, None, has_receiver, Vec::new(), backtrace)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -245,10 +226,6 @@ impl<'a> FunctionValue<'a> {
 
     pub fn backtrace(&self) -> Option<&LabelBacktrace<'a>> {
         self.backtrace.as_ref()
-    }
-
-    pub fn sanitizer(&self) -> &Label<'a> {
-        &self.sanitizer
     }
 
     pub fn sources(&self) -> &[InherentSourceOrRevocation<'a>] {
@@ -540,7 +517,6 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
     fn allows_lossless_downgrade(&self) -> bool {
         self.signature.is_none()
             && self.outcome.is_none()
-            && self.sanitizer.is_bottom()
             && self.sources.is_empty()
             && self.revocations.is_empty()
             && self.sinks.is_empty()
@@ -607,7 +583,6 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             known_underlying_type: self.known_underlying_type.clone(),
             outcome,
             backtrace,
-            sanitizer: self.sanitizer.clone(),
             sources: self.sources.clone(),
             revocations: self.revocations.clone(),
             sinks: self.sinks.clone(),
@@ -642,7 +617,6 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
             known_underlying_type: self.known_underlying_type.clone(),
             outcome: self.outcome.clone(),
             backtrace,
-            sanitizer: self.sanitizer.clone(),
             sources: self.sources.clone(),
             revocations: self.revocations.clone(),
             sinks: self.sinks.clone(),
@@ -674,7 +648,6 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.known_underlying_type == other.known_underlying_type
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
-            && self.sanitizer == other.sanitizer
             && self.sources == other.sources
             && self.revocations == other.revocations
             && self.sinks == other.sinks
@@ -927,6 +900,14 @@ pub struct InherentSourceOrRevocation<'a> {
 }
 
 impl<'a> InherentSourceOrRevocation<'a> {
+    pub fn new_unconditional(label: Label<'a>) -> Self {
+        InherentSourceOrRevocation {
+            label,
+            result_selector: BTreeSet::new(),
+            predicate: None,
+        }
+    }
+
     pub fn label(&self) -> &Label<'a> {
         &self.label
     }
