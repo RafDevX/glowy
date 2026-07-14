@@ -1,29 +1,363 @@
 # Glowy Base Security Policy
 # ==========================
 
-# IMPORTANT: These are heuristics, encoding sensible security assumptions for an
-# arbitrary Go program, but each project requires domain-specific adjustments to
-# extract the most possible value from Glowy with respect to the possible
-# security guarantees offered by analysis.
+# IMPORTANT: These are deliberately selective heuristics, encoding sensible
+# security assumptions for arbitrary Go programs, but each project requires
+# domain-specific adjustments to extract the most possible value from Glowy with
+# respect to the possible security guarantees offered by analysis.
 
 # Convention: all tags in this policy use either the `secret` axis (shorthand:
 # prefix `$`) or the `untrusted` axis (shorthand: prefix `?`). No other axes are
 # used, as they would necessarily be specific to the domain under analysis.
 
+# If using this policy as a template, modifying it to better suit the project's
+# needs, ensure that the canonical base policy that Glowy ships with is disabled
+# to avoid clashes with project-adjusted blanket directives.
+inherit_base_policy = false
+
 # ==============================================================================
 [sources] # === ROOTS FOR TAINT PROPAGATION ====================================
 # ==============================================================================
 
-# --- TODO ---
+# --- Confidentiality: environment-derived credentials -------------------------
+"os.Getenv#0~=API_KEY" = ["$env"]
+"os.Getenv#0~=SECRET_ACCESS_KEY" = ["$env"]
+"os.Getenv#0~=SECRET_KEY" = ["$env"]
+"os.Getenv#0~=PASSWORD" = ["$env"]
+"os.Getenv#0~=PRIVATE_KEY" = ["$env"]
+"os.Getenv#0~=DATABASE_URL" = ["$env"]
+"os.Getenv#0~=DB_URL" = ["$env"]
+"os.Getenv#0~=_TOKEN" = ["$env"]
+"os.Getenv#0~=_SECRET" = ["$env"]
+"os.Getenv#0=TOKEN" = ["$env"]
+"os.Getenv#0=SECRET" = ["$env"]
+# ^ `TOKEN*` and `SECRET*` are plausible non-secrets, e.g. `SECRETS_DIRECTORY` 
+
+"os.LookupEnv->0#0~=API_KEY" = ["$env"]
+"os.LookupEnv->0#0~=SECRET_ACCESS_KEY" = ["$env"]
+"os.LookupEnv->0#0~=SECRET_KEY" = ["$env"]
+"os.LookupEnv->0#0~=PASSWORD" = ["$env"]
+"os.LookupEnv->0#0~=PRIVATE_KEY" = ["$env"]
+"os.LookupEnv->0#0~=DATABASE_URL" = ["$env"]
+"os.LookupEnv->0#0~=DB_URL" = ["$env"]
+"os.LookupEnv->0#0~=_TOKEN" = ["$env"]
+"os.LookupEnv->0#0~=_SECRET" = ["$env"]
+"os.LookupEnv->0#0=TOKEN" = ["$env"]
+"os.LookupEnv->0#0=SECRET" = ["$env"]
+
+"syscall.Getenv->0#0~=API_KEY" = ["$env"]
+"syscall.Getenv->0#0~=SECRET_ACCESS_KEY" = ["$env"]
+"syscall.Getenv->0#0~=SECRET_KEY" = ["$env"]
+"syscall.Getenv->0#0~=PASSWORD" = ["$env"]
+"syscall.Getenv->0#0~=PRIVATE_KEY" = ["$env"]
+"syscall.Getenv->0#0~=DATABASE_URL" = ["$env"]
+"syscall.Getenv->0#0~=DB_URL" = ["$env"]
+"syscall.Getenv->0#0~=_TOKEN" = ["$env"]
+"syscall.Getenv->0#0~=_SECRET" = ["$env"]
+"syscall.Getenv->0#0=TOKEN" = ["$env"]
+"syscall.Getenv->0#0=SECRET" = ["$env"]
+
+"os.ExpandEnv#0~=API_KEY" = ["$env"]
+"os.ExpandEnv#0~=SECRET_ACCESS_KEY" = ["$env"]
+"os.ExpandEnv#0~=SECRET_KEY" = ["$env"]
+"os.ExpandEnv#0~=PASSWORD" = ["$env"]
+"os.ExpandEnv#0~=PRIVATE_KEY" = ["$env"]
+"os.ExpandEnv#0~=DATABASE_URL" = ["$env"]
+"os.ExpandEnv#0~=DB_URL" = ["$env"]
+"os.ExpandEnv#0~=_TOKEN" = ["$env"]
+"os.ExpandEnv#0~=_SECRET" = ["$env"]
+"os.ExpandEnv#0~=$TOKEN" = ["$env"]
+"os.ExpandEnv#0~=${TOKEN}" = ["$env"]
+"os.ExpandEnv#0~=$SECRET" = ["$env"]
+"os.ExpandEnv#0~=${SECRET}" = ["$env"]
+
+"os.Environ" = ["$env"]
+
+# --- Integrity: inbound net/http request data ---------------------------------
+"net/http.Request.Body" = ["?http"]
+"net/http.Request.URL" = ["?http"]
+"net/http.Request.RequestURI" = ["?http"]
+"net/http.Request.Host" = ["?http"]
+"net/http.Request.RemoteAddr" = ["?http"]
+"net/http.Request.Header" = ["?http"]
+"net/http.Request.Trailer" = ["?http"]
+"net/http.Request.Form" = ["?http"]
+"net/http.Request.PostForm" = ["?http"]
+"net/http.Request.MultipartForm" = ["?http"]
+"net/http.Request.FormValue" = ["?http"]
+"net/http.Request.PostFormValue" = ["?http"]
+"net/http.Request.PathValue" = ["?http"]
+"net/http.Request.FormFile->0,1" = ["?http"]
+"net/http.Request.MultipartReader->0" = ["?http"]
+"net/http.Request.Cookie->0" = ["?http"]
+"net/http.Request.Cookies" = ["?http"]
+"net/http.Request.BasicAuth->0,1" = ["?http"]
+"net/http.Request.Referer" = ["?http"]
+"net/http.Request.UserAgent" = ["?http"]
+
+# --- Integrity: popular web-framework request accessors -----------------------
+"github.com/gin-gonic/gin.Context.Query" = ["?http"]
+"github.com/gin-gonic/gin.Context.DefaultQuery" = ["?http"]
+"github.com/gin-gonic/gin.Context.Param" = ["?http"]
+"github.com/gin-gonic/gin.Context.PostForm" = ["?http"]
+"github.com/gin-gonic/gin.Context.GetHeader" = ["?http"]
+"github.com/gin-gonic/gin.Context.Cookie->0" = ["?http"]
+
+"github.com/labstack/echo/v4.Context.QueryParam" = ["?http"]
+"github.com/labstack/echo/v4.Context.Param" = ["?http"]
+"github.com/labstack/echo/v4.Context.FormValue" = ["?http"]
+"github.com/labstack/echo/v4.Context.Cookie->0" = ["?http"]
+
+"github.com/go-chi/chi/v5.URLParam" = ["?http"]
+"github.com/go-chi/chi/v5.URLParamFromCtx" = ["?http"]
+"github.com/gorilla/mux.Vars" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.Query" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.Params" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.FormValue" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.Get" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.Cookies" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.Body" = ["?http"]
+"github.com/gofiber/fiber/v2.Ctx.BodyRaw" = ["?http"]
+
+# ==============================================================================
+[revocations] # === EXPLICIT SECURITY LABEL DOWNGRADING AND TAINT EXCEPTIONS ===
+# ==============================================================================
+
+# allow `val := os.Getenv("..."); if len(val) == 0 { return; }` (common pattern)
+"builtin.len" = ["$env"]
 
 # ==============================================================================
 [allow_sinks] # === AXIS-RESTRICTING WHITELIST-BASED ENFORCEMENT CHECKS ========
 # ==============================================================================
 
-# --- TODO ---
+# The base policy does not define allow-sinks, as whitelists are most useful for
+# domain-specific trust boundaries. For example, a `/profile` endpoint may wish
+# to whitelist `{user:full-name, user:bio, user:phone-number}`, but it is not
+# possible for this base policy to make decisions about such particular cases.
 
 # ==============================================================================
 [deny_sinks] # === BLACKLIST-BASED ENFORCEMENT CHECKS ==========================
 # ==============================================================================
 
-# --- TODO ---
+# --- Secret disclosure: stdout and standard loggers ---------------------------
+"fmt.Print" = ["secret:*"]
+"fmt.Println" = ["secret:*"]
+"fmt.Printf" = ["secret:*"]
+"log.Print" = ["secret:*"]
+"log.Println" = ["secret:*"]
+"log.Printf" = ["secret:*"]
+"log.Fatal" = ["secret:*"]
+"log.Fatalln" = ["secret:*"]
+"log.Fatalf" = ["secret:*"]
+"log.Panic" = ["secret:*"]
+"log.Panicln" = ["secret:*"]
+"log.Panicf" = ["secret:*"]
+"log.Output#1" = ["secret:*"]
+"log.Logger.Print" = ["secret:*"]
+"log.Logger.Println" = ["secret:*"]
+"log.Logger.Printf" = ["secret:*"]
+"log.Logger.Fatal" = ["secret:*"]
+"log.Logger.Fatalln" = ["secret:*"]
+"log.Logger.Fatalf" = ["secret:*"]
+"log.Logger.Panic" = ["secret:*"]
+"log.Logger.Panicln" = ["secret:*"]
+"log.Logger.Panicf" = ["secret:*"]
+"log.Logger.Output#1" = ["secret:*"]
+
+# --- Secret disclosure: structured logging ------------------------------------
+"log/slog.Debug" = ["secret:*"]
+"log/slog.Info" = ["secret:*"]
+"log/slog.Warn" = ["secret:*"]
+"log/slog.Error" = ["secret:*"]
+"log/slog.Log" = ["secret:*"]
+"log/slog.LogAttrs" = ["secret:*"]
+"log/slog.Logger.Debug" = ["secret:*"]
+"log/slog.Logger.Info" = ["secret:*"]
+"log/slog.Logger.Warn" = ["secret:*"]
+"log/slog.Logger.Error" = ["secret:*"]
+"log/slog.Logger.DebugContext" = ["secret:*"]
+"log/slog.Logger.InfoContext" = ["secret:*"]
+"log/slog.Logger.WarnContext" = ["secret:*"]
+"log/slog.Logger.ErrorContext" = ["secret:*"]
+"log/slog.Logger.Log" = ["secret:*"]
+"log/slog.Logger.LogAttrs" = ["secret:*"]
+
+"github.com/sirupsen/logrus.Debug" = ["secret:*"]
+"github.com/sirupsen/logrus.Info" = ["secret:*"]
+"github.com/sirupsen/logrus.Infof" = ["secret:*"]
+"github.com/sirupsen/logrus.Warn" = ["secret:*"]
+"github.com/sirupsen/logrus.Warnf" = ["secret:*"]
+"github.com/sirupsen/logrus.Error" = ["secret:*"]
+"github.com/sirupsen/logrus.Errorf" = ["secret:*"]
+"github.com/sirupsen/logrus.Fatal" = ["secret:*"]
+"github.com/sirupsen/logrus.Fatalf" = ["secret:*"]
+"github.com/sirupsen/logrus.Print" = ["secret:*"]
+"github.com/sirupsen/logrus.Entry.Debug" = ["secret:*"]
+"github.com/sirupsen/logrus.Entry.Info" = ["secret:*"]
+"github.com/sirupsen/logrus.Entry.Warn" = ["secret:*"]
+"github.com/sirupsen/logrus.Entry.Error" = ["secret:*"]
+"github.com/sirupsen/logrus.Entry.Fatal" = ["secret:*"]
+
+"go.uber.org/zap.Logger.Debug" = ["secret:*"]
+"go.uber.org/zap.Logger.Info" = ["secret:*"]
+"go.uber.org/zap.Logger.Warn" = ["secret:*"]
+"go.uber.org/zap.Logger.Error" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Debug" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Debugf" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Debugw" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Info" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Infof" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Infow" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Warn" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Warnf" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Warnw" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Error" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Errorf" = ["secret:*"]
+"go.uber.org/zap.SugaredLogger.Errorw" = ["secret:*"]
+
+"github.com/rs/zerolog.Event.Msg" = ["secret:*"]
+"github.com/rs/zerolog.Event.Msgf" = ["secret:*"]
+"github.com/rs/zerolog.Event.Str#1" = ["secret:*"]
+"github.com/rs/zerolog.Event.Bytes#1" = ["secret:*"]
+"github.com/rs/zerolog.Event.RawJSON#1" = ["secret:*"]
+"github.com/rs/zerolog.Event.Interface#1" = ["secret:*"]
+
+# --- Secret disclosure: HTTP responses ----------------------------------------
+"net/http.ResponseWriter.Write#0" = ["secret:*"]
+"net/http.Error#1" = ["secret:*"]
+
+"github.com/gin-gonic/gin.Context.Data#2" = ["secret:*"]
+"github.com/gin-gonic/gin.Context.HTML#2" = ["secret:*"]
+"github.com/gin-gonic/gin.Context.JSON#1" = ["secret:*"]
+"github.com/gin-gonic/gin.Context.String" = ["secret:*"]
+"github.com/labstack/echo/v4.Context.Blob#2" = ["secret:*"]
+"github.com/labstack/echo/v4.Context.HTML#1" = ["secret:*"]
+"github.com/labstack/echo/v4.Context.JSON#1" = ["secret:*"]
+"github.com/labstack/echo/v4.Context.String#1" = ["secret:*"]
+"github.com/gofiber/fiber/v2.Ctx.JSON#0" = ["secret:*"]
+"github.com/gofiber/fiber/v2.Ctx.Send#0" = ["secret:*"]
+"github.com/gofiber/fiber/v2.Ctx.SendString#0" = ["secret:*"]
+
+# --- SQL injection: raw query strings -----------------------------------------
+"database/sql.DB.Query#0" = ["untrusted:*"]
+"database/sql.DB.QueryRow#0" = ["untrusted:*"]
+"database/sql.DB.Exec#0" = ["untrusted:*"]
+"database/sql.DB.Prepare#0" = ["untrusted:*"]
+"database/sql.DB.QueryContext#1" = ["untrusted:*"]
+"database/sql.DB.QueryRowContext#1" = ["untrusted:*"]
+"database/sql.DB.ExecContext#1" = ["untrusted:*"]
+"database/sql.DB.PrepareContext#1" = ["untrusted:*"]
+"database/sql.Tx.Query#0" = ["untrusted:*"]
+"database/sql.Tx.QueryRow#0" = ["untrusted:*"]
+"database/sql.Tx.Exec#0" = ["untrusted:*"]
+"database/sql.Tx.Prepare#0" = ["untrusted:*"]
+"database/sql.Tx.QueryContext#1" = ["untrusted:*"]
+"database/sql.Tx.QueryRowContext#1" = ["untrusted:*"]
+"database/sql.Tx.ExecContext#1" = ["untrusted:*"]
+"database/sql.Tx.PrepareContext#1" = ["untrusted:*"]
+"database/sql.Conn.QueryContext#1" = ["untrusted:*"]
+"database/sql.Conn.QueryRowContext#1" = ["untrusted:*"]
+"database/sql.Conn.ExecContext#1" = ["untrusted:*"]
+"database/sql.Conn.PrepareContext#1" = ["untrusted:*"]
+
+"github.com/jmoiron/sqlx.DB.Query#0" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.Queryx#0" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.Get#1" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.Select#1" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.Exec#0" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.NamedExec#0" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.NamedQuery#0" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.QueryContext#1" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.QueryxContext#1" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.GetContext#2" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.SelectContext#2" = ["untrusted:*"]
+"github.com/jmoiron/sqlx.DB.ExecContext#1" = ["untrusted:*"]
+
+"gorm.io/gorm.DB.Raw#0" = ["untrusted:*"]
+"gorm.io/gorm.DB.Exec#0" = ["untrusted:*"]
+"gorm.io/gorm.DB.Where#0" = ["untrusted:*"]
+"gorm.io/gorm.DB.Order#0" = ["untrusted:*"]
+"gorm.io/gorm.DB.Table#0" = ["untrusted:*"]
+
+"github.com/jackc/pgx/v5.Conn.Query#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5.Conn.QueryRow#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5.Conn.Exec#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5.Tx.Query#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5.Tx.QueryRow#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5.Tx.Exec#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5/pgxpool.Pool.Query#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5/pgxpool.Pool.QueryRow#1" = ["untrusted:*"]
+"github.com/jackc/pgx/v5/pgxpool.Pool.Exec#1" = ["untrusted:*"]
+
+# --- OS command injection / unsafe process execution --------------------------
+"os/exec.Command#0" = ["untrusted:*"]
+"os/exec.CommandContext#1" = ["untrusted:*"]
+"syscall.Exec#0" = ["untrusted:*"]
+"syscall.ForkExec#0" = ["untrusted:*"]
+"os.StartProcess#0" = ["untrusted:*"]
+
+# --- Path traversal: untrusted filesystem paths -------------------------------
+"os.Open#0" = ["untrusted:*"]
+"os.OpenFile#0" = ["untrusted:*"]
+"os.Create#0" = ["untrusted:*"]
+"os.ReadFile#0" = ["untrusted:*"]
+"os.ReadDir#0" = ["untrusted:*"]
+"os.WriteFile#0" = ["untrusted:*"]
+"os.Remove#0" = ["untrusted:*"]
+"os.RemoveAll#0" = ["untrusted:*"]
+"os.Mkdir#0" = ["untrusted:*"]
+"os.MkdirAll#0" = ["untrusted:*"]
+"os.Rename" = ["untrusted:*"]
+"os.Stat#0" = ["untrusted:*"]
+"os.Lstat#0" = ["untrusted:*"]
+"os.Readlink#0" = ["untrusted:*"]
+"os.Chdir#0" = ["untrusted:*"]
+"os.Chmod#0" = ["untrusted:*"]
+"os.Chown#0" = ["untrusted:*"]
+"os.Truncate#0" = ["untrusted:*"]
+"os.Link" = ["untrusted:*"]
+"os.Symlink" = ["untrusted:*"]
+"io/ioutil.ReadFile#0" = ["untrusted:*"]
+"io/ioutil.WriteFile#0" = ["untrusted:*"]
+"io/ioutil.ReadDir#0" = ["untrusted:*"]
+"path/filepath.Glob#0" = ["untrusted:*"]
+"path/filepath.Walk#0" = ["untrusted:*"]
+"path/filepath.WalkDir#0" = ["untrusted:*"]
+"net/http.ServeFile#2" = ["untrusted:*"]
+
+# --- Server-side request forgery: untrusted outbound network targets ----------
+"net/http.Get#0" = ["untrusted:*"]
+"net/http.Head#0" = ["untrusted:*"]
+"net/http.Post#0" = ["untrusted:*"]
+"net/http.PostForm#0" = ["untrusted:*"]
+"net/http.NewRequest#1" = ["untrusted:*"]
+"net/http.NewRequestWithContext#2" = ["untrusted:*"]
+"net/http.Request.URL" = ["untrusted:*"]
+"net/http.Client.Get#0" = ["untrusted:*"]
+"net/http.Client.Head#0" = ["untrusted:*"]
+"net/http.Client.Post#0" = ["untrusted:*"]
+"net/http.Client.PostForm#0" = ["untrusted:*"]
+"net.Dial#1" = ["untrusted:*"]
+"net.DialTimeout#1" = ["untrusted:*"]
+"net.Dialer.Dial#1" = ["untrusted:*"]
+"net.Dialer.DialContext#2" = ["untrusted:*"]
+"crypto/tls.Dial#1" = ["untrusted:*"]
+"crypto/tls.DialWithDialer#2" = ["untrusted:*"]
+
+# --- Open redirect ------------------------------------------------------------
+"net/http.Redirect#2" = ["untrusted:*"]
+"net/http.RedirectHandler#0" = ["untrusted:*"]
+"github.com/gin-gonic/gin.Context.Redirect#1" = ["untrusted:*"]
+"github.com/labstack/echo/v4.Context.Redirect#1" = ["untrusted:*"]
+"github.com/gofiber/fiber/v2.Ctx.Redirect#0" = ["untrusted:*"]
+
+# --- Template injection and explicit HTML/template escaping bypasses ----------
+"text/template.Template.Parse#0" = ["untrusted:*"]
+"html/template.Template.Parse#0" = ["untrusted:*"]
+"html/template.HTML" = ["untrusted:*"]
+"html/template.JS" = ["untrusted:*"]
+"html/template.JSStr" = ["untrusted:*"]
+"html/template.URL" = ["untrusted:*"]
+"html/template.CSS" = ["untrusted:*"]
+"html/template.HTMLAttr" = ["untrusted:*"]
+"html/template.Srcset" = ["untrusted:*"]
