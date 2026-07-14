@@ -830,16 +830,33 @@ impl SimpleConstValue {
                     return None;
                 };
 
+                // when a computation would surpass numeric bounds, we choose to
+                // be conservative and return None instead of saturating to a
+                // different const value, since that could be unsound
                 match kind {
-                    BinaryOpKind::Sum => Self::Integer(left.saturating_add(right)),
-                    BinaryOpKind::Diff => Self::Integer(left.saturating_sub(right)),
-                    BinaryOpKind::Product => Self::Integer(left.saturating_mul(right)),
-                    BinaryOpKind::Quotient if right != 0 => {
-                        Self::Integer(left.saturating_div(right))
+                    BinaryOpKind::Sum => Self::Integer(left.checked_add(right)?),
+                    BinaryOpKind::Diff => Self::Integer(left.checked_sub(right)?),
+                    BinaryOpKind::Product => Self::Integer(left.checked_mul(right)?),
+                    BinaryOpKind::Quotient => Self::Integer(left.checked_div(right)?),
+                    BinaryOpKind::Remainder => Self::Integer(left.checked_rem(right)?),
+                    BinaryOpKind::ShiftLeft if left == 0 => Self::Integer(0),
+                    BinaryOpKind::ShiftLeft => {
+                        let shift = u32::try_from(right).ok()?;
+                        let factor = 1_u64.checked_shl(shift)?;
+
+                        Self::Integer(left.checked_mul(factor)?)
                     }
-                    BinaryOpKind::Remainder => Self::Integer(left % right),
-                    BinaryOpKind::ShiftLeft => Self::Integer(left << right),
-                    BinaryOpKind::ShiftRight => Self::Integer(left >> right),
+                    BinaryOpKind::ShiftRight => {
+                        let shifted = if right >= u64::BITS.into() {
+                            // the Go spec specifies that shifting any number by
+                            // an amount >= 64 always produces exactly 0
+                            0
+                        } else {
+                            left >> right
+                        };
+
+                        Self::Integer(shifted)
+                    }
                     BinaryOpKind::BitwiseOr => Self::Integer(left | right),
                     BinaryOpKind::BitwiseAnd => Self::Integer(left & right),
                     BinaryOpKind::BitwiseXor => Self::Integer(left ^ right),
@@ -855,9 +872,7 @@ impl SimpleConstValue {
 
                     // not using wildcard to force revisiting this
                     // implementation if a new op kind is added
-                    BinaryOpKind::LogicalAnd | BinaryOpKind::LogicalOr | BinaryOpKind::Quotient => {
-                        return None;
-                    }
+                    BinaryOpKind::LogicalAnd | BinaryOpKind::LogicalOr => return None,
                 }
             }
             _ => return None,
