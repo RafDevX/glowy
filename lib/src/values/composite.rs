@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
 };
 
@@ -22,6 +22,9 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
     r#const: HashMap<K, ValueRef<'a>>,
     // overall backtrace affecting the entire structure, from dynamic sets, etc.
     r#dyn: Option<LabelBacktrace<'a>>,
+    // exact keys strongly updated after the current dynamic state was produced
+    // (helps to allow better precision and be less conservative when safe)
+    dyn_overrides: HashSet<K>,
     // exact length, when statically known. only meaningful for slice-shaped
     // (u64-keyed) composites; conservatively collapsed to None when unknown
     known_len: Option<u64>,
@@ -32,6 +35,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         Self {
             r#const: HashMap::new(),
             r#dyn,
+            dyn_overrides: HashSet::new(),
             known_len: None,
         }
     }
@@ -57,6 +61,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         Self {
             r#const,
             r#dyn,
+            dyn_overrides: HashSet::new(),
             known_len,
         }
     }
@@ -64,6 +69,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn clear(&mut self) {
         self.r#const = HashMap::new();
         self.r#dyn = None;
+        self.dyn_overrides.clear();
         // known_len is preserved since copy/clear doesn't change the underlying
         // slice's size, only its elements are reset to their zero-values
     }
@@ -93,12 +99,16 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             None => ValueRef::new_bottom(at_location.clone(), None),
         };
 
+        let dynamic_backtrace = (!self.dyn_overrides.contains(key))
+            .then(|| self.r#dyn.clone())
+            .flatten();
+
         value
             .nest_backtrace(
                 LabelBacktraceKind::Expression,
                 None,
                 at_location.clone(),
-                self.r#dyn.clone(),
+                dynamic_backtrace,
             )
             .with_location(at_location)
     }
@@ -116,15 +126,36 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         )
     }
 
-    pub fn set_const(&mut self, key: K, value: ValueRef<'a>) {
-        self.r#const.insert(key, value);
+    pub fn set_const(&mut self, key: K, value: ValueRef<'a>)
+    where
+        // note: this function's `K: Clone` constraint is necessary to avoid
+        // interning dyn_overrides into `r#const` by having it be a map from K
+        // to `ConstEntry { value: ValueRef<'a>, overrides_dyn: bool }`, since
+        // that would make the code more complex and would require traversing
+        // `r#const` every time we now just do `self.dyn_overrides.clear()`.
+        // this constraint is fine since right now all possible CompositeValue
+        // keys are Clone, but in the future this can be re-assessed if a
+        // non-Clone key must be supported (and `set_const` available for it)
+        K: Clone,
+    {
+        self.r#const.insert(key.clone(), value);
+        self.dyn_overrides.insert(key);
     }
 
     // never overwrites
     pub fn set_dyn(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
+        let backtrace = value.backtrace();
+
+        if backtrace.is_some() {
+            // we're re-calculating the dyn backtrace, so overrides don't make
+            // sense anymore, as they only represent const updates pending
+            // between dyn backtrace updates
+            self.dyn_overrides.clear();
+        }
+
         self.r#dyn = LabelBacktrace::combine_options(
             self.r#dyn.clone(),
-            value.backtrace(),
+            backtrace,
             LabelBacktraceKind::Assignment,
             Cow::Owned(at_location),
         );
@@ -142,6 +173,7 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
         Self {
             r#const,
             r#dyn: Some(backtrace),
+            dyn_overrides: HashSet::new(),
             known_len: self.known_len,
         }
     }
@@ -201,6 +233,10 @@ impl<'a> CompositeValue<'a, u64> {
                 LabelBacktraceKind::Assignment,
                 Cow::Owned(at_location),
             );
+
+            if src.r#dyn.is_some() {
+                self.dyn_overrides.clear();
+            }
 
             self.known_len = Some(self_len.saturating_add(src_len));
         } else {
@@ -299,6 +335,7 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
         Self {
             r#const,
             r#dyn,
+            dyn_overrides: self.dyn_overrides.clone(),
             known_len: self.known_len,
         }
     }
@@ -312,6 +349,8 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
     ) -> Self {
         let r#const = self.r#const.clone();
 
+        let has_extra_children = extra_children.clone().into_iter().next().is_some();
+
         #[rustfmt::skip]
         let r#dyn = self.r#dyn.nest_backtrace(
             parent_kind,
@@ -320,9 +359,16 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             extra_children
         );
 
+        let dyn_overrides = if has_extra_children {
+            HashSet::new()
+        } else {
+            self.dyn_overrides.clone()
+        };
+
         Self {
             r#const,
             r#dyn,
+            dyn_overrides,
             known_len: self.known_len,
         }
     }
@@ -358,6 +404,14 @@ impl<'a, K: Eq + Hash + Clone> Mergeable<'a> for CompositeValue<'a, K> {
             .r#dyn
             .merge_with(&other.r#dyn, with_kind, at_location.clone());
 
+        // a key is independent of the merged dynamic state only when its value
+        // supersedes that state along every incoming control-flow path
+        let dyn_overrides = self
+            .dyn_overrides
+            .intersection(&other.dyn_overrides)
+            .cloned()
+            .collect();
+
         // only retain length when both branches agree
         let known_len = match (self.known_len, other.known_len) {
             (Some(left), Some(right)) if left == right => Some(left),
@@ -367,6 +421,7 @@ impl<'a, K: Eq + Hash + Clone> Mergeable<'a> for CompositeValue<'a, K> {
         Self {
             r#const,
             r#dyn,
+            dyn_overrides,
             known_len,
         }
     }
@@ -388,6 +443,7 @@ impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
         self.r#dyn.snapshot_aware_eq(&other.r#dyn)
             && self.r#const.len() == other.r#const.len()
             && self.r#const.snapshot_aware_eq(&other.r#const)
+            && self.dyn_overrides == other.dyn_overrides
             && self.known_len == other.known_len
     }
 }
