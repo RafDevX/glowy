@@ -19,33 +19,8 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     // then they were already spotted and differentiated by the parser, but
     // otherwise we need to here identify all remaining built-in functions and
     // trigger their special handling, aborting function call handling on match
-    if let ExprNode::Name(id) = &*node.func
-        && ctx.symtab().get_symbol(id.content()).is_none()
-    // ^^ check that the name has not been shadowed
-    {
-        match id.content() {
-            "append" => return CallResolution::Final(vec![builtins::visit_append(ctx, node)]),
-            "copy" => return CallResolution::Final(vec![builtins::visit_copy(ctx, node)]),
-            "clear" => {
-                builtins::visit_clear(ctx, node);
-
-                return CallResolution::Final(vec![]);
-            }
-            "close" => {
-                builtins::visit_close(ctx, node);
-
-                return CallResolution::Final(vec![]);
-            }
-            "delete" => {
-                builtins::visit_delete(ctx, node);
-
-                return CallResolution::Final(vec![]);
-            }
-            "len" => {
-                return CallResolution::Final(vec![builtins::visit_len(ctx, node)]);
-            }
-            _ => {} // nothing to do, it's a real function call
-        }
+    if let Some(resolution) = try_resolve_special_builtin_call(ctx, node) {
+        return resolution;
     }
 
     // this looks a bit strange and convoluted, but it is necessary to guarantee
@@ -186,6 +161,42 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
         blackbox_replacement,
         method_receiver_value,
     })
+}
+
+fn try_resolve_special_builtin_call<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+) -> Option<CallResolution<'a>> {
+    let ExprNode::Name(id) = &*node.func else {
+        return None;
+    };
+
+    if !ctx.symtab().resolves_to_predeclared(id.content()) {
+        return None;
+    }
+
+    let (name, mut result) = match id.content() {
+        "append" => ("append", vec![builtins::visit_append(ctx, node)]),
+        "copy" => ("copy", vec![builtins::visit_copy(ctx, node)]),
+        "clear" => ("clear", {
+            builtins::visit_clear(ctx, node);
+            vec![]
+        }),
+        "close" => ("close", {
+            builtins::visit_close(ctx, node);
+            vec![]
+        }),
+        "delete" => ("delete", {
+            builtins::visit_delete(ctx, node);
+            vec![]
+        }),
+        "len" => ("len", vec![builtins::visit_len(ctx, node)]),
+        _ => return None,
+    };
+
+    super::apply_predeclared_blanket_revocations(ctx, name, &node.args, &mut result);
+
+    Some(CallResolution::Final(result))
 }
 
 fn try_extract_typed_selection_callee<'a>(

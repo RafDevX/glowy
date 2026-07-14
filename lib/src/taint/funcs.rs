@@ -11,6 +11,7 @@ use crate::{
     context::{AnalysisContext, DeferredCall},
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    policy,
     taint::exprs,
     types::TypeInfo,
     values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
@@ -153,6 +154,36 @@ fn apply_deferred_calls(ctx: &mut AnalysisContext<'_>) {
             ctx.pop_branch_backtrace();
         }
     }
+}
+
+pub fn apply_predeclared_blanket_revocations<'a>(
+    ctx: &AnalysisContext<'a>,
+    name: &'static str,
+    args: &[ExprNode<'a>],
+    result: &mut [ValueRef<'a>],
+) {
+    let directives = ctx.blanket_directives_for(policy::BUILTIN_PACKAGE_PATH, None, name);
+
+    if directives.is_empty() {
+        return;
+    }
+
+    // builtins with special handling bypass normal operand access and call
+    // application, so we fake it here by creating a lightweight policy
+    // carrier matching what those routines would have otherwise received so
+    // that we can reuse the normal blanket directive machinery
+
+    let mut fake_func = FunctionValue::new(
+        FunctionRef::BuiltIn(name),
+        None, // not relevant
+        false,
+        Vec::new(),
+        None,
+    );
+
+    fake_func.absorb_blanket_directives(directives);
+
+    call_application::apply_call_blanket_revocations(&fake_func, args, result);
 }
 
 pub fn nest_receiver_backtrace<'a>(

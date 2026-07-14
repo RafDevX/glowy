@@ -306,6 +306,23 @@ impl<'a> SymbolTable<'a> {
         self.decl_index.get(&declaration).cloned() // cloning Rc is cheap
     }
 
+    pub fn resolves_to_predeclared(&self, name: &str) -> bool {
+        let resolved = self.get_symbol(name);
+
+        if resolved.is_none() {
+            // if this is being treated as a valid symbol and no error is being
+            // reported for it not existing, then it has special handling and so
+            // must necessarily be a predeclared, even if not in the universe
+            return true;
+        }
+
+        if let Some(predeclared) = self.universe_scope.get_local_symbol(name) {
+            return resolved.is_some_and(|resolved| Rc::ptr_eq(&resolved, &predeclared));
+        }
+
+        false
+    }
+
     pub fn declare_new_symbol(
         &mut self,
         name: &'a str,

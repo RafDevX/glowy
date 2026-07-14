@@ -9,7 +9,7 @@ pub(crate) use blanket_directives::{
     BlanketDirective, BlanketDirectiveKind, BlanketDirectives, PackageBlanketDirectives,
 };
 use parser::Location;
-pub use targets::{BlanketDirectiveTarget, BlanketSourceArgPredicate};
+pub use targets::{BUILTIN_PACKAGE_PATH, BlanketDirectiveTarget, BlanketSourceArgPredicate};
 
 use crate::{labels::Label, snapshots::SnapshotAware};
 

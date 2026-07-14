@@ -409,7 +409,7 @@ fn apply_call_blanket_sources<'a>(
     }
 }
 
-fn apply_call_blanket_revocations<'a>(
+pub(super) fn apply_call_blanket_revocations<'a>(
     func: &FunctionValue<'a>,
     args: &[ExprNode<'a>],
     result: &mut [ValueRef<'a>],

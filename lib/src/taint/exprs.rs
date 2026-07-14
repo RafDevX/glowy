@@ -3,7 +3,8 @@ use std::borrow::Cow;
 use parser::{
     Location, Span,
     ast::{
-        AmbiguousBracketAccessNode, ExprNode, TypeAssertionNode, TypeInstantiationNode, UnaryOpKind,
+        AmbiguousBracketAccessNode, ExprNode, MakeNode, TypeAssertionNode, TypeInstantiationNode,
+        UnaryOpKind,
     },
 };
 
@@ -13,7 +14,7 @@ use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    policy::{BlanketDirective, BlanketDirectiveKind},
+    policy::{self, BlanketDirective, BlanketDirectiveKind},
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     values::{
         BacktraceContainer, ExpandableValue, FunctionValue, PackageRefValue,
@@ -31,7 +32,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         ExprNode::Name(name) => visit_operand_name(ctx, *name, None),
         ExprNode::Literal(lit) => literals::visit_literal(ctx, lit),
         ExprNode::Call(call) => return funcs::visit_call(ctx, call),
-        ExprNode::Make(make) => funcs::builtins::visit_make(ctx, make),
+        ExprNode::Make(make) => visit_make_with_revocations(ctx, make),
         ExprNode::Selection(selection) => component::visit_selection(ctx, selection),
         ExprNode::Indexing(indexing) => component::visit_indexing(ctx, indexing),
         ExprNode::Slicing(slicing) => component::visit_slicing(ctx, slicing),
@@ -156,15 +157,17 @@ pub fn visit_operand_name<'a>(
         ValueRef::new_bottom(location.clone(), None)
     };
 
+    let blanket_directives = blanket_directives_for_operand(ctx, name, qualifier);
+
     // embed any potential blanket source backtrace if there are any Source
     // blanket directives targeting this symbol (propagates the backtrace in
     // question for both functions like `os.Getenv` and non-function targets
     // such as `os.Args` and `os.Stdin` which are read directly / never called)
-    let blanket_source_bt = build_blanket_source_backtrace_for(ctx, name, qualifier, &location);
+    let blanket_source_bt = build_blanket_source_backtrace(blanket_directives, &location);
     // calculate blanket revocation label
-    let blanket_revocation = build_blanket_revocation_label_for(ctx, name, qualifier);
+    let blanket_revocation = build_blanket_revocation_label(blanket_directives);
 
-    let value = value
+    let mut value = value
         .nest_backtrace(
             LabelBacktraceKind::Expression,
             Some(name.content()),
@@ -172,6 +175,18 @@ pub fn visit_operand_name<'a>(
             blanket_source_bt,
         )
         .with_location(location);
+
+    if value.is_function()
+        && let Some(mut function) = value.as_function_mut()
+    {
+        // unlike declared functions, predeclared (= builtin) functions have no
+        // declaration visit step during which they can absorb call-level
+        // blanket directives, so we have to fold directives into the accessed
+        // copy here. however, despite this being necessary for predeclared
+        // functions, there is no harm in doing this for all functions since
+        // additions are deduplicated, keeping this simple and uniform
+        function.absorb_blanket_directives(blanket_directives);
+    }
 
     apply_blanket_revocation(value, &blanket_revocation)
 }
@@ -263,26 +278,30 @@ fn synthesize_fake_symbol_with_blanket_directives<'a>(
     Some(Symbol::new_ref(ctx.pin(name), false, value))
 }
 
-fn build_blanket_source_backtrace_for<'a>(
+fn blanket_directives_for_operand<'a>(
     ctx: &AnalysisContext<'a>,
     name: Span<'a>,
     qualifier: Option<Span<'a>>,
-    at_location: &Pinned<'a, Location>,
-) -> Option<LabelBacktrace<'a>> {
+) -> &'a [BlanketDirective] {
     let package_path = if let Some(qualifier) = qualifier {
         ctx.symtab()
-            .package_path_for_qualifier(qualifier.content())?
+            .package_path_for_qualifier(qualifier.content())
+            .map(String::as_str)
+    } else if ctx.symtab().resolves_to_predeclared(name.content()) {
+        Some(policy::BUILTIN_PACKAGE_PATH)
     } else {
         // FIXME: if current package doesn't have this symbol, pick the first
-        // wildcard import that has it; ignore universe scope
+        // wildcard import that has it
 
-        ctx.symtab().current_package_path()?
+        ctx.symtab().current_package_path().map(String::as_str)
+    };
+
+    let Some(package_path) = package_path else {
+        return &[];
     };
 
     // we pass type_name = None because this could never be a method access
-    let directives = ctx.blanket_directives_for(package_path, None, name.content());
-
-    build_blanket_source_backtrace(directives, at_location)
+    ctx.blanket_directives_for(package_path, None, name.content())
 }
 
 fn build_blanket_source_backtrace<'a>(
@@ -312,30 +331,6 @@ fn build_blanket_source_backtrace<'a>(
     )
 }
 
-fn build_blanket_revocation_label_for<'a>(
-    ctx: &AnalysisContext<'a>,
-    name: Span<'a>,
-    qualifier: Option<Span<'a>>,
-) -> Label<'a> {
-    let package_path = if let Some(qualifier) = qualifier {
-        ctx.symtab().package_path_for_qualifier(qualifier.content())
-    } else {
-        // FIXME: if current package doesn't have this symbol, pick the first
-        // wildcard import that has it; ignore universe scope
-
-        ctx.symtab().current_package_path()
-    };
-
-    let Some(package_path) = package_path else {
-        return Label::Bottom;
-    };
-
-    // we pass type_name = None because this could never be a method access
-    let directives = ctx.blanket_directives_for(package_path, None, name.content());
-
-    build_blanket_revocation_label(directives)
-}
-
 fn build_blanket_revocation_label<'a>(directives: &'a [BlanketDirective]) -> Label<'a> {
     let mut label: Label<'a> = directives
         .iter()
@@ -356,6 +351,35 @@ fn apply_blanket_revocation<'a>(mut value: ValueRef<'a>, revocation: &Label<'a>)
     value.subtract_label(revocation);
 
     value
+}
+
+fn visit_make_with_revocations<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &MakeNode<'a>,
+) -> ValueRef<'a> {
+    let mut result = funcs::builtins::visit_make(ctx, node);
+
+    if !ctx.symtab().resolves_to_predeclared("make") {
+        // just in case any any user shadow exists
+        return result;
+    }
+
+    // this should always fail arg predicate matching, hopefully
+    let fake_type_arg = ExprNode::Name(*crate::FAKE_SPAN.inner());
+
+    let args: Vec<_> = std::iter::once(fake_type_arg)
+        .chain(node.n.iter().cloned().map(|n| *n))
+        .chain(node.m.iter().cloned().map(|m| *m))
+        .collect();
+
+    funcs::apply_predeclared_blanket_revocations(
+        ctx,
+        "make",
+        &args,
+        std::slice::from_mut(&mut result),
+    );
+
+    result
 }
 
 fn visit_type_assertion<'a>(

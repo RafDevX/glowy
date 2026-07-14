@@ -2,6 +2,14 @@ use std::{collections::BTreeSet, error, fmt, hash::Hash, num::ParseIntError, str
 
 use crate::{FullPackagePath, values::SimpleConstValue};
 
+/// Canonical pseudo-package path for Go's predeclared identifiers.
+///
+/// The Go documentation presents these identifiers under package `builtin`,
+/// even though it is not an importable package. Blanket directive target
+/// deserialization accepts either this explicit namespace (`builtin.len`) or
+/// the shorthand of omitting a package path entirely (`len`).
+pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
+
 /// Fully-qualified target of a blanket directive.
 ///
 /// A target is primarily identified by a member path, which is composed of a
@@ -26,8 +34,10 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 ///
 /// # Parsing and Deserializing
 ///
-/// Often, it is simplest to specify a target as a well-formed [`String`]. Two
+/// Often, it is simplest to specify a target as a well-formed [`String`]. Three
 /// syntactic forms are supported:
+/// - `name`: a predeclared identifier from Go's universe block (shorthand for
+///   `builtin.name`);
 /// - `pkg/path.Func`: a package-level symbol (usually a function); or
 /// - `pkg/path.Type.Method`: a method or struct field associated to a named
 ///   receiver type declared in the specified package.
@@ -66,6 +76,9 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlanketDirectiveTarget {
     /// Fully-qualified package path.
+    ///
+    /// If this matches [`BUILTIN_PACKAGE_PATH`], it qualifies predeclared Go
+    /// symbols from the universe scope.
     pub package_path: FullPackagePath,
     /// Declared name of the receiver type, when the target is a method/field.
     ///
@@ -239,16 +252,17 @@ impl FromStr for BlanketDirectiveTarget {
             return Err(BlanketDirectiveTargetParseError::TooManyMemberSegments);
         }
 
-        let (type_name, member_name) = match (mid_segment, last_segment) {
-            (Some(member_name), None) => (None, member_name),
-            (Some(type_name), Some(method_name)) => (Some(type_name), method_name),
+        let (is_builtin, type_name, member_name) = match (mid_segment, last_segment) {
+            (Some(member_name), None) => (false, None, member_name),
+            (Some(type_name), Some(method_name)) => (false, Some(type_name), method_name),
+            (None, None) if before_last_slash.is_none() => (true, None, subpackage),
             (None, _) => {
                 // no `.` at all after the last `/`
                 return Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator);
             }
         };
 
-        if before_last_slash.is_some_and(str::is_empty) || subpackage.is_empty() {
+        if before_last_slash.is_some_and(str::is_empty) || (subpackage.is_empty() && !is_builtin) {
             return Err(BlanketDirectiveTargetParseError::EmptyPackagePath);
         }
 
@@ -260,9 +274,12 @@ impl FromStr for BlanketDirectiveTarget {
             return Err(BlanketDirectiveTargetParseError::EmptyTypeName);
         }
 
-        let package_path = match before_last_slash {
-            Some(prefix) => format!("{prefix}/{subpackage}"),
-            None => subpackage.to_owned(),
+        let package_path = if is_builtin {
+            BUILTIN_PACKAGE_PATH.to_owned()
+        } else if let Some(prefix) = before_last_slash {
+            format!("{prefix}/{subpackage}")
+        } else {
+            subpackage.to_owned()
         };
 
         let target = Self {
@@ -474,7 +491,7 @@ impl From<&str> for BlanketSourcePredicateValue {
 /// Represents a failure to parse a string into a [`BlanketDirectiveTarget`].
 #[derive(Debug)]
 pub enum BlanketDirectiveTargetParseError {
-    /// No `.` was located separating the package path from the member name.
+    /// A slash-qualified package path had no `.` separating its member name.
     NoPackageFunctionSeparator,
     /// More than 3 `.`-separated identifiers was found after the final `/`.
     TooManyMemberSegments,
@@ -499,7 +516,7 @@ impl fmt::Display for BlanketDirectiveTargetParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoPackageFunctionSeparator => {
-                f.write_str("blanket directive target has no `.` separator")
+                f.write_str("slash-qualified blanket directive target has no `.` separator")
             }
             Self::TooManyMemberSegments => f.write_str(
                 "blanket directive target has too many `.`-separated identifiers (expected \
@@ -559,6 +576,17 @@ mod tests {
             target,
             BlanketDirectiveTarget::new_for_sink("os", None::<String>, "Remove", None)
         );
+    }
+
+    #[test]
+    fn parses_predeclared_identifier_shorthand() {
+        let shorthand: BlanketDirectiveTarget = "len".parse().unwrap();
+        let explicit: BlanketDirectiveTarget = "builtin.len".parse().unwrap();
+
+        assert_eq!(shorthand, explicit);
+        assert_eq!(shorthand.package_path, BUILTIN_PACKAGE_PATH);
+        assert_eq!(shorthand.member_name, "len");
+        assert_eq!(shorthand.to_string(), "builtin.len");
     }
 
     #[test]
@@ -632,6 +660,7 @@ mod tests {
         for input in [
             "os.Remove",
             "os.WriteFile#1",
+            "builtin.len",
             "example.com/a/b/pkg.Fn#0",
             "database/sql.DB.Query",
             "database/sql.DB.QueryContext#1",
@@ -659,10 +688,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_no_separator() {
+    fn slash_qualified_target_still_requires_separator() {
+        assert!(matches!(
+            "example.com/pkg".parse::<BlanketDirectiveTarget>(),
+            Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator)
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_predeclared_member_name() {
         assert!(matches!(
             "#0".parse::<BlanketDirectiveTarget>(),
-            Err(BlanketDirectiveTargetParseError::NoPackageFunctionSeparator)
+            Err(BlanketDirectiveTargetParseError::EmptyMemberName)
         ));
     }
 
