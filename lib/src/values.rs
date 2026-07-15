@@ -185,6 +185,46 @@ impl<'a> ValueRef<'a> {
         Self::new(inner, self.location.clone(), self.declared_type.clone())
     }
 
+    pub fn realize_with_shape_preservation(
+        &self,
+        func: &FunctionRef<'a>,
+        slot: SyntheticSlot,
+        concrete: &Self,
+    ) -> Self {
+        let concrete_backtrace = concrete.backtrace();
+
+        let contains_slot = self.backtrace().is_some_and(|backtrace| {
+            backtrace
+                .label()
+                .contains_synthetic_representation(func, slot)
+        });
+
+        if !contains_slot {
+            return self.realize(func, slot, concrete_backtrace.as_ref());
+        }
+
+        let borrowed = self.value.borrow();
+        let concrete_borrowed = concrete.value.borrow();
+
+        let realized = match (&*borrowed, &*concrete_borrowed) {
+            (Value::Array(template), Value::Array(concrete_array)) => {
+                Value::Array(template.realize_with_shape_preservation(func, slot, concrete_array))
+            }
+            (Value::Slice(template), Value::Slice(concrete_slice)) => {
+                Value::Slice(template.realize_with_shape_preservation(func, slot, concrete_slice))
+            }
+            (Value::Map(template), Value::Map(concrete_map)) => {
+                Value::Map(template.realize_with_shape_preservation(func, slot, concrete_map))
+            }
+            (Value::Struct(template), Value::Struct(concrete_struct)) => {
+                Value::Struct(template.realize_with_shape_preservation(func, slot, concrete_struct))
+            }
+            _ => borrowed.realize(func, slot, concrete_backtrace.as_ref()),
+        };
+
+        Self::new(realized, self.location.clone(), self.declared_type.clone())
+    }
+
     pub fn try_upgrade_to_channel(&self) {
         self.try_upgrade_to(Value::Channel);
     }

@@ -226,12 +226,23 @@ fn apply_capture_mutations_with<'a>(
             ));
         }
 
+        let outer_value = outer_symbol.borrow().value().get();
+
         for (index, backtrace) in capture_backtraces {
-            realized = Cow::Owned(realized.realize(
-                func.r#ref(),
-                SyntheticSlot::Capture(*index),
-                backtrace.as_ref(),
-            ));
+            realized = Cow::Owned(if *index == binding.index() {
+                // try to avoid using `backtrace` (flattened value)
+                realized.realize_with_shape_preservation(
+                    func.r#ref(),
+                    SyntheticSlot::Capture(*index),
+                    &outer_value,
+                )
+            } else {
+                realized.realize(
+                    func.r#ref(),
+                    SyntheticSlot::Capture(*index),
+                    backtrace.as_ref(),
+                )
+            });
         }
 
         realized = Cow::Owned(realized.realize(
@@ -244,8 +255,6 @@ fn apply_capture_mutations_with<'a>(
             // no realization happened; ensure compliance with AssumedImmutable
             realized = Cow::Owned(local_value.clone_inner());
         }
-
-        let outer_value = outer_symbol.borrow().value().get();
 
         if (*realized).snapshot_aware_eq(&outer_value) {
             // avoid unbounded growth of the outer symbol's backtrace tree

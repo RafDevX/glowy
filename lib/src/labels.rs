@@ -617,6 +617,15 @@ impl<'a> Label<'a> {
         single.is_synthetic_representation(func, slot)
     }
 
+    pub(crate) fn contains_synthetic_representation(
+        &self,
+        func: &FunctionRef<'a>,
+        slot: SyntheticSlot,
+    ) -> bool {
+        self.tags()
+            .any(|tag| tag.is_synthetic_representation(func, slot))
+    }
+
     fn rebind_synthetic_func(
         &self,
         from_func: &FunctionRef<'a>,

@@ -177,6 +177,62 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
             known_len: self.known_len,
         }
     }
+
+    // for precision; avoid flattening all values into one backtrace
+    pub fn realize_with_shape_preservation(
+        &self,
+        func: &FunctionRef<'a>,
+        slot: SyntheticSlot,
+        concrete: &Self,
+    ) -> Self {
+        let mut r#const = concrete.r#const.clone();
+
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "Each key is realized independently; order is irrelevant"
+        )]
+        for (key, template_value) in &self.r#const {
+            let concrete_value = concrete.get_const(key, template_value.location().clone());
+
+            #[rustfmt::skip]
+            let realized = template_value.realize_with_shape_preservation(
+                func,
+                slot,
+                &concrete_value,
+            );
+
+            r#const.insert(key.clone(), realized);
+        }
+
+        let r#dyn = self.r#dyn.realize(func, slot, concrete.r#dyn.as_ref());
+
+        let mut dyn_overrides = self.dyn_overrides.clone();
+
+        if self
+            .r#dyn
+            .as_ref()
+            .map(LabelBacktrace::label)
+            .is_some_and(|label| label.is_synthetic_representation(func, slot))
+        {
+            // if our synthetic is the sole dynamic tag, no mutation occurred
+            // since copy_shape, so overrides can be retained
+            dyn_overrides.extend(concrete.dyn_overrides.iter().cloned());
+        }
+
+        let known_len = if self.known_len == concrete.known_len {
+            self.known_len
+        } else {
+            // be conservative; it would be unsound to pick either len
+            None
+        };
+
+        Self {
+            r#const,
+            r#dyn,
+            dyn_overrides,
+            known_len,
+        }
+    }
 }
 
 // slice-shaped (u64-keyed) specific operations. these mirror `append(s, x)`
