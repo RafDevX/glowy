@@ -12,6 +12,7 @@ pub struct Config {
     directory: PathBuf,
     mode: Mode,
     strict: bool,
+    summary_only: bool,
     time_analysis: bool,
 }
 
@@ -31,6 +32,7 @@ impl From<CliConfig> for Config {
                 .expect("clap requires a directory when no subcommand is provided"),
             mode,
             strict: cli.strict,
+            summary_only: cli.summary_only,
             time_analysis: cli.time_analysis,
         }
     }
@@ -44,13 +46,13 @@ enum Mode {
 
 pub fn analyze(config: &Config) -> (usize, usize) {
     match config.mode {
-        Mode::Single => analyze_single(&config.directory, config),
+        Mode::Single => analyze_single(&config.directory, config, false),
         Mode::Suite => analyze_suite(config),
         Mode::MultiSuites => analyze_multi_suites(config),
     }
 }
 
-fn analyze_single<P: AsRef<Path>>(path: P, config: &Config) -> (usize, usize) {
+fn analyze_single<P: AsRef<Path>>(path: P, config: &Config, quiet: bool) -> (usize, usize) {
     let analyzer = glowy::Analyzer::from_directory(path).unwrap_or_else(|err| match err {
         glowy::AnalyzerFromDirectoryError::FileSystem(error) => fatal(
             "IO error occurred when reading the specified directory.",
@@ -78,7 +80,7 @@ fn analyze_single<P: AsRef<Path>>(path: P, config: &Config) -> (usize, usize) {
 
     let result = analyzer.analyze();
 
-    if config.time_analysis {
+    if config.time_analysis && !quiet {
         let elapsed = start.elapsed();
 
         println!(
@@ -91,7 +93,9 @@ fn analyze_single<P: AsRef<Path>>(path: P, config: &Config) -> (usize, usize) {
 
     match result {
         Ok(_) => {
-            println!("Analysis succeeded with no errors found!");
+            if !quiet {
+                println!("Analysis succeeded with no errors found!");
+            }
 
             (0, 0)
         }
@@ -111,10 +115,12 @@ fn analyze_single<P: AsRef<Path>>(path: P, config: &Config) -> (usize, usize) {
                     warning_count += 1;
                 }
 
-                let group = diagnostics::error_to_group(&error, &analyzer, config.strict);
-                let report = &[group];
+                if !quiet {
+                    let group = diagnostics::error_to_group(&error, &analyzer, config.strict);
+                    let report = &[group];
 
-                anstream::eprintln!("{}", renderer.render(report));
+                    anstream::eprintln!("{}", renderer.render(report));
+                }
             }
 
             (warning_count, error_count)
@@ -140,20 +146,24 @@ fn analyze_multi(mut modules: Vec<PathBuf>, config: &Config) -> (usize, usize) {
     let start = Instant::now();
 
     for (i, module) in modules.into_iter().enumerate() {
-        let title = format!(
-            "{} {} {}",
-            format!("#{:0>width$} -", i + 1).cyan(),
-            "Module @".blue(),
-            module.to_string_lossy().purple()
-        );
-        println!("{}", presentation::build_header(title));
+        if !config.summary_only {
+            let title = format!(
+                "{} {} {}",
+                format!("#{:0>width$} -", i + 1).cyan(),
+                "Module @".blue(),
+                module.to_string_lossy().purple()
+            );
+            println!("{}", presentation::build_header(title));
+        }
 
         results.push((
             module.to_string_lossy().into_owned(),
-            analyze_single(module, config),
+            analyze_single(module, config, config.summary_only),
         ));
 
-        println!("\n");
+        if !config.summary_only {
+            println!("\n");
+        }
     }
 
     println!("{}", presentation::build_header("SUMMARY".cyan()));

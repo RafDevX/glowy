@@ -53,6 +53,9 @@ struct CliConfig {
     /// Analyze multiple suites (directories of directories with Go modules).
     #[arg(long)]
     multi_suites: bool,
+    /// Omit per-module output when analyzing multiple modules.
+    #[arg(long)]
+    summary_only: bool,
     /// Report elapsed time for the entire analysis process (including parsing).
     #[arg(long)]
     time_analysis: bool,
