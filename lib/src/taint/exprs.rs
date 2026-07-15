@@ -18,7 +18,7 @@ use crate::{
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     values::{
         BacktraceContainer, ExpandableValue, FunctionValue, PackageRefValue,
-        SelfAwareBacktraceContainer, Value, ValueRef,
+        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
     },
 };
 
@@ -443,5 +443,22 @@ fn visit_ambiguous_bracket_access<'a>(
     // convert our node into an IndexingNode since it'd lead to base being
     // visited multiple times (which would be bad for, e.g., side-effects)
 
-    component::visit_indexing_with(ctx, &base, &node.index_if_indexing, &node.location)
+    let index_backtrace = get_expr_backtrace(ctx, &node.index_if_indexing);
+    // ^^ note that we would rather visit the index before the base in case they
+    // have side-effects, but it is simply not possible to do that here since we
+    // can only really disambiguate after visiting the base, and trying to visit
+    // the index as an expression is unsound if we later decide to treat this as
+    // a type instantiation, meaning here is the earliest point at which one can
+    // actually visit the index. HOWEVER, this is actually not so bad, since the
+    // Go spec does not prescribe an order of evaluation for base / index at all
+
+    let index_const = SimpleConstValue::try_resolve_from_expr(&node.index_if_indexing);
+
+    component::visit_indexing_with(
+        ctx,
+        &base,
+        index_backtrace,
+        index_const.as_ref(),
+        &node.location,
+    )
 }

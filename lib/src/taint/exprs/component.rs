@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use parser::{
     Location,
-    ast::{ExprNode, IndexingNode, SelectionNode, SlicingNode},
+    ast::{IndexingNode, SelectionNode, SlicingNode},
 };
 
 use crate::{
@@ -297,15 +297,28 @@ fn nest_field_backtraces<'a>(
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
+    // index needs to be visited before base, in case it has side-effects
+
+    let index_backtrace = super::get_expr_backtrace(ctx, &node.index);
+
     let base = super::visit_single_expr(ctx, &node.base);
 
-    visit_indexing_with(ctx, &base, &node.index, &node.location)
+    let index_const = SimpleConstValue::try_resolve_from_expr(&node.index);
+
+    visit_indexing_with(
+        ctx,
+        &base,
+        index_backtrace,
+        index_const.as_ref(),
+        &node.location,
+    )
 }
 
 pub fn visit_indexing_with<'a>(
     ctx: &mut AnalysisContext<'a>,
     base: &ValueRef<'a>,
-    index: &ExprNode<'a>,
+    index_backtrace: Option<LabelBacktrace<'a>>,
+    index_const: Option<&SimpleConstValue>,
     location: &Location,
 ) -> ValueRef<'a> {
     let pinned = ctx.pin(location.clone());
@@ -318,9 +331,17 @@ pub fn visit_indexing_with<'a>(
         return ValueRef::new_bottom(pinned, None);
     };
 
-    let index = SimpleConstValue::try_resolve_from_expr(index);
+    let result = composite.get_at_key(index_const, pinned.clone());
 
-    let result = composite.get_at_key(index.as_ref(), pinned.clone());
+    let result = match index_backtrace {
+        Some(index_backtrace) => result.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            pinned.clone(),
+            [index_backtrace],
+        ),
+        None => result,
+    };
 
     if base.is_map() {
         // indexing a map returns a second value corresponding to whether the
