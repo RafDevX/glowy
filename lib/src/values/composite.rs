@@ -177,62 +177,6 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
             known_len: self.known_len,
         }
     }
-
-    // for precision; avoid flattening all values into one backtrace
-    pub fn realize_with_shape_preservation(
-        &self,
-        func: &FunctionRef<'a>,
-        slot: SyntheticSlot,
-        concrete: &Self,
-    ) -> Self {
-        let mut r#const = concrete.r#const.clone();
-
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "Each key is realized independently; order is irrelevant"
-        )]
-        for (key, template_value) in &self.r#const {
-            let concrete_value = concrete.get_const(key, template_value.location().clone());
-
-            #[rustfmt::skip]
-            let realized = template_value.realize_with_shape_preservation(
-                func,
-                slot,
-                &concrete_value,
-            );
-
-            r#const.insert(key.clone(), realized);
-        }
-
-        let r#dyn = self.r#dyn.realize(func, slot, concrete.r#dyn.as_ref());
-
-        let mut dyn_overrides = self.dyn_overrides.clone();
-
-        if self
-            .r#dyn
-            .as_ref()
-            .map(LabelBacktrace::label)
-            .is_some_and(|label| label.is_synthetic_representation(func, slot))
-        {
-            // if our synthetic is the sole dynamic tag, no mutation occurred
-            // since copy_shape, so overrides can be retained
-            dyn_overrides.extend(concrete.dyn_overrides.iter().cloned());
-        }
-
-        let known_len = if self.known_len == concrete.known_len {
-            self.known_len
-        } else {
-            // be conservative; it would be unsound to pick either len
-            None
-        };
-
-        Self {
-            r#const,
-            r#dyn,
-            dyn_overrides,
-            known_len,
-        }
-    }
 }
 
 // slice-shaped (u64-keyed) specific operations. these mirror `append(s, x)`
@@ -393,6 +337,77 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             r#dyn,
             dyn_overrides: self.dyn_overrides.clone(),
             known_len: self.known_len,
+        }
+    }
+
+    // for precision; avoid flattening all components into one backtrace
+    fn realize_with_shape_preservation(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_slot: SyntheticSlot,
+        concrete: &Self,
+        concrete_location: Pinned<'a, Location>,
+    ) -> Self {
+        let contains_slot = self
+            .backtrace_at_location(concrete_location)
+            .as_ref()
+            .map(LabelBacktrace::label)
+            .is_some_and(|label| label.contains_synthetic_representation(from_func, from_slot));
+
+        if !contains_slot {
+            // slot doesn't exist, so concrete doesn't matter
+            return self.realize(from_func, from_slot, None);
+        }
+
+        let mut r#const = concrete.r#const.clone();
+
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "Each key is realized independently; order is irrelevant"
+        )]
+        for (key, template_value) in &self.r#const {
+            let concrete_value = concrete.get_const(key, template_value.location().clone());
+
+            #[rustfmt::skip]
+            let realized = template_value.realize_with_shape_preservation(
+                from_func,
+                from_slot,
+                &concrete_value,
+                concrete_value.location().clone(),
+            );
+
+            r#const.insert(key.clone(), realized);
+        }
+
+        let r#dyn = self
+            .r#dyn
+            .realize(from_func, from_slot, concrete.r#dyn.as_ref());
+
+        let mut dyn_overrides = self.dyn_overrides.clone();
+
+        if self
+            .r#dyn
+            .as_ref()
+            .map(LabelBacktrace::label)
+            .is_some_and(|label| label.is_synthetic_representation(from_func, from_slot))
+        {
+            // if our synthetic is the sole dynamic tag, no mutation occurred
+            // since copy_shape, so overrides can be retained
+            dyn_overrides.extend(concrete.dyn_overrides.iter().cloned());
+        }
+
+        let known_len = if self.known_len == concrete.known_len {
+            self.known_len
+        } else {
+            // be conservative; it would be unsound to pick either len
+            None
+        };
+
+        Self {
+            r#const,
+            r#dyn,
+            dyn_overrides,
+            known_len,
         }
     }
 

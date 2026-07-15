@@ -185,46 +185,6 @@ impl<'a> ValueRef<'a> {
         Self::new(inner, self.location.clone(), self.declared_type.clone())
     }
 
-    pub fn realize_with_shape_preservation(
-        &self,
-        func: &FunctionRef<'a>,
-        slot: SyntheticSlot,
-        concrete: &Self,
-    ) -> Self {
-        let concrete_backtrace = concrete.backtrace();
-
-        let contains_slot = self.backtrace().is_some_and(|backtrace| {
-            backtrace
-                .label()
-                .contains_synthetic_representation(func, slot)
-        });
-
-        if !contains_slot {
-            return self.realize(func, slot, concrete_backtrace.as_ref());
-        }
-
-        let borrowed = self.value.borrow();
-        let concrete_borrowed = concrete.value.borrow();
-
-        let realized = match (&*borrowed, &*concrete_borrowed) {
-            (Value::Array(template), Value::Array(concrete_array)) => {
-                Value::Array(template.realize_with_shape_preservation(func, slot, concrete_array))
-            }
-            (Value::Slice(template), Value::Slice(concrete_slice)) => {
-                Value::Slice(template.realize_with_shape_preservation(func, slot, concrete_slice))
-            }
-            (Value::Map(template), Value::Map(concrete_map)) => {
-                Value::Map(template.realize_with_shape_preservation(func, slot, concrete_map))
-            }
-            (Value::Struct(template), Value::Struct(concrete_struct)) => {
-                Value::Struct(template.realize_with_shape_preservation(func, slot, concrete_struct))
-            }
-            _ => borrowed.realize(func, slot, concrete_backtrace.as_ref()),
-        };
-
-        Self::new(realized, self.location.clone(), self.declared_type.clone())
-    }
-
     pub fn try_upgrade_to_channel(&self) {
         self.try_upgrade_to(Value::Channel);
     }
@@ -610,13 +570,32 @@ impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
 
 // can't be part of BacktraceContainer because returning Self is sadly not
 // dyn-compatible (nor is `param: impl Trait`)
-pub trait SelfAwareBacktraceContainer<'a> {
+pub trait SelfAwareBacktraceContainer<'a>: BacktraceContainer<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
         from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self;
+
+    fn realize_with_shape_preservation(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_slot: SyntheticSlot,
+        concrete: &Self,
+        concrete_location: Pinned<'a, Location>,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        // if this default implementation has been selected (the impl did not
+        // provide another implementation), then it is not possible to preserve
+        // shape, so we just fall back to normal realization instead
+
+        let concrete = concrete.backtrace_at_location(concrete_location);
+
+        self.realize(from_func, from_slot, concrete.as_ref())
+    }
 
     fn nest_backtrace(
         &self,
@@ -639,6 +618,30 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         let borrowed = self.value.borrow();
 
         let realized = borrowed.realize(from_func, from_slot, concrete);
+
+        Self::new(
+            realized,
+            self.location.clone(),
+            self.declared_type.clone(), // cheap
+        )
+    }
+
+    fn realize_with_shape_preservation(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_slot: SyntheticSlot,
+        concrete: &Self,
+        concrete_location: Pinned<'a, Location>,
+    ) -> Self {
+        let borrowed = self.value.borrow();
+        let concrete_borrowed = concrete.value.borrow();
+
+        let realized = borrowed.realize_with_shape_preservation(
+            from_func,
+            from_slot,
+            &concrete_borrowed,
+            concrete_location,
+        );
 
         Self::new(
             realized,

@@ -235,6 +235,7 @@ fn apply_capture_mutations_with<'a>(
                     func.r#ref(),
                     SyntheticSlot::Capture(*index),
                     &outer_value,
+                    outer_value.location().clone(),
                 )
             } else {
                 realized.realize(

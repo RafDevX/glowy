@@ -134,6 +134,61 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
         }
     }
 
+    fn realize_with_shape_preservation(
+        &self,
+        from_func: &FunctionRef<'a>,
+        from_slot: SyntheticSlot,
+        concrete: &Self,
+        concrete_location: Pinned<'a, Location>,
+    ) -> Self {
+        macro_rules! recurs {
+            ($template:expr, $concrete:expr) => {
+                $template.realize_with_shape_preservation(
+                    from_func,
+                    from_slot,
+                    $concrete,
+                    concrete_location,
+                )
+            };
+        }
+
+        match (self, concrete) {
+            (Self::Simple(template), Self::Simple(concrete)) => {
+                Value::Simple(recurs!(template, concrete))
+            }
+            (Self::Expandable(template), Self::Expandable(concrete)) => {
+                Value::Expandable(recurs!(template, concrete))
+            }
+            (Self::Mobius(template), Self::Mobius(concrete)) => {
+                Value::Mobius(recurs!(template, concrete))
+            }
+            (Self::PackageRef(template), Self::PackageRef(concrete)) => {
+                Value::PackageRef(recurs!(template, concrete))
+            }
+            (Self::Channel(template), Self::Channel(concrete)) => {
+                Value::Channel(recurs!(template, concrete))
+            }
+            (Self::Array(template), Self::Array(concrete)) => {
+                Value::Array(recurs!(template, concrete))
+            }
+            (Self::Slice(template), Self::Slice(concrete)) => {
+                Value::Slice(recurs!(template, concrete))
+            }
+            (Self::Map(template), Self::Map(concrete)) => Value::Map(recurs!(template, concrete)),
+            (Self::Struct(template), Self::Struct(concrete)) => {
+                Value::Struct(recurs!(template, concrete))
+            }
+            (Self::Function(template), Self::Function(concrete)) => {
+                Value::Function(Box::new(recurs!(template, concrete)))
+            }
+            _ => {
+                let concrete = concrete.backtrace_at_location(concrete_location);
+
+                self.realize(from_func, from_slot, concrete.as_ref())
+            }
+        }
+    }
+
     fn nest_backtrace(
         &self,
         parent_kind: LabelBacktraceKind,
