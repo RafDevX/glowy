@@ -6,13 +6,51 @@ use std::{
 
 use colored::Colorize;
 
-use crate::{diagnostics, errors, fatal, presentation};
+use crate::{CliConfig, diagnostics, errors, fatal, presentation};
 
-pub fn analyze_single<P: AsRef<Path>>(
-    path: P,
+pub struct Config {
+    directory: PathBuf,
+    mode: Mode,
     strict: bool,
     time_analysis: bool,
-) -> (usize, usize) {
+}
+
+impl From<CliConfig> for Config {
+    fn from(cli: CliConfig) -> Self {
+        let mode = if cli.multi_suites {
+            Mode::MultiSuites
+        } else if cli.suite {
+            Mode::Suite
+        } else {
+            Mode::Single
+        };
+
+        Self {
+            directory: cli
+                .directory
+                .expect("clap requires a directory when no subcommand is provided"),
+            mode,
+            strict: cli.strict,
+            time_analysis: cli.time_analysis,
+        }
+    }
+}
+
+enum Mode {
+    Single,
+    Suite,
+    MultiSuites,
+}
+
+pub fn analyze(config: &Config) -> (usize, usize) {
+    match config.mode {
+        Mode::Single => analyze_single(&config.directory, config),
+        Mode::Suite => analyze_suite(config),
+        Mode::MultiSuites => analyze_multi_suites(config),
+    }
+}
+
+fn analyze_single<P: AsRef<Path>>(path: P, config: &Config) -> (usize, usize) {
     let analyzer = glowy::Analyzer::from_directory(path).unwrap_or_else(|err| match err {
         glowy::AnalyzerFromDirectoryError::FileSystem(error) => fatal(
             "IO error occurred when reading the specified directory.",
@@ -40,7 +78,7 @@ pub fn analyze_single<P: AsRef<Path>>(
 
     let result = analyzer.analyze();
 
-    if time_analysis {
+    if config.time_analysis {
         let elapsed = start.elapsed();
 
         println!(
@@ -65,7 +103,7 @@ pub fn analyze_single<P: AsRef<Path>>(
 
             for error in errors {
                 let category = error.kind.category();
-                let level = errors::error_category_to_level(category, strict);
+                let level = errors::error_category_to_level(category, config.strict);
 
                 if level == annotate_snippets::Level::ERROR {
                     error_count += 1;
@@ -73,7 +111,7 @@ pub fn analyze_single<P: AsRef<Path>>(
                     warning_count += 1;
                 }
 
-                let group = diagnostics::error_to_group(&error, &analyzer, strict);
+                let group = diagnostics::error_to_group(&error, &analyzer, config.strict);
                 let report = &[group];
 
                 anstream::eprintln!("{}", renderer.render(report));
@@ -84,7 +122,7 @@ pub fn analyze_single<P: AsRef<Path>>(
     }
 }
 
-fn analyze_multi(mut modules: Vec<PathBuf>, strict: bool, time_analysis: bool) -> (usize, usize) {
+fn analyze_multi(mut modules: Vec<PathBuf>, config: &Config) -> (usize, usize) {
     if modules.is_empty() {
         fatal(
             "No directories found in the specified modules directory.",
@@ -112,7 +150,7 @@ fn analyze_multi(mut modules: Vec<PathBuf>, strict: bool, time_analysis: bool) -
 
         results.push((
             module.to_string_lossy().into_owned(),
-            analyze_single(module, strict, time_analysis),
+            analyze_single(module, config),
         ));
 
         println!("\n");
@@ -120,7 +158,7 @@ fn analyze_multi(mut modules: Vec<PathBuf>, strict: bool, time_analysis: bool) -
 
     println!("{}", presentation::build_header("SUMMARY".cyan()));
 
-    if time_analysis {
+    if config.time_analysis {
         let elapsed = start.elapsed();
 
         println!(
@@ -200,26 +238,22 @@ fn analyze_multi(mut modules: Vec<PathBuf>, strict: bool, time_analysis: bool) -
     aggregate
 }
 
-pub fn analyze_suite<P: AsRef<Path>>(path: P, strict: bool, time_analysis: bool) -> (usize, usize) {
-    let modules = list_dirs_in_dir(path).collect();
+fn analyze_suite(config: &Config) -> (usize, usize) {
+    let modules = list_dirs_in_dir(&config.directory).collect();
 
-    analyze_multi(modules, strict, time_analysis)
+    analyze_multi(modules, config)
 }
 
-pub fn analyze_multi_suites<P: AsRef<Path>>(
-    path: P,
-    strict: bool,
-    time_analysis: bool,
-) -> (usize, usize) {
+fn analyze_multi_suites(config: &Config) -> (usize, usize) {
     let mut modules = vec![];
 
-    for suite in list_dirs_in_dir(path) {
+    for suite in list_dirs_in_dir(&config.directory) {
         let suite_modules = list_dirs_in_dir(suite);
 
         modules.extend(suite_modules);
     }
 
-    analyze_multi(modules, strict, time_analysis)
+    analyze_multi(modules, config)
 }
 
 fn list_dirs_in_dir<P: AsRef<Path>>(path: P) -> impl Iterator<Item = PathBuf> {

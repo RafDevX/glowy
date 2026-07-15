@@ -14,29 +14,21 @@ const DOCS_ROOT_URL: &str = "https://glowy.rso.pt/glowy";
 const DOCS_ROOT_URL: &str = concat!("file://", env!("CARGO_MANIFEST_DIR"), "/target/doc/glowy",);
 
 fn main() {
-    let config = Config::parse();
+    let cli_config = CliConfig::parse();
 
-    if let Some(Command::BaseSecurityPolicy { eject }) = config.command {
+    if let Some(Command::BaseSecurityPolicy { eject }) = cli_config.command {
         base_security_policy(eject);
 
         return;
     }
 
-    let directory = config
-        .directory
-        .expect("clap requires a directory when no subcommand is provided");
-
     diagnostics::N_CONTEXT_LINES
-        .set(config.context_lines)
+        .set(cli_config.context_lines)
         .unwrap(); // impossible for cell to already be initialized
 
-    let (_warnings, errors) = if config.multi_suites {
-        orchestration::analyze_multi_suites(&directory, config.strict, config.time_analysis)
-    } else if config.suite {
-        orchestration::analyze_suite(&directory, config.strict, config.time_analysis)
-    } else {
-        orchestration::analyze_single(&directory, config.strict, config.time_analysis)
-    };
+    let config = orchestration::Config::from(cli_config);
+
+    let (_warnings, errors) = orchestration::analyze(&config);
 
     if errors > 0 {
         process::exit(2)
@@ -45,7 +37,7 @@ fn main() {
 
 #[derive(clap::Parser)]
 #[command(version, about, subcommand_negates_reqs = true)]
-struct Config {
+struct CliConfig {
     /// Path to a directory containing a Go module, including a `go.mod` file.
     #[arg(required = true)] // positional
     directory: Option<PathBuf>,
