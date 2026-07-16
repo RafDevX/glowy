@@ -429,6 +429,7 @@ impl BlanketSourcePredicateValue {
                 SimpleConstValue::String(actual) => {
                     expected.to_lowercase() == actual.to_lowercase()
                 }
+                SimpleConstValue::Nil => expected.to_lowercase() == "nil",
             },
         }
     }

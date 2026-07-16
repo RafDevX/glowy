@@ -810,6 +810,7 @@ pub enum SimpleConstValue {
     Boolean(bool),
     Integer(u64),
     String(String),
+    Nil,
 }
 
 // basic support for literal-only composition, e.g. `2 + 3` is recognized as 5
@@ -930,7 +931,8 @@ impl fmt::Display for SimpleConstValue {
         match self {
             Self::Boolean(inner) => inner.fmt(f),
             Self::Integer(inner) => inner.fmt(f),
-            Self::String(inner) => inner.fmt(f),
+            Self::String(inner) => write!(f, "\"{inner}\""),
+            Self::Nil => write!(f, "nil"),
         }
     }
 }
