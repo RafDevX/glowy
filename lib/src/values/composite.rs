@@ -25,6 +25,8 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
     // exact keys strongly updated after the current dynamic state was produced
     // (helps to allow better precision and be less conservative when safe)
     dyn_overrides: HashSet<K>,
+    // aggregate key backtrace
+    keys: Option<LabelBacktrace<'a>>,
     // exact length, when statically known. only meaningful for slice-shaped
     // (u64-keyed) composites; conservatively collapsed to None when unknown
     known_len: Option<u64>,
@@ -36,6 +38,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             r#const: HashMap::new(),
             r#dyn,
             dyn_overrides: HashSet::new(),
+            keys: None,
             known_len: None,
         }
     }
@@ -43,8 +46,9 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn new(
         r#const: HashMap<K, ValueRef<'a>>,
         others: impl IntoIterator<Item = ValueRef<'a>>,
-        location: Pinned<'a, Location>,
+        keys: Option<LabelBacktrace<'a>>,
         known_len: Option<u64>,
+        location: Pinned<'a, Location>,
     ) -> Self {
         let children: Vec<_> = others
             .into_iter()
@@ -62,6 +66,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             r#const,
             r#dyn,
             dyn_overrides: HashSet::new(),
+            keys,
             known_len,
         }
     }
@@ -70,6 +75,7 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         self.r#const = HashMap::new();
         self.r#dyn = None;
         self.dyn_overrides.clear();
+        self.keys = None;
         // known_len is preserved since copy/clear doesn't change the underlying
         // slice's size, only its elements are reset to their zero-values
     }
@@ -170,10 +176,13 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
             .map(|(k, v)| (k.clone(), v.copy_shape(backtrace.clone())))
             .collect();
 
+        let keys = self.keys.as_ref().map(|_| backtrace.clone());
+
         Self {
             r#const,
             r#dyn: Some(backtrace),
             dyn_overrides: HashSet::new(),
+            keys,
             known_len: self.known_len,
         }
     }
@@ -278,6 +287,7 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
             .values()
             .filter_map(ValueRef::backtrace)
             .chain(self.r#dyn.clone())
+            .chain(self.keys.clone())
             .collect();
 
         LabelBacktrace::fold(
@@ -289,7 +299,7 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
     }
 
     fn is_bottom(&self) -> bool {
-        if self.r#dyn.is_some() {
+        if self.r#dyn.is_some() || self.keys.is_some() {
             false
         } else {
             self.r#const.iter().all(|(_, v)| v.is_bottom())
@@ -314,6 +324,7 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
         }
 
         self.r#dyn.subtract_label(subtract);
+        self.keys.subtract_label(subtract);
     }
 }
 
@@ -331,11 +342,13 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             .collect();
 
         let r#dyn = self.r#dyn.realize(from_func, from_slot, concrete);
+        let keys = self.keys.realize(from_func, from_slot, concrete);
 
         Self {
             r#const,
             r#dyn,
             dyn_overrides: self.dyn_overrides.clone(),
+            keys,
             known_len: self.known_len,
         }
     }
@@ -385,6 +398,10 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
 
         let mut dyn_overrides = self.dyn_overrides.clone();
 
+        let keys = self
+            .keys
+            .realize(from_func, from_slot, concrete.keys.as_ref());
+
         if self
             .r#dyn
             .as_ref()
@@ -407,6 +424,7 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             r#const,
             r#dyn,
             dyn_overrides,
+            keys,
             known_len,
         }
     }
@@ -426,8 +444,8 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
         let r#dyn = self.r#dyn.nest_backtrace(
             parent_kind,
             parent_symbol,
-            parent_location,
-            extra_children
+            parent_location.clone(),
+            extra_children.clone()
         );
 
         let dyn_overrides = if has_extra_children {
@@ -436,10 +454,19 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
             self.dyn_overrides.clone()
         };
 
+        #[rustfmt::skip]
+        let keys = self.keys.nest_backtrace(
+            parent_kind,
+            parent_symbol,
+            parent_location,
+            extra_children
+        );
+
         Self {
             r#const,
             r#dyn,
             dyn_overrides,
+            keys,
             known_len: self.known_len,
         }
     }
@@ -483,6 +510,10 @@ impl<'a, K: Eq + Hash + Clone> Mergeable<'a> for CompositeValue<'a, K> {
             .cloned()
             .collect();
 
+        let keys = self
+            .keys
+            .merge_with(&other.keys, with_kind, at_location.clone());
+
         // only retain length when both branches agree
         let known_len = match (self.known_len, other.known_len) {
             (Some(left), Some(right)) if left == right => Some(left),
@@ -493,6 +524,7 @@ impl<'a, K: Eq + Hash + Clone> Mergeable<'a> for CompositeValue<'a, K> {
             r#const,
             r#dyn,
             dyn_overrides,
+            keys,
             known_len,
         }
     }
@@ -512,6 +544,7 @@ impl<'a, K: Eq + Hash> Upgrade<'a> for CompositeValue<'a, K> {
 impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.r#dyn.snapshot_aware_eq(&other.r#dyn)
+            && self.keys.snapshot_aware_eq(&other.keys)
             && self.r#const.len() == other.r#const.len()
             && self.r#const.snapshot_aware_eq(&other.r#const)
             && self.dyn_overrides == other.dyn_overrides
@@ -559,15 +592,33 @@ pub trait CompositeValueAdapter<'a>: BacktraceContainer<'a> {
     fn set_at_key(
         &mut self,
         key: Option<SimpleConstValue>,
-        value: ValueRef<'a>,
+        mut value: ValueRef<'a>,
+        key_backtrace: Option<LabelBacktrace<'a>>,
         at_location: Pinned<'a, Location>,
     ) {
-        if let Some(key) = key {
-            self.set_at_known_key(key, value, at_location);
-        } else {
-            self.set_at_unknown_key(&value, at_location);
+        if key.is_none() {
+            value = value.nest_backtrace(
+                LabelBacktraceKind::Assignment,
+                None,
+                at_location.clone(),
+                key_backtrace.clone(),
+            );
         }
+
+        if let Some(key) = key {
+            self.set_at_known_key(key, value, at_location.clone());
+        } else {
+            self.set_at_unknown_key(&value, at_location.clone());
+        }
+
+        self.record_key_backtrace(key_backtrace, at_location);
     }
+
+    fn record_key_backtrace(
+        &mut self,
+        backtrace: Option<LabelBacktrace<'a>>,
+        at_location: Pinned<'a, Location>,
+    );
 
     fn length_backtrace_at_location(
         &self,
@@ -600,6 +651,19 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, SimpleConstValue> {
 
     fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.set_dyn(value, at_location);
+    }
+
+    fn record_key_backtrace(
+        &mut self,
+        backtrace: Option<LabelBacktrace<'a>>,
+        at_location: Pinned<'a, Location>,
+    ) {
+        self.keys = LabelBacktrace::combine_options(
+            self.keys.clone(),
+            backtrace,
+            LabelBacktraceKind::Assignment,
+            Cow::Owned(at_location),
+        );
     }
 
     fn length_backtrace_at_location(
@@ -643,6 +707,23 @@ impl<'a> CompositeValueAdapter<'a> for CompositeValue<'a, u64> {
 
     fn set_at_unknown_key(&mut self, value: &ValueRef<'a>, at_location: Pinned<'a, Location>) {
         self.set_dyn(value, at_location);
+    }
+
+    fn record_key_backtrace(
+        &mut self,
+        backtrace: Option<LabelBacktrace<'a>>,
+        at_location: Pinned<'a, Location>,
+    ) {
+        if backtrace.is_some() {
+            self.dyn_overrides.clear();
+        }
+
+        self.r#dyn = LabelBacktrace::combine_options(
+            self.r#dyn.clone(),
+            backtrace,
+            LabelBacktraceKind::Assignment,
+            Cow::Owned(at_location),
+        );
     }
 
     fn length_backtrace_at_location(

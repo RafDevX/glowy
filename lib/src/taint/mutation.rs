@@ -475,7 +475,8 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         assignment_location: &Location,
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
-        exprs::visit_single_expr(ctx, &self.index); // trigger side effects
+        // evaluate index before base to trigger side-effects in order
+        let (index_backtrace, index_const) = exprs::get_expr_backtrace_and_const(ctx, &self.index);
 
         #[expect(
             clippy::shadow_unrelated,
@@ -491,16 +492,22 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                     return None;
                 };
 
-                let index = SimpleConstValue::try_resolve_from_expr(&self.index);
+                let child = composite.get_at_key(
+                    index_const.as_ref(), // use const key if available
+                    ctx.pin(self.location.clone()),
+                );
 
-                let child = composite.get_at_key(index.as_ref(), ctx.pin(self.location.clone()));
+                let (child, _) = mutator(ctx, child)?;
 
-                let child = mutator(ctx, child)?;
-
-                composite.set_at_key(index, child, ctx.pin(assignment_location.clone()));
+                composite.set_at_key(
+                    index_const.clone(), // use const key if available
+                    child,
+                    index_backtrace.clone(),
+                    ctx.pin(assignment_location.clone()),
+                );
 
                 drop(composite);
-                Some(target)
+                Some((target, None))
             });
     }
 }

@@ -14,7 +14,10 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{funcs, types},
-    values::{BacktraceContainer, CompositeValue, SimpleConstValue, Value, ValueRef},
+    values::{
+        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
+        ValueRef,
+    },
 };
 
 pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) -> ValueRef<'a> {
@@ -228,7 +231,7 @@ fn visit_integer_keyed_composite_literal<'a>(
 
     let known_len = known_length.then_some(next_default_key);
 
-    CompositeValue::new(map, others, location, known_len)
+    CompositeValue::new(map, others, None, known_len, location)
 }
 
 fn visit_map_composite_literal<'a>(
@@ -238,30 +241,49 @@ fn visit_map_composite_literal<'a>(
 ) -> CompositeValue<'a, SimpleConstValue> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
+    let mut key_backtraces = Vec::new();
 
     for (opt_key, el) in values {
-        let value = visit_array_literal_element(ctx, el, &location);
+        // key must be visited before its associated element, and kept even if
+        // the element is later pruned via is_prunable (still exposed by range)
+        let (key_backtrace, const_key) = opt_key.as_ref().map_or((None, None), |key| {
+            super::get_expr_backtrace_and_const(ctx, key)
+        });
+
+        let mut value = visit_array_literal_element(ctx, el, &location);
+
+        if const_key.is_none()
+            && let Some(key_backtrace) = &key_backtrace
+        {
+            value = value.nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                key_backtrace.location().clone(),
+                [key_backtrace.clone()],
+            );
+        }
+
+        key_backtraces.extend(key_backtrace);
 
         if is_prunable(&value) {
             continue;
         }
 
-        let const_key = opt_key
-            .as_ref()
-            .and_then(SimpleConstValue::try_resolve_from_expr);
-
         if let Some(const_key) = const_key {
             map.insert(const_key, value);
         } else {
-            if let Some(dyn_key) = opt_key {
-                others.push(super::visit_single_expr(ctx, dyn_key));
-            }
-
             others.push(value);
         }
     }
 
-    CompositeValue::new(map, others, location, None)
+    let keys = LabelBacktrace::fold(
+        &key_backtraces,
+        LabelBacktraceKind::Expression,
+        None,
+        location.clone(),
+    );
+
+    CompositeValue::new(map, others, keys, None, location)
 }
 
 fn visit_struct_composite_literal<'a>(
@@ -358,7 +380,7 @@ fn visit_struct_composite_literal<'a>(
         }
     }
 
-    CompositeValue::new(map, others, location, None)
+    CompositeValue::new(map, others, None, None, location)
 }
 
 fn visit_array_literal_element<'a>(

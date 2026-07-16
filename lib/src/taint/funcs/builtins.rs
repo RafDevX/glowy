@@ -73,8 +73,9 @@ pub fn visit_make<'a>(
             let composite = CompositeValue::new(
                 HashMap::new(),
                 n.into_iter().chain(m),
-                location.clone(),
+                None,
                 known_len,
+                location.clone(),
             );
 
             ValueRef::new(Value::Slice(composite), location, declared_type)
@@ -472,9 +473,20 @@ pub fn visit_delete<'a>(
 
             let location = ctx.pin(node.location.clone());
 
+            // cloning key and key_backtrace is necessary because this closure
+            // is an Fn, meaning it could technically execute multiple times
+            // (even if it actually does not) -- it cannot be changed to an
+            // FnOnce because then it would have to be invoked with ownership,
+            // meaning passing a reference to the closure would not be enough,
+            // and so instead of the signature being `&dyn Fn` it would have to
+            // be `impl FnOnce`, but that would make the LeftValue trait not
+            // dyn-compatible, which is not what we want; we also can't just use
+            // a `Box<dyn FnOnce>`, since then that would require the 'a in
+            // `LeftValue<'a>` to live for 'static, which is not possible
             composite.set_at_key(
-                SimpleConstValue::try_resolve_from_expr(key),
+                key_const.clone(),
                 ValueRef::new_bottom(location.clone(), None),
+                key_backtrace.clone(),
                 location,
             );
 
