@@ -87,11 +87,16 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
     pub fn len_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         if self.known_len.is_some() {
             // if the length is statically known, values stored at constant keys
-            // do not affect it, but the dynamic backtrace still applies, as it
-            // carries aggregate information introduced by control flow and
-            // assignments that could have had an influence on the length
+            // do not affect it, but dynamic and key backtraces still apply, as
+            // they carry aggregate information introduced by control flow and
+            // by keyed literals whose greatest index determines the length
 
-            self.r#dyn.backtrace_at_location(location)
+            LabelBacktrace::combine_options(
+                self.r#dyn.clone(),
+                self.keys.clone(),
+                LabelBacktraceKind::Expression,
+                Cow::Owned(location),
+            )
         } else {
             // if the exact length is unknown, we have to be conservative
 

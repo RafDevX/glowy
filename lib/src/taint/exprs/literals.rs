@@ -187,51 +187,79 @@ fn visit_integer_keyed_composite_literal<'a>(
 ) -> CompositeValue<'a, u64> {
     let mut map = HashMap::new();
     let mut others = Vec::new();
+    let mut key_backtraces = Vec::new();
 
     // valid Go array/slice composite literals require constant keys, so
-    // in the well-formed case every position is known and the final length is
-    // `next_default_key`. we only forfeit that hint if we hit the defensive
-    // "non-const key" branch below, where the true length becomes ambiguous
-    let mut known_length = true;
+    // in the well-formed case every position is known. the length is one more
+    // than the greatest index, which is not necessarily `next_default_key`
+    // because explicit indices may move backwards. we only forfeit that hint
+    // if an index cannot be resolved or incremented
+    let mut has_known_length = true;
 
-    let mut next_default_key = 0;
+    let mut next_default_key = Some(0);
+    let mut greatest_key = None;
+
     for (opt_key, el) in values {
-        let value = visit_array_literal_element(ctx, el, &location);
+        let (key_backtrace, key) = if let Some(expr) = opt_key {
+            let (backtrace, r#const) = super::get_expr_backtrace_and_const(ctx, expr);
 
-        if is_prunable(&value) {
-            next_default_key += 1;
+            let key = match r#const {
+                Some(SimpleConstValue::Integer(int)) => Some(int),
+                _ => None,
+            };
 
-            continue;
-        }
-
-        let key = if let Some(expr) = opt_key {
-            if let Some(SimpleConstValue::Integer(int)) = super::try_resolve_simple_const(ctx, expr)
-            {
-                Some(int)
-            } else {
-                // should not happen for arrays/slices, but you never know
-                // (more complex const expressions won't be resolved)
-                None
-            }
+            (backtrace, key)
         } else {
-            Some(next_default_key)
+            (None, next_default_key)
         };
 
+        let mut value = visit_array_literal_element(ctx, el, &location);
+
+        if key.is_none()
+            && let Some(key_backtrace) = &key_backtrace
+        {
+            value = value.nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                key_backtrace.location().clone(),
+                [key_backtrace.clone()],
+            );
+        }
+
+        key_backtraces.extend(key_backtrace);
+
         if let Some(key) = key {
-            next_default_key = key + 1;
+            greatest_key = Some(greatest_key.map_or(key, |greatest: u64| greatest.max(key)));
+            next_default_key = key.checked_add(1);
 
-            map.insert(key, value);
+            if next_default_key.is_none() {
+                // should never happen for well-formed input
+                has_known_length = false;
+            }
+
+            if !is_prunable(&value) {
+                map.insert(key, value);
+            }
         } else {
-            next_default_key += 1; // no proper answer on what to do here...
+            next_default_key = None;
+            has_known_length = false;
 
-            known_length = false;
-            others.push(value);
+            if !is_prunable(&value) {
+                others.push(value);
+            }
         }
     }
 
-    let known_len = known_length.then_some(next_default_key);
+    let known_len = has_known_length.then(|| greatest_key.map_or(0, |key| key + 1));
 
-    CompositeValue::new(map, others, None, known_len, location)
+    let keys = LabelBacktrace::fold(
+        &key_backtraces,
+        LabelBacktraceKind::Expression,
+        None,
+        location.clone(),
+    );
+
+    CompositeValue::new(map, others, keys, known_len, location)
 }
 
 fn visit_map_composite_literal<'a>(
