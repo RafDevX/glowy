@@ -12,6 +12,11 @@ args = [
     "${@}",
 ]
 
+[tasks.ifc-benchmarks]
+workspace = false
+command = "cargo"
+args = ["run", "--", "--summary-only", "--multi-suites", "./ifc-benchmarks"]
+
 [tasks.flamegraph]
 workspace = false
 env = { RUSTFLAGS = "-C force-frame-pointers=yes -C force-unwind-tables=yes" }

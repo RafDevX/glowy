@@ -1,0 +1,5 @@
+[sources]
+"conditional-source.text#0=secret" = ["exact"]
+"conditional-source.text#0~=token" = ["fuzzy"]
+"conditional-source.number#0=5" = ["integer"]
+"conditional-source.boolean#0=true" = ["boolean"]

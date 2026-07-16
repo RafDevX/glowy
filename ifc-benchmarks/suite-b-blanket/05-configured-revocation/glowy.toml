@@ -1,0 +1,2 @@
+[revocations]
+"configured-revocation.redact" = ["secret"]

@@ -1,0 +1,3 @@
+[sources]
+"value-source.Global" = ["global"]
+"value-source.Box.Value" = ["field"]

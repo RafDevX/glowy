@@ -1,0 +1,4 @@
+[revocations]
+"builtin.len" = ["length"]
+"builtin.len#0=secret" = ["conditional"]
+"builtin.make" = ["allocation"]
