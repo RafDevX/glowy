@@ -20,6 +20,8 @@ use crate::{
     },
 };
 
+type MutationResult<'a> = Option<(ValueRef<'a>, Option<SimpleConstValue>)>;
+
 pub trait LeftValue<'a> {
     #[expect(clippy::too_many_arguments, reason = "No obvious arg aggregation")]
     fn assign(
@@ -27,6 +29,7 @@ pub trait LeftValue<'a> {
         ctx: &mut AnalysisContext<'a>,
         backtrace_kind: LabelBacktraceKind, // usually Assignment, unless...
         rhs: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
         // from revocation annotation
@@ -41,7 +44,7 @@ pub trait LeftValue<'a> {
         &self,
         ctx: &mut AnalysisContext<'a>,
         assignment_location: &Location,
-        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     );
 
     // high-level helper to use in alternative to `assign` when it is necessary
@@ -62,11 +65,14 @@ pub trait LeftValue<'a> {
             let new_value = transformer(ctx, target)?;
             let pinned = ctx.pin(location.clone());
 
-            Some(new_value.nest_backtrace(
-                backtrace_kind,
+            Some((
+                new_value.nest_backtrace(
+                    backtrace_kind,
+                    None,
+                    pinned,
+                    ctx.branch_backtrace().cloned(),
+                ),
                 None,
-                pinned,
-                ctx.branch_backtrace().cloned(),
             ))
         });
     }
@@ -170,6 +176,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         ctx: &mut AnalysisContext<'a>,
         backtrace_kind: LabelBacktraceKind,
         rhs: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         subtract: &Label<'a>,
@@ -184,6 +191,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
             ctx,
             backtrace_kind,
             rhs,
+            known_const,
             simple,
             explicit_backtrace,
             subtract,
@@ -199,7 +207,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         &self,
         ctx: &mut AnalysisContext<'a>,
         assignment_location: &Location,
-        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
         let Some(inner) = as_valid_left_value(self, Some(ctx)) else {
             // error already reported
@@ -217,6 +225,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
         ctx: &mut AnalysisContext<'a>,
         backtrace_kind: LabelBacktraceKind,
         rhs: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         subtract: &Label<'a>,
@@ -315,7 +324,13 @@ impl<'a> LeftValue<'a> for Span<'a> {
                 }
             }
 
-            Some(mutated)
+            let known_const = if should_override {
+                known_const.clone()
+            } else {
+                None
+            };
+
+            Some((mutated, known_const))
         });
     }
 
@@ -327,7 +342,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
         &self,
         ctx: &mut AnalysisContext<'a>,
         assignment_location: &Location,
-        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
         let Some(symbol) = exprs::resolve_operand_name(ctx, *self, None) else {
             // no symbol found, but error already reported
@@ -343,7 +358,7 @@ fn mutate_through_symbol<'a>(
     symbol: &SymbolRef<'a>,
     name: Span<'a>,
     assignment_location: &Location,
-    mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+    mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
 ) {
     if !symbol.borrow().mutable() {
         ctx.report_error(AnalysisErrorKind::ImmutableLeftValue { symbol: name });
@@ -355,7 +370,7 @@ fn mutate_through_symbol<'a>(
     // restrictions (cannot directly mutate a Symbol's value)
     let value = symbol.borrow().value().get().clone_inner();
 
-    let Some(mutated) = mutator(ctx, value) else {
+    let Some((mutated, known_const)) = mutator(ctx, value) else {
         return;
     };
 
@@ -366,7 +381,7 @@ fn mutate_through_symbol<'a>(
         &ctx.pin(assignment_location.clone()),
     );
 
-    symbol.borrow_mut().set_value(mutated);
+    symbol.borrow_mut().set_value(mutated, known_const);
 }
 
 pub fn record_active_function_capture_mutation<'a>(
@@ -406,6 +421,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         ctx: &mut AnalysisContext<'a>,
         backtrace_kind: LabelBacktraceKind,
         rhs: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         subtract: &Label<'a>,
@@ -416,6 +432,8 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
             reason = "Same context, just threaded through closures"
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
+            let should_override = self.should_override(ctx, simple);
+
             let new_value = rhs.nest_backtrace(
                 backtrace_kind,
                 None,
@@ -429,7 +447,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
             let mut mutated = merge_assigned_target_value(
                 &target,
                 &new_value,
-                self.should_override(ctx, simple),
+                should_override,
                 backtrace_kind,
                 &ctx.pin(location.clone()),
             );
@@ -437,7 +455,13 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
             // apply revocation
             mutated.subtract_label(subtract);
 
-            Some(mutated)
+            let known_const = if should_override {
+                known_const.clone()
+            } else {
+                None
+            };
+
+            Some((mutated, known_const))
         });
     }
 
@@ -449,7 +473,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         &self,
         ctx: &mut AnalysisContext<'a>,
         assignment_location: &Location,
-        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
         exprs::visit_single_expr(ctx, &self.index); // trigger side effects
 
@@ -490,6 +514,7 @@ impl<'a> LeftValue<'a> for AmbiguousBracketAccessNode<'a> {
         ctx: &mut AnalysisContext<'a>,
         backtrace_kind: LabelBacktraceKind,
         rhs: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         subtract: &Label<'a>,
@@ -501,6 +526,7 @@ impl<'a> LeftValue<'a> for AmbiguousBracketAccessNode<'a> {
             ctx,
             backtrace_kind,
             rhs,
+            known_const,
             simple,
             explicit_backtrace,
             subtract,
@@ -518,7 +544,7 @@ impl<'a> LeftValue<'a> for AmbiguousBracketAccessNode<'a> {
         &self,
         ctx: &mut AnalysisContext<'a>,
         assignment_location: &Location,
-        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
         let indexing = IndexingNode::from(self.clone());
 
@@ -532,6 +558,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         ctx: &mut AnalysisContext<'a>,
         backtrace_kind: LabelBacktraceKind,
         rhs: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
         simple: bool,
         explicit_backtrace: Option<&LabelBacktrace<'a>>,
         subtract: &Label<'a>,
@@ -542,6 +569,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
             reason = "Same context, just threaded through closures"
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
+            let should_override = self.should_override(ctx, simple);
             let pinned_location = ctx.pin(location.clone());
 
             let new_value = rhs.nest_backtrace(
@@ -557,7 +585,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
             let mut mutated = merge_assigned_target_value(
                 &target,
                 &new_value,
-                self.should_override(ctx, simple),
+                should_override,
                 backtrace_kind,
                 &pinned_location,
             );
@@ -565,7 +593,13 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
             // apply revocation
             mutated.subtract_label(subtract);
 
-            Some(mutated)
+            let known_const = if should_override {
+                known_const.clone()
+            } else {
+                None
+            };
+
+            Some((mutated, known_const))
         });
     }
 
@@ -577,7 +611,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
         &self,
         ctx: &mut AnalysisContext<'a>,
         assignment_location: &Location,
-        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> Option<ValueRef<'a>>,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
         // while in most cases mutating a selection means changing some field in
         // some struct, technically it is possible that this is actually the
@@ -676,12 +710,12 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                     None => child,
                 };
 
-                let child = mutator(ctx, child)?;
+                let (child, _) = mutator(ctx, child)?;
 
                 r#struct.set_const(selector, child);
 
                 drop(r#struct);
-                Some(target)
+                Some((target, None))
             });
     }
 }

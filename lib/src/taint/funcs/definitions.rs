@@ -66,9 +66,9 @@ pub fn visit_function_def<'a>(
             // the body through the same handle, otherwise e.g. typed dispatch
             // would keep dereferencing the stale Bottom-valued symbol
 
-            existing.borrow_mut().set_value(value.clone());
+            existing.borrow_mut().set_value(value.clone(), None);
         } else {
-            let symbol = Symbol::new_ref(name, false, value.clone());
+            let symbol = Symbol::new_ref(name, false, value.clone(), None);
 
             ctx.declare_function_or_method(receiver, symbol);
         }
@@ -102,7 +102,7 @@ pub fn visit_function_def<'a>(
                 param_value.set_declared_type(r#type);
             }
 
-            ctx.declare_new_symbol(Symbol::new_ref(ctx.pin($id), true, param_value));
+            ctx.declare_new_symbol(Symbol::new_ref(ctx.pin($id), true, param_value, None));
         };
     }
 
@@ -373,7 +373,7 @@ fn bind_named_result_locals<'a>(ctx: &mut AnalysisContext<'a>, result: &Function
             let pinned = ctx.pin(id);
             let value = ValueRef::new_bottom(pinned.pinned_location(), r#type.clone());
 
-            ctx.declare_new_symbol(Symbol::new_ref(pinned, true, value));
+            ctx.declare_new_symbol(Symbol::new_ref(pinned, true, value, None));
         }
     }
 }

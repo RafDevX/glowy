@@ -282,7 +282,7 @@ fn visit_for_range<'a>(
             explicit::visit_raw_binding_decl_spec(
                 ctx,
                 lhs,
-                rhs_values.into_iter(),
+                rhs_values.into_iter().map(|value| (value, None)),
                 true,
                 true,
                 header_location,
@@ -294,7 +294,7 @@ fn visit_for_range<'a>(
                 ctx,
                 AssignmentKind::Simple,
                 lhs.iter(),
-                rhs_values.into_iter(),
+                rhs_values.into_iter().map(|value| (value, None)),
                 None,
                 &Label::Bottom,
                 header_location,
@@ -696,7 +696,7 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
     let value = exprs::visit_single_expr(ctx, &node.expr);
 
     if let Some(id) = node.decl {
-        ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id), true, value.clone()));
+        ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id), true, value.clone(), None));
     }
 
     let expr_location = ctx.pin(node.expr.location().into_owned());

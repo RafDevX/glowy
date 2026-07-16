@@ -54,7 +54,7 @@ use parser::Span;
 use crate::{
     FullPackagePath, Pinned,
     snapshots::{AssumedImmutable, SymbolTableSnapshot, SymbolTableSnapshotItem},
-    values::{FunctionRef, FunctionValue, Value, ValueRef},
+    values::{FunctionRef, FunctionValue, SimpleConstValue, Value, ValueRef},
 };
 
 #[derive(Debug)]
@@ -650,6 +650,7 @@ impl<'a> PackageScopeEnvelope<'a> {
                     name,
                     borrowed.mutable(),
                     borrowed.value().get(),
+                    borrowed.known_const().cloned(),
                 ));
             }
         }
@@ -708,14 +709,18 @@ impl<'a> Scope<'a> {
         let predeclared_location = &*crate::FAKE_LOCATION;
 
         macro_rules! predeclared_constant {
-            ($id:expr, $value:expr) => {
-                scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value))
+            ($id:expr, $value:expr, $known_const:expr) => {
+                scope.set_local_symbol($id, Symbol::new_predeclared_ref($id, $value, $known_const))
             };
-            ($id:expr) => {
+            ($id:expr, $known_const:expr) => {
                 predeclared_constant!(
                     $id,
-                    ValueRef::new_bottom(predeclared_location.clone(), None)
+                    ValueRef::new_bottom(predeclared_location.clone(), None),
+                    $known_const
                 )
+            };
+            ($id:expr) => {
+                predeclared_constant!($id, None);
             };
         }
 
@@ -732,7 +737,8 @@ impl<'a> Scope<'a> {
                         ))),
                         predeclared_location.clone(),
                         None,
-                    )
+                    ),
+                    None
                 )
             };
         }
@@ -759,13 +765,14 @@ impl<'a> Scope<'a> {
                         ))),
                         predeclared_location.clone(),
                         None,
-                    )
+                    ),
+                    None
                 )
             };
         }
 
-        predeclared_constant!("true");
-        predeclared_constant!("false");
+        predeclared_constant!("true", Some(SimpleConstValue::Boolean(true)));
+        predeclared_constant!("false", Some(SimpleConstValue::Boolean(false)));
         predeclared_constant!("iota");
         predeclared_constant!("nil"); // not really a constant, but close enough
 
@@ -836,6 +843,7 @@ impl<'a> Scope<'a> {
                 name,
                 borrowed.mutable(),
                 borrowed.value().get(),
+                borrowed.known_const().cloned(),
             );
 
             items.push(item);
@@ -890,14 +898,22 @@ pub struct Symbol<'a> {
     mutable: bool,
     /// This symbol's current value, including its accumulated security label.
     value: ValueRef<'a>,
+    /// Exact value, when this symbol is known to denote a simple Go constant.
+    known_const: Option<SimpleConstValue>,
 }
 
 impl<'a> Symbol<'a> {
-    fn new(declared_name: Pinned<'a, Span<'a>>, mutable: bool, value: ValueRef<'a>) -> Self {
+    fn new(
+        declared_name: Pinned<'a, Span<'a>>,
+        mutable: bool,
+        value: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
+    ) -> Self {
         Self {
             declared_name,
             mutable,
             value,
+            known_const,
         }
     }
 
@@ -905,16 +921,27 @@ impl<'a> Symbol<'a> {
         declared_name: Pinned<'a, Span<'a>>,
         mutable: bool,
         value: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
     ) -> SymbolRef<'a> {
-        Rc::new(RefCell::new(Self::new(declared_name, mutable, value)))
+        Rc::new(RefCell::new(Self::new(
+            declared_name,
+            mutable,
+            value,
+            known_const,
+        )))
     }
 
-    fn new_predeclared_ref(name: &'a str, value: ValueRef<'a>) -> SymbolRef<'a> {
+    fn new_predeclared_ref(
+        name: &'a str,
+        value: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
+    ) -> SymbolRef<'a> {
         Self::new_ref(
             // vv not very pretty, but it should never matter anyway
             Pinned::new(Path::new("/main.go"), Span::new(name, 0, 1)),
             false,
             value,
+            known_const,
         )
     }
 
@@ -939,7 +966,12 @@ impl<'a> Symbol<'a> {
         AssumedImmutable::new(self.value.clone())
     }
 
-    pub fn set_value(&mut self, value: ValueRef<'a>) {
+    pub fn set_value(&mut self, value: ValueRef<'a>, known_const: Option<SimpleConstValue>) {
         self.value = value;
+        self.known_const = known_const;
+    }
+
+    pub fn known_const(&self) -> Option<&SimpleConstValue> {
+        self.known_const.as_ref()
     }
 }

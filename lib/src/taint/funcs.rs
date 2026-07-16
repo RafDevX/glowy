@@ -14,7 +14,7 @@ use crate::{
     policy,
     taint::exprs,
     types::TypeInfo,
-    values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
+    values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
 pub mod builtins;
@@ -33,6 +33,7 @@ pub enum CallResolution<'a> {
 pub struct ResolvedCall<'a> {
     callee: ValueRef<'a>,
     arg_values: Vec<ValueRef<'a>>,
+    arg_consts: Vec<Option<SimpleConstValue>>,
     blackbox_replacement: Option<Box<FunctionValue<'a>>>,
     method_receiver_value: Option<ValueRef<'a>>,
 }
@@ -159,7 +160,7 @@ fn apply_deferred_calls(ctx: &mut AnalysisContext<'_>) {
 pub fn apply_predeclared_blanket_revocations<'a>(
     ctx: &AnalysisContext<'a>,
     name: &'static str,
-    args: &[ExprNode<'a>],
+    arg_consts: &[Option<SimpleConstValue>],
     result: &mut [ValueRef<'a>],
 ) {
     let directives = ctx.blanket_directives_for(policy::BUILTIN_PACKAGE_PATH, None, name);
@@ -183,7 +184,7 @@ pub fn apply_predeclared_blanket_revocations<'a>(
 
     fake_func.absorb_blanket_directives(directives);
 
-    call_application::apply_call_blanket_revocations(&fake_func, args, result);
+    call_application::apply_call_blanket_revocations(&fake_func, arg_consts, result);
 }
 
 pub fn nest_receiver_backtrace<'a>(

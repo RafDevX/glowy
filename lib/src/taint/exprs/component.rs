@@ -298,12 +298,9 @@ fn nest_field_backtraces<'a>(
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
     // index needs to be visited before base, in case it has side-effects
-
-    let index_backtrace = super::get_expr_backtrace(ctx, &node.index);
+    let (index_backtrace, index_const) = super::get_expr_backtrace_and_const(ctx, &node.index);
 
     let base = super::visit_single_expr(ctx, &node.base);
-
-    let index_const = SimpleConstValue::try_resolve_from_expr(&node.index);
 
     visit_indexing_with(
         ctx,
@@ -376,11 +373,11 @@ pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) 
         let low = node
             .low
             .as_deref()
-            .map(SimpleConstValue::try_resolve_from_expr);
+            .map(|expr| super::try_resolve_simple_const(ctx, expr));
         let high = node
             .high
             .as_deref()
-            .map(SimpleConstValue::try_resolve_from_expr);
+            .map(|expr| super::try_resolve_simple_const(ctx, expr));
 
         // at this point low and high are both Option<Option<SimpleConstValue>>,
         // but we actually need to match on the inner Option (representing

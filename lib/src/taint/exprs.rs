@@ -97,24 +97,39 @@ pub fn visit_single_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>)
     ValueRef::new_bottom(ctx.pin(node.location().into_owned()), None)
 }
 
-pub fn visit_multi_exprs<'a>(
+pub fn visit_multi_exprs_with_consts<'a>(
     ctx: &mut AnalysisContext<'a>,
     nodes: &[ExprNode<'a>],
-) -> Vec<ValueRef<'a>> {
+) -> Vec<(ValueRef<'a>, Option<SimpleConstValue>)> {
     if let [single] = nodes {
         // only one expression, which might end up being:
         // - a function call returning multiple values, e.g. `x, y := f()`; or
         // - just a normal expression, corresponding to a single value, but in that case
         //   visit_expr will wrap it in a vec so we're all good
 
-        visit_expr(ctx, single)
+        let known_const = try_resolve_simple_const(ctx, single);
+        let mut values = visit_expr(ctx, single);
+
+        if values.len() == 1 {
+            vec![(values.pop().unwrap(), known_const)]
+        } else {
+            // known_const is not actually valid since we're returning >1 value
+            values.into_iter().map(|value| (value, None)).collect()
+        }
     } else {
         // single multiple expressions were provided, we know for sure that each
         // of them must yield a single value
 
         nodes
             .iter()
-            .map(|expr| visit_single_expr(ctx, expr))
+            .map(|expr| {
+                // resolve before visiting so each expression observes the
+                // symbol state at its own point in Go's evaluation order
+                let known_const = try_resolve_simple_const(ctx, expr);
+                let value = visit_single_expr(ctx, expr);
+
+                (value, known_const)
+            })
             .collect()
     }
 }
@@ -124,6 +139,29 @@ pub fn get_expr_backtrace<'a>(
     node: &ExprNode<'a>,
 ) -> Option<LabelBacktrace<'a>> {
     visit_single_expr(ctx, node).backtrace()
+}
+
+pub fn get_expr_backtrace_and_const<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &ExprNode<'a>,
+) -> (Option<LabelBacktrace<'a>>, Option<SimpleConstValue>) {
+    // resolve before visiting so that the expression observes the symbol state
+    // at its own point in Go's evaluation order
+    let known_const = try_resolve_simple_const(ctx, node);
+    let backtrace = visit_single_expr(ctx, node).backtrace();
+
+    (backtrace, known_const)
+}
+
+pub fn try_resolve_simple_const(
+    ctx: &AnalysisContext<'_>,
+    node: &ExprNode<'_>,
+) -> Option<SimpleConstValue> {
+    SimpleConstValue::try_resolve_from_expr_with_names(node, &|name| {
+        let symbol = ctx.symtab().get_symbol(name)?;
+
+        symbol.borrow().known_const().cloned()
+    })
 }
 
 pub fn visit_operand_name<'a>(
@@ -277,7 +315,7 @@ fn synthesize_fake_symbol_with_blanket_directives<'a>(
     let location = ctx.pin(name.location());
     let value = ValueRef::new(Value::Function(Box::new(func_val)), location, None);
 
-    Some(Symbol::new_ref(ctx.pin(name), false, value))
+    Some(Symbol::new_ref(ctx.pin(name), false, value, None))
 }
 
 fn blanket_directives_for_operand<'a>(
@@ -361,25 +399,20 @@ fn visit_make_with_revocations<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &MakeNode<'a>,
 ) -> ValueRef<'a> {
-    let mut result = funcs::builtins::visit_make(ctx, node);
+    let n_args = 1 + usize::from(node.n.is_some()) + usize::from(node.m.is_some());
+    let mut arg_consts = vec![None; n_args];
+
+    let mut result = funcs::builtins::visit_make(ctx, node, &mut arg_consts);
 
     if !ctx.symtab().resolves_to_predeclared("make") {
         // just in case any any user shadow exists
         return result;
     }
 
-    // this should always fail arg predicate matching, hopefully
-    let fake_type_arg = ExprNode::Name(*crate::FAKE_SPAN.inner());
-
-    let args: Vec<_> = std::iter::once(fake_type_arg)
-        .chain(node.n.iter().cloned().map(|n| *n))
-        .chain(node.m.iter().cloned().map(|m| *m))
-        .collect();
-
     funcs::apply_predeclared_blanket_revocations(
         ctx,
         "make",
-        &args,
+        &arg_consts,
         std::slice::from_mut(&mut result),
     );
 
@@ -443,7 +476,7 @@ fn visit_ambiguous_bracket_access<'a>(
     // convert our node into an IndexingNode since it'd lead to base being
     // visited multiple times (which would be bad for, e.g., side-effects)
 
-    let index_backtrace = get_expr_backtrace(ctx, &node.index_if_indexing);
+    let (index_backtrace, index_const) = get_expr_backtrace_and_const(ctx, &node.index_if_indexing);
     // ^^ note that we would rather visit the index before the base in case they
     // have side-effects, but it is simply not possible to do that here since we
     // can only really disambiguate after visiting the base, and trying to visit
@@ -451,8 +484,6 @@ fn visit_ambiguous_bracket_access<'a>(
     // a type instantiation, meaning here is the earliest point at which one can
     // actually visit the index. HOWEVER, this is actually not so bad, since the
     // Go spec does not prescribe an order of evaluation for base / index at all
-
-    let index_const = SimpleConstValue::try_resolve_from_expr(&node.index_if_indexing);
 
     component::visit_indexing_with(
         ctx,

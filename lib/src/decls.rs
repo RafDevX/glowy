@@ -117,7 +117,7 @@ fn visit_binding_decl_spec<'a>(
             declared_type.clone(), // cheap
         );
 
-        let symbol = Symbol::new_ref(name, mutable, value);
+        let symbol = Symbol::new_ref(name, mutable, value, None);
 
         ctx.declare_new_symbol(symbol);
     }
@@ -151,7 +151,7 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
 
     let value = ValueRef::new(Value::Function(Box::new(func_value)), location, None);
 
-    let symbol = Symbol::new_ref(name, false, value);
+    let symbol = Symbol::new_ref(name, false, value, None);
 
     ctx.declare_new_symbol(symbol);
 }
@@ -202,7 +202,7 @@ fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNod
     let name = ctx.pin(node.name);
     let value = ValueRef::new_bottom(name.pinned_location(), None);
 
-    let symbol = Symbol::new_ref(name, false, value);
+    let symbol = Symbol::new_ref(name, false, value, None);
 
     // if this is a method (has a receiver), also register it on the receiver's
     // TypeInfo so typed dispatch can later look it up by name.

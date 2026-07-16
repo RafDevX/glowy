@@ -17,7 +17,7 @@ use crate::{
     },
     values::{
         BacktraceContainer, FunctionValue, InherentSourceOrRevocation, MobiusValue,
-        SelfAwareBacktraceContainer, Value, ValueRef,
+        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
     },
 };
 
@@ -44,6 +44,7 @@ pub fn apply_call<'a>(
         blackbox_replacement,
         method_receiver_value,
         arg_values,
+        arg_consts,
     } = resolved;
 
     // re-borrow the callee's FunctionValue; `resolve_call` already validated
@@ -165,8 +166,8 @@ pub fn apply_call<'a>(
             func.signature(),
         );
 
-        apply_call_blanket_sources(func, &node.args, &call_location, &mut result);
-        apply_call_blanket_revocations(func, &node.args, &mut result);
+        apply_call_blanket_sources(func, &arg_consts, &call_location, &mut result);
+        apply_call_blanket_revocations(func, &arg_consts, &mut result);
 
         return result;
     };
@@ -217,7 +218,7 @@ pub fn apply_call<'a>(
 
     let mut result = calculate_call_result(ctx, func, outcome, &call_realization);
 
-    apply_call_blanket_sources(func, &node.args, &call_location, &mut result);
+    apply_call_blanket_sources(func, &arg_consts, &call_location, &mut result);
 
     // need to nest the function's backtrace into the result because the
     // function itself was accessed
@@ -232,7 +233,7 @@ pub fn apply_call<'a>(
         }
     }
 
-    apply_call_blanket_revocations(func, &node.args, &mut result);
+    apply_call_blanket_revocations(func, &arg_consts, &mut result);
 
     for realized in &mut result {
         *realized = realized.with_location(call_location.clone());
@@ -332,7 +333,7 @@ fn visit_blackbox_call<'a>(
 
 fn apply_call_blanket_sources<'a>(
     func: &FunctionValue<'a>,
-    args: &[ExprNode<'a>],
+    arg_consts: &[Option<SimpleConstValue>],
     call_location: &Pinned<'a, Location>,
     result: &mut [ValueRef<'a>],
 ) {
@@ -340,7 +341,7 @@ fn apply_call_blanket_sources<'a>(
         .sources()
         .iter()
         .filter(|source| !source.label().is_bottom())
-        .filter(|source| source.applies_to_args(args))
+        .filter(|source| source.applies_to_args(arg_consts))
         .collect();
 
     if sources.is_empty() {
@@ -411,14 +412,14 @@ fn apply_call_blanket_sources<'a>(
 
 pub(super) fn apply_call_blanket_revocations<'a>(
     func: &FunctionValue<'a>,
-    args: &[ExprNode<'a>],
+    arg_consts: &[Option<SimpleConstValue>],
     result: &mut [ValueRef<'a>],
 ) {
     let revocations: Vec<_> = func
         .revocations()
         .iter()
         .filter(|revocation| !revocation.label().is_bottom())
-        .filter(|revocation| revocation.applies_to_args(args))
+        .filter(|revocation| revocation.applies_to_args(arg_consts))
         .collect();
 
     if revocations.is_empty() {

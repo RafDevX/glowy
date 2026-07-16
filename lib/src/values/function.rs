@@ -10,8 +10,7 @@ use std::{
 use parser::{
     Location, Span,
     ast::{
-        ExprNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode,
-        TypeNode,
+        FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode, TypeNode,
     },
 };
 use uuid::Uuid;
@@ -920,16 +919,16 @@ impl<'a> InherentSourceOrRevocation<'a> {
         self.result_selector.is_empty() || self.result_selector.contains(&result_index)
     }
 
-    pub fn applies_to_args(&self, args: &[ExprNode<'_>]) -> bool {
+    pub fn applies_to_args(&self, arg_consts: &[Option<SimpleConstValue>]) -> bool {
         let Some(predicate) = &self.predicate else {
             return true;
         };
 
-        let Some(arg) = args.get(predicate.arg_index()) else {
+        let Some(actual) = arg_consts.get(predicate.arg_index()) else {
             return false;
         };
 
-        SimpleConstValue::try_resolve_from_expr(arg)
+        actual
             .as_ref()
             .is_none_or(|actual| predicate.matches_const(actual))
         // ^^ if we cannot resolve a SimpleConstValue, we have to be

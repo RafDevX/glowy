@@ -85,7 +85,7 @@ pub fn register_closure_captures<'a>(
         // arbitrary default, but retain the synthetic as the sole backtrace
         let local_value = outer_value.get().copy_shape(capture_backtrace);
 
-        ctx.declare_new_symbol(Symbol::new_ref(local_decl, true, local_value));
+        ctx.declare_new_symbol(Symbol::new_ref(local_decl, true, local_value, None));
     }
 }
 

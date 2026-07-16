@@ -17,7 +17,7 @@ use crate::{
     symbols::Symbol,
     taint::{enforcement, mutation::LeftValue},
     types::TypeInfo,
-    values::ValueRef,
+    values::{SimpleConstValue, ValueRef},
 };
 
 pub fn visit_binding_decl<'a>(
@@ -63,7 +63,10 @@ fn visit_binding_decl_spec<'a>(
         None
     };
 
-    if node.exprs.is_empty() && node.r#type.is_some() && !short {
+    if node.exprs.is_empty()
+        && !short
+        && let Some(r#type) = &node.r#type
+    {
         // no initialization expression; zero-value is used;
         // for our purposes, we just need to remember the decl exists
         // (branch label is irrelevant in this case)
@@ -75,7 +78,12 @@ fn visit_binding_decl_spec<'a>(
                 declared_type.clone(), // cheap
             );
 
-            let symbol = Symbol::new_ref(pinned, mutable, value);
+            let symbol = Symbol::new_ref(
+                pinned,
+                mutable,
+                value,
+                SimpleConstValue::zero_value_for_type(r#type),
+            );
 
             ctx.declare_new_symbol(symbol);
         }
@@ -101,20 +109,20 @@ fn visit_binding_decl_spec<'a>(
         &node.exprs
     };
 
-    let mut rhs_values = exprs::visit_multi_exprs(ctx, spec_exprs);
+    let mut rhs_values = exprs::visit_multi_exprs_with_consts(ctx, spec_exprs);
 
     if node.ids.len() > 1
-        && let [single] = rhs_values.as_slice()
+        && let [(single, _)] = rhs_values.as_slice()
         && let Some(expanded) = single.try_expand_to(node.ids.len())
     {
-        rhs_values = expanded;
+        rhs_values = expanded.into_iter().map(|value| (value, None)).collect();
     }
 
     // override the rhs values' declared_type with the spec's, if any: a typed
     // declaration necessarily produces a value of the specified type regardless
     // of the expr's own static type, per the Go spec
     if let Some(r#type) = &declared_type {
-        for rhs in &mut rhs_values {
+        for (rhs, _) in &mut rhs_values {
             rhs.set_declared_type(Rc::clone(r#type));
         }
     }
@@ -140,7 +148,7 @@ fn visit_binding_decl_spec<'a>(
 pub fn visit_raw_binding_decl_spec<'a>(
     ctx: &mut AnalysisContext<'a>,
     ids: &[Span<'a>],
-    rhs_values: impl ExactSizeIterator<Item = ValueRef<'a>>,
+    rhs_values: impl ExactSizeIterator<Item = (ValueRef<'a>, Option<SimpleConstValue>)>,
     mutable: bool,
     short: bool, // allows redeclaration in some circumstances
     location: &Location,
@@ -162,7 +170,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
     let mut redeclarations = vec![];
     let mut any_new = false;
 
-    for (name, rhs) in ids.iter().copied().zip(rhs_values) {
+    for (name, (rhs, known_const)) in ids.iter().copied().zip(rhs_values) {
         let mut explicit_backtrace = None;
         let mut subtract = Label::Bottom;
 
@@ -232,6 +240,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             ctx.pin(name),
             true, // we initially always set the symbol as mutable
             initial_value,
+            None,
         );
         let symbol2 = Rc::clone(&symbol); // for later use if needed
 
@@ -267,6 +276,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
             ctx,
             LabelBacktraceKind::DeclarationInitialization,
             rhs,
+            known_const,
             true,
             explicit_backtrace.as_ref(),
             &subtract,
@@ -317,13 +327,13 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         return;
     }
 
-    let mut rhs_values = exprs::visit_multi_exprs(ctx, &node.rhs);
+    let mut rhs_values = exprs::visit_multi_exprs_with_consts(ctx, &node.rhs);
 
     if node.lhs.len() > 1
-        && let [single] = rhs_values.as_slice()
+        && let [(single, _)] = rhs_values.as_slice()
         && let Some(expanded) = single.try_expand_to(node.lhs.len())
     {
-        rhs_values = expanded;
+        rhs_values = expanded.into_iter().map(|value| (value, None)).collect();
     }
 
     let mut explicit_backtrace = None;
@@ -355,7 +365,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
                 );
 
                 if let Some(sink) = sink {
-                    for rhs in &rhs_values {
+                    for (rhs, _) in &rhs_values {
                         enforcement::trigger_sink(ctx, Cow::Borrowed(&sink), rhs.backtrace());
                     }
                 } else {
@@ -367,7 +377,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
             annotations::AssignmentDirective::Assert => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
 
-                for rhs in &rhs_values {
+                for (rhs, _) in &rhs_values {
                     enforcement::trigger_assertion(
                         ctx,
                         &sequence,
@@ -395,7 +405,7 @@ pub fn visit_raw_assignment<'a: 'b, 'b>(
     ctx: &mut AnalysisContext<'a>,
     kind: AssignmentKind,
     lhs_exprs: impl ExactSizeIterator<Item = &'b ExprNode<'a>>,
-    rhs_values: impl ExactSizeIterator<Item = ValueRef<'a>>,
+    rhs_values: impl ExactSizeIterator<Item = (ValueRef<'a>, Option<SimpleConstValue>)>,
     explicit_backtrace: Option<&LabelBacktrace<'a>>, // from annotation
     subtract: &Label<'a>,
     location: &Location,
@@ -410,11 +420,12 @@ pub fn visit_raw_assignment<'a: 'b, 'b>(
         return;
     }
 
-    for (lhs, rhs) in lhs_exprs.zip(rhs_values) {
+    for (lhs, (rhs, known_const)) in lhs_exprs.zip(rhs_values) {
         lhs.assign(
             ctx,
             LabelBacktraceKind::Assignment,
             rhs,
+            known_const,
             kind == AssignmentKind::Simple,
             explicit_backtrace,
             subtract,

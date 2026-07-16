@@ -149,15 +149,21 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     // value matters (its taint flows in via SyntheticSlot::Receiver)
     let method_receiver_value = method_receiver.map(|(_, base)| base);
 
-    let arg_values: Vec<_> = node
+    let (arg_values, arg_consts) = node
         .args
         .iter()
-        .map(|arg| exprs::visit_single_expr(ctx, arg))
-        .collect();
+        .map(|arg| {
+            let known_const = exprs::try_resolve_simple_const(ctx, arg);
+            let arg_value = exprs::visit_single_expr(ctx, arg);
+
+            (arg_value, known_const)
+        })
+        .unzip();
 
     CallResolution::PendingApply(ResolvedCall {
         callee: value,
         arg_values,
+        arg_consts,
         blackbox_replacement,
         method_receiver_value,
     })
@@ -175,26 +181,38 @@ fn try_resolve_special_builtin_call<'a>(
         return None;
     }
 
+    let mut arg_consts = vec![None; node.args.len()];
+
+    // `name` is necessary to get a &'static str instead of a &'a str
     let (name, mut result) = match id.content() {
-        "append" => ("append", vec![builtins::visit_append(ctx, node)]),
-        "copy" => ("copy", vec![builtins::visit_copy(ctx, node)]),
+        "append" => (
+            "append",
+            vec![builtins::visit_append(ctx, node, &mut arg_consts)],
+        ),
+        "copy" => (
+            "copy",
+            vec![builtins::visit_copy(ctx, node, &mut arg_consts)],
+        ),
         "clear" => ("clear", {
-            builtins::visit_clear(ctx, node);
+            builtins::visit_clear(ctx, node, &mut arg_consts);
+
             vec![]
         }),
         "close" => ("close", {
-            builtins::visit_close(ctx, node);
+            builtins::visit_close(ctx, node, &mut arg_consts);
+
             vec![]
         }),
         "delete" => ("delete", {
-            builtins::visit_delete(ctx, node);
+            builtins::visit_delete(ctx, node, &mut arg_consts);
+
             vec![]
         }),
-        "len" => ("len", vec![builtins::visit_len(ctx, node)]),
+        "len" => ("len", vec![builtins::visit_len(ctx, node, &mut arg_consts)]),
         _ => return None,
     };
 
-    super::apply_predeclared_blanket_revocations(ctx, name, &node.args, &mut result);
+    super::apply_predeclared_blanket_revocations(ctx, name, &arg_consts, &mut result);
 
     Some(CallResolution::Final(result))
 }

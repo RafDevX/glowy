@@ -26,7 +26,11 @@ use crate::{
     },
 };
 
-pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> ValueRef<'a> {
+pub fn visit_make<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &MakeNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) -> ValueRef<'a> {
     // the first argument is any type whose *underlying* type must be a slice,
     // map, or channel. so for `make(SomeNamedType, ...)` we need to traverse
     // the known defined-type/alias indirections to figure out the actual root
@@ -47,16 +51,21 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
     )]
     match resolved.as_ref().unwrap_or(&node.r#type) {
         TypeNode::Slice { .. } => {
-            let known_len = node.n.as_deref().and_then(resolve_const_len);
+            let known_len = node
+                .n
+                .as_deref()
+                .and_then(|expr| resolve_const_len(ctx, expr, arg_consts));
 
             let n = node
                 .n
                 .as_ref()
                 .map(|expr| exprs::visit_single_expr(ctx, expr));
-            let m = node
-                .m
-                .as_ref()
-                .map(|expr| exprs::visit_single_expr(ctx, expr));
+
+            let m = node.m.as_ref().map(|expr| {
+                capture_arg_const(ctx, expr, arg_consts, 2);
+
+                exprs::visit_single_expr(ctx, expr)
+            });
 
             let location = ctx.pin(node.location.clone());
 
@@ -79,15 +88,18 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 });
 
                 // visit to trigger side effects even though it shouldn't exist
+                capture_arg_const(ctx, m, arg_consts, 2);
                 exprs::visit_single_expr(ctx, m);
             }
 
             // we assume "initial space for approximately n elements" is not
             // (easily) observable, so n does NOT taint the resulting map.
             // we just visit to trigger side effects
-            node.n
-                .as_ref()
-                .map(|expr| exprs::visit_single_expr(ctx, expr));
+            node.n.as_ref().map(|expr| {
+                capture_arg_const(ctx, expr, arg_consts, 1);
+
+                exprs::visit_single_expr(ctx, expr)
+            });
 
             ValueRef::new(
                 Value::Map(CompositeValue::empty(None)),
@@ -104,6 +116,7 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 });
 
                 // visit to trigger side effects even though it shouldn't exist
+                capture_arg_const(ctx, m, arg_consts, 2);
                 exprs::visit_single_expr(ctx, m);
             }
 
@@ -114,10 +127,11 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
             // send/receive timing -- so we seed the channel's inner backtrace
             // with n's backtrace, ensuring everything later received from
             // this channel inherits n's label as a sound over-approximation
-            let initial = node
-                .n
-                .as_ref()
-                .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
+            let initial = node.n.as_ref().and_then(|expr| {
+                capture_arg_const(ctx, expr, arg_consts, 1);
+
+                exprs::get_expr_backtrace(ctx, expr)
+            });
 
             ValueRef::new(
                 Value::Channel(ChannelValue::new(initial)),
@@ -131,14 +145,17 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
                 location: node.location.clone(),
             });
 
-            let n = node
-                .n
-                .as_ref()
-                .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
-            let m = node
-                .m
-                .as_ref()
-                .and_then(|expr| exprs::get_expr_backtrace(ctx, expr));
+            let n = node.n.as_ref().and_then(|expr| {
+                capture_arg_const(ctx, expr, arg_consts, 1);
+
+                exprs::get_expr_backtrace(ctx, expr)
+            });
+
+            let m = node.m.as_ref().and_then(|expr| {
+                capture_arg_const(ctx, expr, arg_consts, 2);
+
+                exprs::get_expr_backtrace(ctx, expr)
+            });
 
             let location = ctx.pin(node.location.clone());
 
@@ -155,14 +172,22 @@ pub fn visit_make<'a>(ctx: &mut AnalysisContext<'a>, node: &MakeNode<'a>) -> Val
     }
 }
 
-fn resolve_const_len(expr: &ExprNode<'_>) -> Option<u64> {
-    match SimpleConstValue::try_resolve_from_expr(expr) {
-        Some(SimpleConstValue::Integer(length)) => Some(length),
+fn resolve_const_len(
+    ctx: &AnalysisContext<'_>,
+    expr: &ExprNode<'_>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) -> Option<u64> {
+    match capture_arg_const(ctx, expr, arg_consts, 1) {
+        Some(SimpleConstValue::Integer(length)) => Some(*length),
         _ => None,
     }
 }
 
-pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+pub fn visit_append<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) -> ValueRef<'a> {
     // Note: `append` in Go returns a new slice with the appended value, but it
     // does NOT mutate the original slice!
 
@@ -179,6 +204,9 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
     }
 
     let original = node.args.first().unwrap(); // already checked length
+
+    capture_arg_const(ctx, original, arg_consts, 0);
+
     let original = exprs::visit_single_expr(ctx, original);
     let mut result = original.clone_inner(); // don't mutate original
 
@@ -203,6 +231,7 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
             return ValueRef::new_bottom(location, None);
         };
 
+        capture_arg_const(ctx, other, arg_consts, 1);
         let src_value = exprs::visit_single_expr(ctx, other);
 
         // we need to clone this since we cannot hold a reference to both a
@@ -212,7 +241,9 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
         slice.extend(src_slice, &src_value, location);
     } else {
         // multiple arguments corresponding to individual elements
-        for el in node.args.iter().skip(1) {
+        for (index, el) in node.args.iter().enumerate().skip(1) {
+            capture_arg_const(ctx, el, arg_consts, index);
+
             let value = exprs::visit_single_expr(ctx, el);
 
             slice.push(value, || location.clone());
@@ -224,7 +255,11 @@ pub fn visit_append<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> V
     result
 }
 
-pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+pub fn visit_copy<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) -> ValueRef<'a> {
     // Note: `copy` in Go mutates the destination slice and returns the number
     // of elements copied, which is min(len(src), len(dst)). This means dst's
     // label must always be raised to the maximum of src and we cannot do
@@ -243,6 +278,9 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
 
         return ValueRef::new_bottom(location, None);
     };
+
+    capture_arg_const(ctx, dst_expr, arg_consts, 0);
+    capture_arg_const(ctx, src_expr, arg_consts, 1);
 
     let src = exprs::visit_single_expr(ctx, src_expr);
 
@@ -287,7 +325,11 @@ pub fn visit_copy<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Val
     ValueRef::from_backtrace_or_bottom_at(combined.into_inner(), || location)
 }
 
-pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
+pub fn visit_clear<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) {
     // `clear` has different behavior depending on whether its argument is a map
     // or a slice. For maps, the result is independent of the original value, so
     // we can just clear the backtrace completely. However, for slices, the
@@ -307,6 +349,8 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     };
 
     let location = ctx.pin(node.location.clone());
+
+    capture_arg_const(ctx, arg, arg_consts, 0);
 
     #[expect(
         clippy::shadow_unrelated,
@@ -348,7 +392,11 @@ pub fn visit_clear<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     );
 }
 
-pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
+pub fn visit_close<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) {
     // close doesn't actually do anything except if there's a branch backtrace
     // set, so we assign to None to essentially mix in the branch backtrace
 
@@ -366,10 +414,13 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
     let location = ctx.pin(node.location.clone());
 
+    capture_arg_const(ctx, arg, arg_consts, 0);
+
     arg.assign(
         ctx,
         LabelBacktraceKind::ChannelClose,
         ValueRef::new_bottom(location, None),
+        None,
         false, // don't want to overwrite
         None,
         &Label::Bottom,
@@ -377,7 +428,11 @@ pub fn visit_close<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     );
 }
 
-pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
+pub fn visit_delete<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) {
     // we essentially treat delete as `m[k] = None`
 
     // Note: `delete` has no return value.
@@ -391,6 +446,12 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
 
         return;
     };
+
+    capture_arg_const(ctx, map, arg_consts, 0);
+    capture_arg_const(ctx, key, arg_consts, 1);
+
+    // evaluate before map to trigger side-effects in the correct order
+    let (key_backtrace, key_const) = exprs::get_expr_backtrace_and_const(ctx, key);
 
     #[expect(
         clippy::shadow_unrelated,
@@ -424,7 +485,11 @@ pub fn visit_delete<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) {
     );
 }
 
-pub fn visit_len<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> ValueRef<'a> {
+pub fn visit_len<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) -> ValueRef<'a> {
     let location = ctx.pin(node.location.clone());
 
     let [arg] = node.args.as_slice() else {
@@ -437,6 +502,7 @@ pub fn visit_len<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Valu
         return ValueRef::new_bottom(location, None);
     };
 
+    capture_arg_const(ctx, arg, arg_consts, 0);
     let value = exprs::visit_single_expr(ctx, arg);
 
     // check with `is_composite` before casting with `as_composite` to avoid
@@ -452,4 +518,17 @@ pub fn visit_len<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Valu
     };
 
     ValueRef::from_backtrace_or_bottom_at(backtrace, || location)
+}
+
+fn capture_arg_const<'c>(
+    ctx: &AnalysisContext<'_>,
+    expr: &ExprNode<'_>,
+    arg_consts: &'c mut [Option<SimpleConstValue>],
+    index: usize,
+) -> Option<&'c SimpleConstValue> {
+    let slot = arg_consts.get_mut(index)?;
+
+    *slot = exprs::try_resolve_simple_const(ctx, expr);
+
+    slot.as_ref()
 }

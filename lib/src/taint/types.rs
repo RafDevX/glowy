@@ -24,7 +24,14 @@ pub fn resolve_named_underlying<'a>(
         let symbol = lookup_symbol_for_type_resolution(ctx, package, id)?;
 
         // cloning is necessary because of AssumedImmutable with as_function
-        let value = symbol.borrow().value().get().clone_inner();
+        let (value, known_const) = {
+            let borrowed = symbol.borrow();
+
+            (
+                symbol.borrow().value().get().clone_inner(),
+                borrowed.known_const().cloned(),
+            )
+        };
 
         let next: TypeNameNode<'a> = {
             // this might coerce, so it might mutate, hence the clone above
@@ -44,7 +51,8 @@ pub fn resolve_named_underlying<'a>(
             next.clone()
         };
 
-        symbol.borrow_mut().set_value(value); // apply potential coercion
+        // apply potential coercion
+        symbol.borrow_mut().set_value(value, known_const);
 
         (package, id) = (next.package, next.id);
     }

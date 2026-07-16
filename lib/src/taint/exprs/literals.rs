@@ -202,8 +202,7 @@ fn visit_integer_keyed_composite_literal<'a>(
         }
 
         let key = if let Some(expr) = opt_key {
-            if let Some(SimpleConstValue::Integer(int)) =
-                SimpleConstValue::try_resolve_from_expr(expr)
+            if let Some(SimpleConstValue::Integer(int)) = super::try_resolve_simple_const(ctx, expr)
             {
                 Some(int)
             } else {

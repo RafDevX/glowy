@@ -4,7 +4,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::{labels::LabelBacktrace, values::ValueRef};
+use crate::{
+    labels::LabelBacktrace,
+    values::{SimpleConstValue, ValueRef},
+};
 
 /// Annotation that an inner value MAY NOT be used for internal mutability.
 ///
@@ -42,16 +45,24 @@ pub struct SymbolTableSnapshotItem<'a> {
     name: &'a str,
     mutable: bool,
     value: SnapshotAwareGuard<ValueRef<'a>>,
+    known_const: Option<SimpleConstValue>,
 }
 
 impl<'a> SymbolTableSnapshotItem<'a> {
-    pub fn new(namespace: Rc<str>, name: &'a str, mutable: bool, value: ValueRef<'a>) -> Self {
+    pub fn new(
+        namespace: Rc<str>,
+        name: &'a str,
+        mutable: bool,
+        value: ValueRef<'a>,
+        known_const: Option<SimpleConstValue>,
+    ) -> Self {
         Self {
             namespace,
             path: Vec::new(),
             name,
             mutable,
             value: SnapshotAwareGuard(value),
+            known_const,
         }
     }
 

@@ -9,7 +9,7 @@ use std::{
 
 use parser::{
     Location,
-    ast::{BinaryOpKind, ExprNode, LiteralNode, UnaryOpKind},
+    ast::{BinaryOpKind, ExprNode, LiteralNode, TypeNameNode, TypeNode, UnaryOpKind},
 };
 
 pub use self::{
@@ -813,26 +813,36 @@ pub enum SimpleConstValue {
     Nil,
 }
 
-// basic support for literal-only composition, e.g. `2 + 3` is recognized as 5
+// basic support for simple constant expressions, especially obvious literal
+// composition; e.g. `2 + 3` is recognized as 5. name resolution is opt-in
 impl SimpleConstValue {
+    // no name resolution, i.e., `known_const` from symbols is not used
     pub fn try_resolve_from_expr(expr: &ExprNode<'_>) -> Option<Self> {
+        Self::try_resolve_from_expr_with_names(expr, &|_| None)
+    }
+
+    pub fn try_resolve_from_expr_with_names(
+        expr: &ExprNode<'_>,
+        resolve_name: &impl Fn(&str) -> Option<Self>,
+    ) -> Option<Self> {
         #[expect(
             clippy::wildcard_enum_match_arm,
             reason = "We explicitly only want a very restricted set of expressions"
         )]
         let result = match expr {
+            ExprNode::Name(name) => resolve_name(name.content())?,
             ExprNode::Literal(LiteralNode::String { value, .. }) => Self::String(value.clone()),
             ExprNode::Literal(LiteralNode::Int { value, .. }) => Self::Integer(*value),
             ExprNode::UnaryOp {
                 kind: UnaryOpKind::Identity,
                 operand,
                 ..
-            } => Self::try_resolve_from_expr(operand)?,
+            } => Self::try_resolve_from_expr_with_names(operand, resolve_name)?,
             ExprNode::BinaryOp {
                 kind, left, right, ..
             } => {
-                let left = Self::try_resolve_from_expr(left)?;
-                let right = Self::try_resolve_from_expr(right)?;
+                let left = Self::try_resolve_from_expr_with_names(left, resolve_name)?;
+                let right = Self::try_resolve_from_expr_with_names(right, resolve_name)?;
 
                 // some operations are treated specially
                 #[expect(
@@ -923,6 +933,36 @@ impl SimpleConstValue {
         };
 
         Some(result)
+    }
+
+    pub fn zero_value_for_type(r#type: &TypeNode<'_>) -> Option<Self> {
+        let zero_value = match r#type {
+            TypeNode::Name(TypeNameNode {
+                package: None,
+                id,
+                args,
+            }) if args.is_empty() => {
+                // technically this could be a shadow, but what are the chances
+                match id.content() {
+                    "bool" => Self::Boolean(false),
+                    "int" | "uint" | "uintptr" | "byte" | "rune" | "uint8" | "uint16"
+                    | "uint32" | "uint64" | "int8" | "int16" | "int32" | "int64" => {
+                        Self::Integer(0)
+                    }
+                    "string" => Self::String(String::new()),
+                    _ => return None,
+                }
+            }
+            TypeNode::Channel { .. }
+            | TypeNode::Slice { .. }
+            | TypeNode::Map { .. }
+            | TypeNode::Interface { .. }
+            | TypeNode::Function { .. }
+            | TypeNode::Pointer { .. } => Self::Nil,
+            TypeNode::Name(_) | TypeNode::Array { .. } | TypeNode::Struct { .. } => return None,
+        };
+
+        Some(zero_value)
     }
 }
 

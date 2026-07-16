@@ -137,6 +137,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
         ctx,
         LabelBacktraceKind::Send,
         base,
+        None,
         false, // don't overwrite ever
         explicit_backtrace.as_ref(),
         &subtract,

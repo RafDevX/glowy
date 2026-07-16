@@ -196,7 +196,11 @@ fn apply_capture_mutations_with<'a>(
             .get_symbol_by_declaration(binding.local_decl())
             .unwrap();
 
-        let local_value = local_symbol.borrow().value().get();
+        let (local_value, local_known_const) = {
+            let borrowed = local_symbol.borrow();
+
+            (borrowed.value().get(), borrowed.known_const().cloned())
+        };
 
         if local_value
             .backtrace()
@@ -226,7 +230,11 @@ fn apply_capture_mutations_with<'a>(
             ));
         }
 
-        let outer_value = outer_symbol.borrow().value().get();
+        let (outer_value, outer_known_const) = {
+            let borrowed = outer_symbol.borrow();
+
+            (borrowed.value().get(), borrowed.known_const().cloned())
+        };
 
         for (index, backtrace) in capture_backtraces {
             realized = Cow::Owned(if *index == binding.index() {
@@ -257,7 +265,7 @@ fn apply_capture_mutations_with<'a>(
             realized = Cow::Owned(local_value.clone_inner());
         }
 
-        if (*realized).snapshot_aware_eq(&outer_value) {
+        if (*realized).snapshot_aware_eq(&outer_value) && local_known_const == outer_known_const {
             // avoid unbounded growth of the outer symbol's backtrace tree
             // across repeated closure calls, as otherwise later backtrace
             // comparisons (e.g., the == at derive_best_backtraces_for_captures)
@@ -268,7 +276,7 @@ fn apply_capture_mutations_with<'a>(
             continue;
         }
 
-        let final_value =
+        let (final_value, final_known_const) =
             if ctx.was_symbol_declared_within_active_split(&outer_symbol) == Some(false) {
                 // outer was declared outside the active split, so its prior
                 // state must survive the closure call alongside whatever the
@@ -277,7 +285,7 @@ fn apply_capture_mutations_with<'a>(
                 // which feeding outer_value.backtrace() into `extra_children`
                 // would do)
 
-                outer_value
+                let merged = outer_value
                     .merge_with(
                         &realized,
                         LabelBacktraceKind::Assignment,
@@ -288,9 +296,11 @@ fn apply_capture_mutations_with<'a>(
                         Some(outer_decl.content()),
                         outer_value.location().clone(),
                         [],
-                    )
+                    );
+
+                (merged, None)
             } else {
-                realized.into_owned()
+                (realized.into_owned(), local_known_const)
             };
 
         mutation::record_active_function_capture_mutation(
@@ -300,7 +310,9 @@ fn apply_capture_mutations_with<'a>(
             call_location,
         );
 
-        outer_symbol.borrow_mut().set_value(final_value);
+        outer_symbol
+            .borrow_mut()
+            .set_value(final_value, final_known_const);
     }
 }
 
