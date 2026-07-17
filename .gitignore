@@ -1,5 +1,9 @@
 /target
 /glowy
+/glowy-cli
+
+/flamegraph.svg
+/perf.data*
 
 .vscode
 .direnv
