@@ -340,6 +340,17 @@ impl<'a> SymbolTable<'a> {
             .set_local_symbol(name, symbol)
     }
 
+    pub fn declare_synthetic_symbol(&mut self, symbol: SymbolRef<'a>) {
+        // synthetic symbols do not represent a distinct source declaration, so
+        // they are deliberately omitted from the declaration reverse index
+
+        let name = symbol.borrow().declared_name().content();
+
+        self.current_scope
+            .borrow_mut()
+            .set_local_symbol(name, symbol);
+    }
+
     pub fn declare_new_method(
         &mut self,
         receiver_type: &'a str,

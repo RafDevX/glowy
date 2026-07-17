@@ -98,7 +98,7 @@ fn derive_concrete_backtrace_or_fallback<'a>(
     binding: &CaptureBinding<'a>,
     capture_env_snapshot: &CaptureEnvSnapshot<'a>,
 ) -> Option<LabelBacktrace<'a>> {
-    let symbol = ctx.symtab().get_symbol_by_declaration(outer_decl).unwrap();
+    let symbol = super::resolve_capture_symbol(ctx, outer_decl);
 
     let value_location = symbol.borrow().value().get().location().clone();
 

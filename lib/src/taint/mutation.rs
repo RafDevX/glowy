@@ -396,8 +396,6 @@ pub fn record_active_function_capture_mutation<'a>(
         return;
     };
 
-    let local_decl = symbol.borrow().declared_name();
-
     // the mutated symbol may be a fake capture-local owned by any enclosing
     // function, not just the innermost function currently being visited, so we
     // have to find the right one by traversing all active functions from
@@ -408,7 +406,7 @@ pub fn record_active_function_capture_mutation<'a>(
             return;
         };
 
-        if func.record_capture_mutation(local_decl, &mutation_backtrace, Cow::Borrowed(location)) {
+        if func.record_capture_mutation(symbol, &mutation_backtrace, Cow::Borrowed(location)) {
             // this function matched, so we can stop here
             break;
         }

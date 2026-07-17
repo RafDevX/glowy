@@ -21,6 +21,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     policy::{BlanketDirective, BlanketDirectiveKind, BlanketSourceArgPredicate, SinkKind},
     snapshots::SnapshotAware,
+    symbols::SymbolRef,
     types::TypeInfo,
     values::{
         BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade, ValueRef,
@@ -55,13 +56,10 @@ pub struct FunctionValue<'a> {
     sinks: Vec<InherentSink<'a>>,
     // from sinks within the function, to which synthetic tags were passed
     deferred_checks: Vec<DeferredEnforcementCheck<'a>>,
-    // symbols from outer lexical scopes captured by this closure, if applicable
-    // (key is original symbol declaration, which must be pinned since this
-    // closure might be called from another file, and value is meta-information
-    // including the unique index we are using to refer to this capture so we
-    // can hook into the existing realization system even for closure capture
-    // resolution whenever the function literal is actually invoked)
-    // [map is empty if this is not a function literal]
+    // mutable symbols from outer lexical scopes captured by this function
+    // (key is the original symbol declaration, which must be pinned since this
+    // function might be called from another file, and value is meta-information
+    // including the unique index used by call-site realization)
     captures: HashMap<Pinned<'a, Span<'a>>, CaptureBinding<'a>>,
     // declaration site of the first parameter's identifier when this function
     // is shaped as a range-over-func iterator (i.e., first param has type
@@ -372,37 +370,31 @@ impl<'a> FunctionValue<'a> {
     }
 
     #[must_use]
-    pub fn register_capture(
+    pub fn register_capture_with(
         &mut self,
         outer_decl: Pinned<'a, Span<'a>>,
-        local_decl: Pinned<'a, Span<'a>>,
-    ) -> usize {
-        // cannot use HashMap's Entry API because we need to borrow self for
-        // calculations as the same time it'd be immutably borrowed for Entry
+        make_local_symbol: impl FnOnce(usize) -> SymbolRef<'a>,
+    ) -> SymbolRef<'a> {
+        let capture_index = self.captures.len();
 
-        if let Some(existing) = self.captures.get(&outer_decl) {
-            existing.index()
-        } else {
-            let capture_index = self.captures.len();
-            let binding = CaptureBinding::new(capture_index, local_decl);
+        let binding = self.captures.entry(outer_decl).or_insert_with(|| {
+            CaptureBinding::new(capture_index, make_local_symbol(capture_index))
+        });
 
-            self.captures.insert(outer_decl, binding);
-
-            capture_index
-        }
+        binding.local_symbol()
     }
 
     #[must_use]
     pub fn record_capture_mutation(
         &mut self,
-        local_decl: Pinned<'a, Span<'a>>,
+        local_symbol: &SymbolRef<'a>,
         mutation_backtrace: &LabelBacktrace<'a>,
         location: Cow<Pinned<'a, Location>>,
     ) -> bool {
         let Some(binding) = self
             .captures
             .values_mut()
-            .find(|binding| binding.local_decl() == local_decl)
+            .find(|binding| Rc::ptr_eq(&binding.local_symbol, local_symbol))
         else {
             return false;
         };
@@ -779,16 +771,16 @@ impl SnapshotAware for FunctionRef<'_> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone)]
 pub struct CaptureBinding<'a> {
     // unique index that has been reserved for this capture to identify it
     // within the context of the function in question, which can be used in
-    // synthetic tags by the realization pipeline when the closure is actually
+    // synthetic tags by the realization pipeline when the function is actually
     // invoked to turn them into concrete labels
     index: usize,
-    // fake local symbol declaration created within the closure scope for this
-    // capture (with a placeholder synthetic tag as its label)
-    local_decl: Pinned<'a, Span<'a>>,
+    // synthetic local symbol installed in the function scope for this capture
+    // (with a placeholder synthetic tag as its label)
+    local_symbol: SymbolRef<'a>,
     // currently best known hybrid backtrace for this capture's outer symbol,
     // used as a fallback when fetching the outer symbol's current value yields
     // a partially or fully synthetic label -- however, there is a risk that
@@ -810,10 +802,10 @@ pub struct CaptureBinding<'a> {
 }
 
 impl<'a> CaptureBinding<'a> {
-    fn new(index: usize, local_decl: Pinned<'a, Span<'a>>) -> Self {
+    fn new(index: usize, local_symbol: SymbolRef<'a>) -> Self {
         Self {
             index,
-            local_decl,
+            local_symbol,
             hybrid_fallback: None,
             mutation_backtrace: None,
         }
@@ -823,8 +815,8 @@ impl<'a> CaptureBinding<'a> {
         self.index
     }
 
-    pub fn local_decl(&self) -> Pinned<'a, Span<'a>> {
-        self.local_decl
+    pub fn local_symbol(&self) -> SymbolRef<'a> {
+        Rc::clone(&self.local_symbol)
     }
 
     #[expect(
@@ -880,14 +872,37 @@ impl<'a> CaptureBinding<'a> {
 
 impl SnapshotAware for CaptureBinding<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        // local_symbol is transient identity; its value is compared as part of
+        // the enclosing symbol-table snapshot instead
         self.index == other.index
-            && self.local_decl == other.local_decl
             && self
                 .hybrid_fallback
                 .snapshot_aware_eq(&other.hybrid_fallback)
             && self
                 .mutation_backtrace
                 .snapshot_aware_eq(&other.mutation_backtrace)
+    }
+}
+
+impl PartialEq for CaptureBinding<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        // local_symbol is implementation state, not capture metadata
+        self.index == other.index
+            && self.hybrid_fallback == other.hybrid_fallback
+            && self.mutation_backtrace == other.mutation_backtrace
+    }
+}
+
+impl Eq for CaptureBinding<'_> {}
+
+impl fmt::Debug for CaptureBinding<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // omit local_symbol (implementation state, not capture metadata)
+        f.debug_struct("CaptureBinding")
+            .field("index", &self.index)
+            .field("hybrid_fallback", &self.hybrid_fallback)
+            .field("mutation_backtrace", &self.mutation_backtrace)
+            .finish_non_exhaustive()
     }
 }
 

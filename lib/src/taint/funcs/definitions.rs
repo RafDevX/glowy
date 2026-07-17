@@ -156,7 +156,7 @@ pub fn visit_function_def<'a>(
 
     bind_named_result_locals(ctx, &signature.result);
 
-    captures::register_closure_captures(ctx, r#ref, signature, receiver, body, &mut value);
+    captures::register_captures(ctx, r#ref, signature, receiver, body, &mut value);
 
     // it is necessary for sinks and other enforcement mechanisms inside this
     // function body to take into account the external branch backtrace at the
@@ -192,7 +192,7 @@ pub fn visit_function_def<'a>(
 
     super::apply_deferred_calls(ctx); // from `defer` statements
 
-    captures::record_closure_capture_fallbacks(ctx, &mut value);
+    captures::record_capture_fallbacks(ctx, &mut value);
 
     ctx.decrease_branch_scope_depth();
     ctx.trigger_defer_target(DeferTarget::Function);

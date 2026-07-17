@@ -191,10 +191,7 @@ fn apply_capture_mutations_with<'a>(
     call_location: &Pinned<'a, Location>,
 ) {
     for (outer_decl, binding) in func.captures() {
-        let local_symbol = ctx
-            .symtab()
-            .get_symbol_by_declaration(binding.local_decl())
-            .unwrap();
+        let local_symbol = binding.local_symbol();
 
         let (local_value, local_known_const) = {
             let borrowed = local_symbol.borrow();
@@ -214,7 +211,7 @@ fn apply_capture_mutations_with<'a>(
             continue;
         }
 
-        let outer_symbol = ctx.symtab().get_symbol_by_declaration(outer_decl).unwrap();
+        let outer_symbol = super::resolve_capture_symbol(ctx, outer_decl);
 
         if !outer_symbol.borrow().mutable() {
             continue;
