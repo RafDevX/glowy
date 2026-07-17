@@ -9,7 +9,7 @@ use crate::{
     values::{
         BacktraceContainer, ChannelValue, CompositeValue, ExpandableValue, FunctionRef,
         FunctionValue, Mergeable, MobiusValue, PackageRefValue, SelfAwareBacktraceContainer,
-        SimpleConstValue,
+        SimpleConstValue, SliceValue,
     },
 };
 
@@ -23,7 +23,7 @@ pub enum Value<'a> {
     PackageRef(PackageRefValue<'a>),
     Channel(ChannelValue<'a>),
     Array(CompositeValue<'a, u64>),
-    Slice(CompositeValue<'a, u64>),
+    Slice(SliceValue<'a>),
     Map(CompositeValue<'a, SimpleConstValue>),
     Struct(CompositeValue<'a, String>),
     Function(Box<FunctionValue<'a>>),
@@ -32,10 +32,9 @@ pub enum Value<'a> {
 impl<'a> Value<'a> {
     pub(super) fn is_copy_by_reference(&self) -> bool {
         // https://go.dev/ref/spec#Representation_of_values
-        matches!(
-            self,
-            Self::Channel(..) | Self::Slice(..) | Self::Map(..) | Self::Function(..)
-        )
+        // SliceValue is intentionally absent: copying a slice copies its
+        // descriptor while SliceValue::clone keeps the backing ValueRefs shared.
+        matches!(self, Self::Channel(..) | Self::Map(..) | Self::Function(..))
     }
 
     pub(super) fn copy_shape(&self, backtrace: LabelBacktrace<'a>) -> Self {
@@ -64,7 +63,8 @@ impl<'a> Value<'a> {
             Self::Mobius(mobius) => mobius,
             Self::PackageRef(pkg) => pkg,
             Self::Channel(channel) => channel,
-            Self::Array(composite) | Self::Slice(composite) => composite,
+            Self::Array(composite) => composite,
+            Self::Slice(slice) => slice,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
             Self::Function(func) => &**func,
@@ -78,7 +78,8 @@ impl<'a> Value<'a> {
             Self::Mobius(mobius) => mobius,
             Self::PackageRef(pkg) => pkg,
             Self::Channel(channel) => channel,
-            Self::Array(composite) | Self::Slice(composite) => composite,
+            Self::Array(composite) => composite,
+            Self::Slice(slice) => slice,
             Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
             Self::Function(func) => &mut **func,
@@ -296,9 +297,8 @@ impl SnapshotAware for Value<'_> {
             (Self::Mobius(a), Self::Mobius(b)) => a.snapshot_aware_eq(b),
             (Self::PackageRef(a), Self::PackageRef(b)) => a.snapshot_aware_eq(b),
             (Self::Channel(a), Self::Channel(b)) => a.snapshot_aware_eq(b),
-            (Self::Array(a), Self::Array(b)) | (Self::Slice(a), Self::Slice(b)) => {
-                a.snapshot_aware_eq(b)
-            }
+            (Self::Array(a), Self::Array(b)) => a.snapshot_aware_eq(b),
+            (Self::Slice(a), Self::Slice(b)) => a.snapshot_aware_eq(b),
             (Self::Map(a), Self::Map(b)) => a.snapshot_aware_eq(b),
             (Self::Struct(a), Self::Struct(b)) => a.snapshot_aware_eq(b),
             (Self::Function(a), Self::Function(b)) => a.snapshot_aware_eq(b),

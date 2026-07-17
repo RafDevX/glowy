@@ -698,11 +698,11 @@ impl fmt::Display for Label<'_> {
     }
 }
 
-impl<'a> ops::Add<&Self> for &Label<'a> {
+impl<'a> ops::Add<Self> for &Label<'a> {
     type Output = Label<'a>;
 
     #[inline]
-    fn add(self, rhs: &Self) -> Self::Output {
+    fn add(self, rhs: Self) -> Self::Output {
         self.union(rhs)
     }
 }
@@ -712,7 +712,7 @@ impl ops::Add<&Self> for Label<'_> {
 
     #[inline]
     fn add(self, rhs: &Self) -> Self::Output {
-        (&self) + &rhs
+        (&self) + rhs
     }
 }
 

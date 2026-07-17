@@ -23,6 +23,7 @@ pub use self::{
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,
+    slices::{SliceBound, SliceValue},
 };
 use crate::{
     Pinned,
@@ -38,6 +39,7 @@ mod function;
 mod mobius;
 mod package_ref;
 mod shapes;
+mod slices;
 
 // wrapper struct (vs. type alias) allows impl'ing despite orphan rule
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -161,6 +163,14 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Channel(_))
     }
 
+    pub fn is_slice(&self) -> bool {
+        matches!(*self.value.borrow(), Value::Slice(_))
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(*self.value.borrow(), Value::Array(_))
+    }
+
     pub fn is_map(&self) -> bool {
         matches!(*self.value.borrow(), Value::Map(_))
     }
@@ -188,6 +198,10 @@ impl<'a> ValueRef<'a> {
         let inner = self.value.borrow().copy_shape(backtrace);
 
         Self::new(inner, self.location.clone(), self.declared_type.clone())
+    }
+
+    pub fn shares_inner_with(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.value, &other.value)
     }
 
     pub fn try_upgrade_to_channel(&self) {
@@ -452,7 +466,21 @@ impl<'a> ValueRef<'a> {
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Channel)).ok()
     }
 
-    pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {
+    pub fn as_array(&self) -> Option<Ref<'_, CompositeValue<'a, u64>>> {
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Array)).ok()
+    }
+
+    pub fn as_array_mut(&self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {
+        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Array)).ok()
+    }
+
+    pub fn as_slice(&self) -> Option<Ref<'_, SliceValue<'a>>> {
+        self.try_upgrade_to(Value::Slice);
+
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Slice)).ok()
+    }
+
+    pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, SliceValue<'a>>> {
         self.try_upgrade_to(Value::Slice);
 
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Slice)).ok()
@@ -464,25 +492,12 @@ impl<'a> ValueRef<'a> {
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Map)).ok()
     }
 
-    // (complex because Simple is technically also sliceable but not supported
-    // here due to the upgrade that would change it to a complex shape)
-    pub fn as_complex_sliceable(&self) -> Option<Ref<'_, CompositeValue<'a, u64>>> {
-        self.try_upgrade_to(Value::Slice);
-
-        Ref::filter_map(self.value.borrow(), |value| match value {
-            Value::Array(composite) | Value::Slice(composite) => Some(composite),
-            _ => None,
-        })
-        .ok()
-    }
-
     pub fn as_composite(&self) -> Option<Ref<'_, dyn CompositeValueAdapter<'a>>> {
         self.try_upgrade_to(Value::Array);
 
         Ref::filter_map(self.value.borrow(), |value| match value {
-            Value::Array(composite) | Value::Slice(composite) => {
-                Some(composite as &dyn CompositeValueAdapter<'a>)
-            }
+            Value::Array(composite) => Some(composite as &dyn CompositeValueAdapter<'a>),
+            Value::Slice(slice) => Some(slice),
             Value::Map(composite) => Some(composite),
             _ => None,
         })
@@ -493,9 +508,8 @@ impl<'a> ValueRef<'a> {
         self.try_upgrade_to(Value::Array);
 
         RefMut::filter_map(self.value.borrow_mut(), |value| match value {
-            Value::Array(composite) | Value::Slice(composite) => {
-                Some(composite as &mut dyn CompositeValueAdapter<'a>)
-            }
+            Value::Array(composite) => Some(composite as &mut dyn CompositeValueAdapter<'a>),
+            Value::Slice(slice) => Some(slice),
             Value::Map(composite) => Some(composite),
             _ => None,
         })

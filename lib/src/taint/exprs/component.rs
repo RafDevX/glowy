@@ -2,7 +2,9 @@ use std::borrow::Cow;
 
 use parser::{
     Location,
-    ast::{IndexingNode, SelectionNode, SlicingNode},
+    ast::{
+        BinaryOpKind, CallNode, ExprNode, IndexingNode, LiteralNode, SelectionNode, SlicingNode,
+    },
 };
 
 use crate::{
@@ -14,8 +16,8 @@ use crate::{
     taint::funcs,
     types::{TypeInfo, TypeKind},
     values::{
-        ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
-        ValueRef,
+        ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, SliceBound,
+        SliceValue, Value, ValueRef,
     },
 };
 
@@ -306,23 +308,35 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
 
     let base = super::visit_single_expr(ctx, &node.base);
 
+    let last_pos = is_last_position_indexing(ctx, &node.base, &node.index);
+
     visit_indexing_with(
         ctx,
         &base,
         index_backtrace,
         index_const.as_ref(),
+        last_pos,
         &node.location,
     )
 }
 
-pub fn visit_indexing_with<'a>(
+pub(super) fn visit_indexing_with<'a>(
     ctx: &mut AnalysisContext<'a>,
     base: &ValueRef<'a>,
     index_backtrace: Option<LabelBacktrace<'a>>,
     index_const: Option<&SimpleConstValue>,
+    last_pos: bool,
     location: &Location,
 ) -> ValueRef<'a> {
     let pinned = ctx.pin(location.clone());
+
+    if last_pos
+        && base.is_slice()
+        && let Some(slice) = base.as_slice()
+    {
+        // special case precision
+        return slice.read_last(pinned);
+    }
 
     let Some(composite) = base.as_composite() else {
         ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
@@ -358,98 +372,112 @@ pub fn visit_indexing_with<'a>(
     }
 }
 
+pub(super) fn is_last_position_indexing(
+    ctx: &AnalysisContext<'_>,
+    base: &ExprNode<'_>,
+    index: &ExprNode<'_>,
+) -> bool {
+    if let ExprNode::Name(base_name) = base
+        && let ExprNode::BinaryOp {
+            kind: BinaryOpKind::Diff,
+            left,
+            right,
+            ..
+        } = index
+        && let ExprNode::Literal(LiteralNode::Int { value: 1, .. }) = &**right
+        && let ExprNode::Call(CallNode {
+            func,
+            args,
+            variadic: false,
+            ..
+        }) = &**left
+        && let ExprNode::Name(func) = &**func
+        && func.content() == "len"
+        && let [ExprNode::Name(single_arg)] = args.as_slice()
+        && single_arg.content() == base_name.content()
+        && ctx.symtab().resolves_to_predeclared("len")
+    // ^ not shadowed
+    {
+        // yes, this is syntactically clear to be `s[len(s) - 1]`
+
+        true
+    } else {
+        // we cannot be sure that this is last position indexing
+
+        false
+    }
+}
+
 pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) -> ValueRef<'a> {
     let base = super::visit_single_expr(ctx, &node.base);
 
     let location = ctx.pin(node.location.clone());
 
-    // per spec, string slicing is only allowed if max is None
-    // (full slicing expressions only support arrays/slices)
-    let result = if node.max.is_none() && base.is_simple() {
-        // either we're slicing a simple string (creating a substring), or base
-        // actually has a more complex shape but just hasn't been coerced yet
-        // (in which case its final "dyn + all consts" backtrace would just be
-        // the current simple value) -- in both cases, the result of accessing
-        // it is always just the backtrace itself (+ low/high/max)
+    let low = node.low.as_deref().map(|expr| visit_slice_bound(ctx, expr));
+    let high = node
+        .high
+        .as_deref()
+        .map(|expr| visit_slice_bound(ctx, expr));
+    let maximum = node.max.as_deref().map(|expr| visit_slice_bound(ctx, expr));
 
-        base.backtrace()
-    } else if let Some(sliceable) = base.as_complex_sliceable() {
-        let low = node
-            .low
-            .as_deref()
-            .map(|expr| super::try_resolve_simple_const(ctx, expr));
-        let high = node
-            .high
-            .as_deref()
-            .map(|expr| super::try_resolve_simple_const(ctx, expr));
-
-        // at this point low and high are both Option<Option<SimpleConstValue>>,
-        // but we actually need to match on the inner Option (representing
-        // whether a const value was determined) to know whether to use const
-        // or dyn slicing, and the outer Option (representing whether a concrete
-        // low/high value was explicitly provided or just omitted) should just
-        // be propagated. this means we need to do some rather unintuitive
-        // matching here to essentially swap the Options
-        #[expect(
-            clippy::items_after_statements,
-            reason = "Auxiliary function makes more sense defined/explained here"
-        )]
-        #[expect(
-            clippy::option_option,
-            reason = "Access to convenient methods in auxiliary computations"
-        )]
-        fn transform(v: Option<&Option<SimpleConstValue>>) -> Option<Option<u64>> {
-            match v {
-                Some(Some(SimpleConstValue::Integer(x))) => Some(Some(*x)),
-                Some(_) => None,
-                None => Some(None),
-            }
-        }
-
-        let low = transform(low.as_ref());
-        let high = transform(high.as_ref());
-
-        match (low, high) {
-            (Some(low), Some(high)) => {
-                sliceable.slice_const(low.as_ref(), high.as_ref(), location.clone())
-            }
-            _ => sliceable.slice_dyn(location.clone()),
-        }
-    } else {
-        ctx.report_error(AnalysisErrorKind::InvalidSlicingBase {
-            location: node.location.clone(),
-        });
-
-        None
-    };
-
-    let result = result.nest_backtrace(
-        LabelBacktraceKind::Expression,
-        None,
-        location.clone(),
-        [
-            node.low
-                .as_ref()
-                .and_then(|l| super::get_expr_backtrace(ctx, l)),
-            node.high
-                .as_ref()
-                .and_then(|h| super::get_expr_backtrace(ctx, h)),
-            node.max
-                .as_ref()
-                .and_then(|m| super::get_expr_backtrace(ctx, m)),
-        ]
-        .into_iter()
-        .flatten(),
-    );
-
-    // slicing preserves the slice type per Go spec; for arrays the result is
-    // anonymous `[]E` (no named type), and string slicing degrades to `string`
-    // (untyped) so we can only propagate when base is itself a slice
     let declared_type = base
         .declared_type()
         .filter(|r#type| matches!(r#type.underlying(), Some(TypeKind::Slice)))
         .cloned();
 
-    ValueRef::from_backtrace_or_bottom_at(result, || location)
-        .into_with_declared_type(declared_type)
+    if base.is_slice()
+        && let Some(slice) = base.as_slice()
+    {
+        let result = slice.reslice(low, high, maximum, location.clone());
+
+        return ValueRef::new(Value::Slice(result), location, declared_type);
+    }
+
+    if base.is_array()
+        && let Some(array) = base.as_array().as_deref().cloned()
+    {
+        let slice = SliceValue::new_from_composite(array, location.clone());
+
+        let result = slice.reslice(low, high, maximum, location.clone());
+
+        return ValueRef::new(Value::Slice(result), location, declared_type);
+    }
+
+    // per the Go spec, string slicing is only allowed if max is None
+    // (full slicing expressions only support arrays/slices)
+    if node.max.is_none() && base.is_simple() {
+        // either we're slicing a simple string (creating a substring), or base
+        // actually has a more complex shape but just hasn't been coerced yet
+        // (in which case the aggregate label is the only sound fallback).
+        let result = base.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            location.clone(),
+            [low, high, maximum]
+                .into_iter()
+                .flatten()
+                .filter_map(SliceBound::into_backtrace),
+        );
+
+        return result
+            .downgrade(|| location)
+            .into_with_declared_type(declared_type);
+    }
+
+    ctx.report_error(AnalysisErrorKind::InvalidSlicingBase {
+        location: node.location.clone(),
+    });
+
+    ValueRef::new_bottom(location, declared_type)
+}
+
+fn visit_slice_bound<'a>(ctx: &mut AnalysisContext<'a>, expr: &ExprNode<'a>) -> SliceBound<'a> {
+    let (backtrace, known) = super::get_expr_backtrace_and_const(ctx, expr);
+
+    let known = match known {
+        Some(SimpleConstValue::Integer(value)) => Some(value),
+        _ => None,
+    };
+
+    SliceBound::new(known, backtrace)
 }

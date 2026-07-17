@@ -15,8 +15,8 @@ use crate::{
     labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{funcs, types},
     values::{
-        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue, Value,
-        ValueRef,
+        BacktraceContainer, CompositeValue, SelfAwareBacktraceContainer, SimpleConstValue,
+        SliceValue, Value, ValueRef,
     },
 };
 
@@ -55,11 +55,8 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
 
             let location = ctx.pin(location.clone());
 
-            let value = Value::Slice(visit_integer_keyed_composite_literal(
-                ctx,
-                values,
-                location.clone(),
-            ));
+            let composite = visit_integer_keyed_composite_literal(ctx, values, location.clone());
+            let value = Value::Slice(SliceValue::new_from_composite(composite, location.clone()));
 
             ValueRef::new(value, location, None)
         }
@@ -120,11 +117,11 @@ fn visit_unknown_composite_literal<'a>(
             values,
             location.clone(),
         )),
-        Some(TypeNode::Slice { .. }) => Value::Slice(visit_integer_keyed_composite_literal(
-            ctx,
-            values,
-            location.clone(),
-        )),
+        Some(TypeNode::Slice { .. }) => {
+            let composite = visit_integer_keyed_composite_literal(ctx, values, location.clone());
+
+            Value::Slice(SliceValue::new_from_composite(composite, location.clone()))
+        }
         Some(TypeNode::Map { .. }) => {
             Value::Map(visit_map_composite_literal(ctx, values, location.clone()))
         }

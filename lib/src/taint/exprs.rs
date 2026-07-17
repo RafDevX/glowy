@@ -497,7 +497,11 @@ fn visit_ambiguous_bracket_access<'a>(
     // convert our node into an IndexingNode since it'd lead to base being
     // visited multiple times (which would be bad for, e.g., side-effects)
 
-    let (index_backtrace, index_const) = get_expr_backtrace_and_const(ctx, &node.index_if_indexing);
+    #[rustfmt::skip]
+    let (index_backtrace, index_const) = get_expr_backtrace_and_untainted_const(
+        ctx,
+        &node.index_if_indexing
+    );
     // ^^ note that we would rather visit the index before the base in case they
     // have side-effects, but it is simply not possible to do that here since we
     // can only really disambiguate after visiting the base, and trying to visit
@@ -506,11 +510,14 @@ fn visit_ambiguous_bracket_access<'a>(
     // actually visit the index. HOWEVER, this is actually not so bad, since the
     // Go spec does not prescribe an order of evaluation for base / index at all
 
+    let last_pos = component::is_last_position_indexing(ctx, &node.base, &node.index_if_indexing);
+
     component::visit_indexing_with(
         ctx,
         &base,
         index_backtrace,
         index_const.as_ref(),
+        last_pos,
         &node.location,
     )
 }

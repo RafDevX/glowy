@@ -412,7 +412,19 @@ fn get_for_range_values<'a>(
         return vec![channel.receive(&location).0];
     }
 
-    // array / slice / map: 2 values (key/index, element i.e. coll[k])
+    // slice: 2 values (index, element i.e. coll[i])
+    if value.is_slice()
+        && let Some(slice) = value.as_slice()
+    {
+        let index_bt = slice.len_backtrace(location.clone());
+
+        return vec![
+            ValueRef::from_backtrace_or_bottom_at(index_bt, || location.clone()),
+            slice.range_element(location),
+        ];
+    }
+
+    // array / map: 2 values (key/index, element i.e. coll[k])
     if let Some(composite) = value.as_composite() {
         let index_bt = composite.backtrace_at_location(location.clone());
 

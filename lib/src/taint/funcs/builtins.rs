@@ -11,18 +11,23 @@
 //! treated as function calls by the parser, but rather as their own unique
 //! kinds of expressions that are then dispatched by the analyzer on visit.
 
-use std::{borrow::Cow, cell::Cell, collections::HashMap};
+use std::{borrow::Cow, cell::Cell, collections::HashMap, rc::Rc};
 
-use parser::ast::{CallNode, ExprNode, MakeNode, TypeNode};
+use parser::{
+    Location,
+    ast::{CallNode, ExprNode, MakeNode, TypeNode},
+};
 
 use crate::{
+    Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{exprs, mutation::LeftValue, types},
+    types::TypeInfo,
     values::{
-        BacktraceContainer, ChannelValue, CompositeValue, CompositeValueAdapter, SimpleConstValue,
-        Value, ValueRef,
+        ChannelValue, CompositeValue, CompositeValueAdapter, SimpleConstValue, SliceBound,
+        SliceValue, Value, ValueRef,
     },
 };
 
@@ -50,94 +55,9 @@ pub fn visit_make<'a>(
         reason = "We explicitly only support these types (per Go spec)"
     )]
     match resolved.as_ref().unwrap_or(&node.r#type) {
-        TypeNode::Slice { .. } => {
-            let known_len = node
-                .n
-                .as_deref()
-                .and_then(|expr| resolve_const_len(ctx, expr, arg_consts));
-
-            let n = node
-                .n
-                .as_ref()
-                .map(|expr| exprs::visit_single_expr(ctx, expr));
-
-            let m = node.m.as_ref().map(|expr| {
-                capture_arg_const(ctx, expr, arg_consts, 2);
-
-                exprs::visit_single_expr(ctx, expr)
-            });
-
-            let location = ctx.pin(node.location.clone());
-
-            #[rustfmt::skip]
-            let composite = CompositeValue::new(
-                HashMap::new(),
-                n.into_iter().chain(m),
-                None,
-                known_len,
-                location.clone(),
-            );
-
-            ValueRef::new(Value::Slice(composite), location, declared_type)
-        }
-        TypeNode::Map { .. } => {
-            if let Some(m) = &node.m {
-                ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                    expected: 2,
-                    found: 3,
-                    location: node.location.clone(),
-                });
-
-                // visit to trigger side effects even though it shouldn't exist
-                capture_arg_const(ctx, m, arg_consts, 2);
-                exprs::visit_single_expr(ctx, m);
-            }
-
-            // we assume "initial space for approximately n elements" is not
-            // (easily) observable, so n does NOT taint the resulting map.
-            // we just visit to trigger side effects
-            node.n.as_ref().map(|expr| {
-                capture_arg_const(ctx, expr, arg_consts, 1);
-
-                exprs::visit_single_expr(ctx, expr)
-            });
-
-            ValueRef::new(
-                Value::Map(CompositeValue::empty(None)),
-                ctx.pin(node.location.clone()),
-                declared_type,
-            )
-        }
-        TypeNode::Channel { .. } => {
-            if let Some(m) = &node.m {
-                ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                    expected: 2,
-                    found: 3,
-                    location: node.location.clone(),
-                });
-
-                // visit to trigger side effects even though it shouldn't exist
-                capture_arg_const(ctx, m, arg_consts, 2);
-                exprs::visit_single_expr(ctx, m);
-            }
-
-            let location = ctx.pin(node.location.clone());
-
-            // buffer size determines when sends block (full buffer => sender
-            // waits), and that blocking is observable to any receiver via
-            // send/receive timing -- so we seed the channel's inner backtrace
-            // with n's backtrace, ensuring everything later received from
-            // this channel inherits n's label as a sound over-approximation
-            let initial = node.n.as_ref().and_then(|expr| {
-                capture_arg_const(ctx, expr, arg_consts, 1);
-
-                exprs::get_expr_backtrace(ctx, expr)
-            });
-
-            let channel = ChannelValue::new_allocated(initial, location.clone());
-
-            ValueRef::new(Value::Channel(channel), location, declared_type)
-        }
+        TypeNode::Slice { .. } => visit_make_slice(ctx, node, arg_consts, declared_type),
+        TypeNode::Map { .. } => visit_make_map(ctx, node, arg_consts, declared_type),
+        TypeNode::Channel { .. } => visit_make_channel(ctx, node, arg_consts, declared_type),
         _ => {
             // we don't know what this is, so there's nothing we can do...
             ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
@@ -171,15 +91,123 @@ pub fn visit_make<'a>(
     }
 }
 
-fn resolve_const_len(
-    ctx: &AnalysisContext<'_>,
-    expr: &ExprNode<'_>,
+pub fn visit_make_slice<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &MakeNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
-) -> Option<u64> {
-    match capture_arg_const(ctx, expr, arg_consts, 1) {
-        Some(SimpleConstValue::Integer(length)) => Some(*length),
-        _ => None,
+    declared_type: Option<Rc<TypeInfo<'a>>>,
+) -> ValueRef<'a> {
+    let known_len = node
+        .n
+        .as_deref()
+        .and_then(|expr| capture_integer_arg_const(ctx, expr, arg_consts, 1));
+
+    let length_backtrace = node
+        .n
+        .as_ref()
+        .and_then(|expr| exprs::visit_single_expr(ctx, expr).backtrace());
+
+    let length = SliceBound::new(known_len, length_backtrace);
+
+    let capacity = node.m.as_ref().map_or_else(
+        || length.clone(),
+        |expr| {
+            let known = capture_integer_arg_const(ctx, expr, arg_consts, 2);
+            let backtrace = exprs::visit_single_expr(ctx, expr).backtrace();
+
+            SliceBound::new(known, backtrace)
+        },
+    );
+
+    let location = ctx.pin(node.location.clone());
+
+    let composite = CompositeValue::new(
+        HashMap::new(), // empty
+        [],
+        None,
+        known_len,
+        location.clone(),
+    );
+
+    let slice = SliceValue::new_allocated(
+        composite, // used as backing array
+        length,
+        capacity,
+        None,
+        location.clone(),
+    );
+
+    ValueRef::new(Value::Slice(slice), location, declared_type)
+}
+
+pub fn visit_make_map<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &MakeNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+    declared_type: Option<Rc<TypeInfo<'a>>>,
+) -> ValueRef<'a> {
+    if let Some(m) = &node.m {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 2,
+            found: 3,
+            location: node.location.clone(),
+        });
+
+        // visit to trigger side effects even though it shouldn't exist
+        capture_arg_const(ctx, m, arg_consts, 2);
+        exprs::visit_single_expr(ctx, m);
     }
+
+    // we assume "initial space for approximately n elements" is not (easily)
+    // observable, so n does NOT taint the resulting map. we just visit in order
+    // to trigger side effects
+    node.n.as_ref().map(|expr| {
+        capture_arg_const(ctx, expr, arg_consts, 1);
+
+        exprs::visit_single_expr(ctx, expr)
+    });
+
+    ValueRef::new(
+        Value::Map(CompositeValue::empty(None)),
+        ctx.pin(node.location.clone()),
+        declared_type,
+    )
+}
+
+pub fn visit_make_channel<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &MakeNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+    declared_type: Option<Rc<TypeInfo<'a>>>,
+) -> ValueRef<'a> {
+    if let Some(m) = &node.m {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected: 2,
+            found: 3,
+            location: node.location.clone(),
+        });
+
+        // visit to trigger side effects even though it shouldn't exist
+        capture_arg_const(ctx, m, arg_consts, 2);
+        exprs::visit_single_expr(ctx, m);
+    }
+
+    let location = ctx.pin(node.location.clone());
+
+    // buffer size determines when sends block (full buffer => sender waits),
+    // and that blocking is easily observable to any receiver via send/receive
+    // timing -- so we seed the channel's inner backtrace with n's backtrace,
+    // ensuring everything later received from this channel inherits n's label
+    // as a sound over-approximation
+    let initial = node.n.as_ref().and_then(|expr| {
+        capture_arg_const(ctx, expr, arg_consts, 1);
+
+        exprs::get_expr_backtrace(ctx, expr)
+    });
+
+    let channel = ChannelValue::new_allocated(initial, location.clone());
+
+    ValueRef::new(Value::Channel(channel), location, declared_type)
 }
 
 pub fn visit_append<'a>(
@@ -187,8 +215,8 @@ pub fn visit_append<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
 ) -> ValueRef<'a> {
-    // Note: `append` in Go returns a new slice with the appended value, but it
-    // does NOT mutate the original slice!
+    // `append` returns a new descriptor, but it may still write through the
+    // original backing array when the existing capacity is sufficient
 
     let location = ctx.pin(node.location.clone());
 
@@ -233,11 +261,9 @@ pub fn visit_append<'a>(
         capture_arg_const(ctx, other, arg_consts, 1);
         let src_value = exprs::visit_single_expr(ctx, other);
 
-        // we need to clone this since we cannot hold a reference to both a
-        // ValueRef and its CompositeValue at the same time
-        let src_slice = src_value.as_complex_sliceable().as_deref().cloned();
+        let src_slice = src_value.as_slice();
 
-        slice.extend(src_slice, &src_value, location);
+        slice.extend(src_slice.as_deref(), &src_value, &location);
     } else {
         // multiple arguments corresponding to individual elements
         for (index, el) in node.args.iter().enumerate().skip(1) {
@@ -245,7 +271,7 @@ pub fn visit_append<'a>(
 
             let value = exprs::visit_single_expr(ctx, el);
 
-            slice.push(value, || location.clone());
+            slice.push(value, &location);
         }
     }
 
@@ -311,8 +337,9 @@ pub fn visit_copy<'a>(
                 return None; // abort mutation
             };
 
-            slice.clear(); // we don't want const info anymore
-            slice.set_dyn(&src, location.clone());
+            // a copy may leave a suffix of dst untouched, so we use a weak
+            // aggregate update to retain those pre-existing element labels
+            slice.set_dyn(&src, &location);
 
             drop(slice);
 
@@ -330,10 +357,8 @@ pub fn visit_clear<'a>(
     arg_consts: &mut [Option<SimpleConstValue>],
 ) {
     // `clear` has different behavior depending on whether its argument is a map
-    // or a slice. For maps, the result is independent of the original value, so
-    // we can just clear the backtrace completely. However, for slices, the
-    // slice length remains unchanged (information leak), so we must keep the
-    // existing backtrace - just that all consts become dyns.
+    // or a slice. A map becomes empty, whereas a slice keeps its descriptor and
+    // resets only the elements in its current range.
 
     // Note: `clear` has no return value.
 
@@ -365,8 +390,6 @@ pub fn visit_clear<'a>(
                 return Some(ValueRef::new_bottom(location.clone(), None));
             }
 
-            let backtrace = current.backtrace_at_location(location.clone());
-
             let Some(mut slice) = current.as_slice_mut() else {
                 ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
                     location: node.location.clone(),
@@ -375,14 +398,7 @@ pub fn visit_clear<'a>(
                 return None; // abort mutation
             };
 
-            slice.clear();
-
-            let backtrace_value = ValueRef::from_backtrace_or_bottom_at(
-                backtrace, // current value's aggregate backtrace
-                || location.clone(),
-            );
-
-            slice.set_dyn(&backtrace_value, location.clone());
+            slice.clear(&location);
 
             drop(slice);
 
@@ -521,6 +537,23 @@ pub fn visit_len<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
 ) -> ValueRef<'a> {
+    visit_collection_size(ctx, node, arg_consts, SliceValue::len_backtrace)
+}
+
+pub fn visit_cap<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+) -> ValueRef<'a> {
+    visit_collection_size(ctx, node, arg_consts, SliceValue::cap_backtrace)
+}
+
+fn visit_collection_size<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+    slice_size: impl FnOnce(&SliceValue<'a>, Pinned<'a, Location>) -> Option<LabelBacktrace<'a>>,
+) -> ValueRef<'a> {
     let location = ctx.pin(node.location.clone());
 
     let [arg] = node.args.as_slice() else {
@@ -536,11 +569,12 @@ pub fn visit_len<'a>(
     capture_arg_const(ctx, arg, arg_consts, 0);
     let value = exprs::visit_single_expr(ctx, arg);
 
-    // check with `is_composite` before casting with `as_composite` to avoid
-    // triggering an upgrade, as `len` can also operate on strings and channels
-    // and we don't want to mis-upgrade them to an array, especially since the
-    // upgrade would be useless to us here (wouldn't have known length anyway)
-    let backtrace = if value.is_composite()
+    // guard shape access to avoid upgrading strings or channels to arrays
+    let backtrace = if value.is_slice()
+        && let Some(slice) = value.as_slice()
+    {
+        slice_size(&slice, location.clone())
+    } else if value.is_composite()
         && let Some(composite) = value.as_composite()
     {
         composite.length_backtrace_at_location(location.clone())
@@ -562,4 +596,16 @@ fn capture_arg_const<'c>(
     *slot = exprs::try_resolve_simple_const(ctx, expr);
 
     slot.as_ref()
+}
+
+fn capture_integer_arg_const(
+    ctx: &AnalysisContext<'_>,
+    expr: &ExprNode<'_>,
+    arg_consts: &mut [Option<SimpleConstValue>],
+    index: usize,
+) -> Option<u64> {
+    match capture_arg_const(ctx, expr, arg_consts, index) {
+        Some(SimpleConstValue::Integer(value)) => Some(*value),
+        _ => None,
+    }
 }

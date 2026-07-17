@@ -71,15 +71,6 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.r#const = HashMap::new();
-        self.r#dyn = None;
-        self.dyn_overrides.clear();
-        self.keys = None;
-        // known_len is preserved since copy/clear doesn't change the underlying
-        // slice's size, only its elements are reset to their zero-values
-    }
-
     pub fn known_len(&self) -> Option<u64> {
         self.known_len
     }
@@ -190,98 +181,6 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
             keys,
             known_len: self.known_len,
         }
-    }
-}
-
-// slice-shaped (u64-keyed) specific operations. these mirror `append(s, x)`
-// and `append(s, xs...)` on slice values, exploiting `known_len` to place the
-// appended elements at their exact indices whenever that length is available
-impl<'a> CompositeValue<'a, u64> {
-    // append a single element
-    pub fn push(
-        &mut self,
-        value: ValueRef<'a>,
-        at_location: impl FnOnce() -> Pinned<'a, Location>,
-    ) {
-        if let Some(length) = self.known_len {
-            // place the value at the exact index
-            self.set_const(length, value);
-
-            // grow length
-            self.known_len = Some(length.saturating_add(1));
-        } else {
-            // degrade to r#dyn (sound but coarse)
-            self.set_dyn(&value, at_location());
-        }
-    }
-
-    pub fn extend(
-        &mut self,
-        src_slice: Option<Self>,
-        src_value: &ValueRef<'a>,
-        at_location: Pinned<'a, Location>,
-    ) {
-        if let Some(src) = src_slice
-            && let Some(self_len) = self.known_len
-            && let Some(src_len) = src.known_len
-        {
-            // both have known lengths, so be smart about it
-
-            #[expect(clippy::iter_over_hash_type, reason = "Mutation order is irrelevant")]
-            for (k, v) in &src.r#const {
-                // set_const overwrites existing values, but that should be fine
-                // since self's positions in the extended range of
-                // [self_len, self_len + src_len[ were previously blank
-                // (any reads there would have returned Bottom + dyn)
-                self.set_const(self_len.saturating_add(*k), v.clone());
-            }
-
-            // fold src's dyn (which conservatively models reads at unknown
-            // positions in other) into self's dyn. this over-taints self's
-            // original portion but is still strictly more precise than the
-            // alternative of set_dyn'ing src's aggregate backtrace (which would
-            // additionally fold every const value's label into self's dyn)
-            self.r#dyn = LabelBacktrace::combine_options(
-                self.r#dyn.clone(),
-                src.r#dyn.clone(),
-                LabelBacktraceKind::Assignment,
-                Cow::Owned(at_location),
-            );
-
-            if src.r#dyn.is_some() {
-                self.dyn_overrides.clear();
-            }
-
-            self.known_len = Some(self_len.saturating_add(src_len));
-        } else {
-            // degrade to r#dyn (sound but coarse)
-            self.set_dyn(src_value, at_location);
-        }
-    }
-}
-
-impl<'a, K: Eq + Hash + Ord> CompositeValue<'a, K> {
-    pub fn slice_const(
-        &self,
-        low: Option<&K>,
-        high: Option<&K>,
-        at_location: Pinned<'a, Location>,
-    ) -> Option<LabelBacktrace<'a>> {
-        let children: Vec<_> = self
-            .r#const
-            .iter()
-            .filter(|(k, _)| low.as_ref().is_none_or(|l| *k >= l))
-            .filter(|(k, _)| high.as_ref().is_none_or(|h| *k < h))
-            .map(|(_, v)| v)
-            .filter_map(ValueRef::backtrace)
-            .chain(self.r#dyn.clone())
-            .collect();
-
-        LabelBacktrace::fold(&children, LabelBacktraceKind::Expression, None, at_location)
-    }
-
-    pub fn slice_dyn(&self, at_location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
-        self.backtrace_at_location(at_location)
     }
 }
 

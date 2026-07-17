@@ -209,6 +209,7 @@ fn try_resolve_special_builtin_call<'a>(
             vec![]
         }),
         "len" => ("len", vec![builtins::visit_len(ctx, node, &mut arg_consts)]),
+        "cap" => ("cap", vec![builtins::visit_cap(ctx, node, &mut arg_consts)]),
         _ => return None,
     };
 
