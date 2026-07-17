@@ -41,6 +41,8 @@ func selectedValues(yield func(int) bool) {
 			if !yield(value) {
 				// glowy::assert::{private, high}
 				fmt.Println(0)
+
+				return
 			}
 		}
 	}
