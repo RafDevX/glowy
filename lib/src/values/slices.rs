@@ -166,11 +166,9 @@ impl<'a> SliceValue<'a> {
     }
 
     fn precise_len(&self) -> Option<u64> {
-        if self.access.is_none() && self.start.backtrace.is_none() && self.end.backtrace.is_none() {
-            self.known_len()
-        } else {
-            None
-        }
+        let (start, end) = self.precise_range()?;
+
+        Some(end - start)
     }
 
     pub fn len_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
@@ -198,6 +196,16 @@ impl<'a> SliceValue<'a> {
             None,
             location,
         )
+    }
+
+    fn precise_range(&self) -> Option<(u64, u64)> {
+        if self.access.is_none() && self.start.backtrace.is_none() && self.end.backtrace.is_none() {
+            let (start, end) = self.start.known.zip(self.end.known)?;
+
+            (start <= end).then_some((start, end))
+        } else {
+            None
+        }
     }
 
     pub fn range_element(&self, location: Pinned<'a, Location>) -> ValueRef<'a> {
@@ -522,10 +530,18 @@ impl<'a> SliceValue<'a> {
 
 impl<'a> BacktraceContainer<'a> for SliceValue<'a> {
     fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
+        let precise_range = self.precise_range();
+
         let backing_backtraces: Vec<_> = self
             .backings
             .iter()
-            .filter_map(|backing| backing.backtrace_at_location(location.clone()))
+            .filter_map(|backing| {
+                if let Some((start, end)) = precise_range {
+                    backing.element_backtrace_in_range(start, end, location.clone())
+                } else {
+                    backing.backtrace_at_location(location.clone())
+                }
+            })
             .collect();
 
         let mut backtrace = LabelBacktrace::fold(
@@ -799,15 +815,6 @@ impl<'a> SliceBacking<'a> {
         Self(self.0.copy_shape(backtrace))
     }
 
-    fn copy_reindexed_range(
-        &self,
-        start: u64,
-        end: u64,
-        known_len: Option<u64>,
-    ) -> CompositeValue<'a, u64> {
-        self.as_array().copy_reindexed_range(start, end, known_len)
-    }
-
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
@@ -815,6 +822,25 @@ impl<'a> SliceBacking<'a> {
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
         Self(self.0.realize(from_func, from_slot, concrete))
+    }
+
+    fn element_backtrace_in_range(
+        &self,
+        start: u64,
+        end: u64,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        self.as_array()
+            .element_backtrace_in_range(start, end, location)
+    }
+
+    fn copy_reindexed_range(
+        &self,
+        start: u64,
+        end: u64,
+        known_len: Option<u64>,
+    ) -> CompositeValue<'a, u64> {
+        self.as_array().copy_reindexed_range(start, end, known_len)
     }
 }
 

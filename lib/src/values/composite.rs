@@ -184,7 +184,38 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
     }
 }
 
-impl CompositeValue<'_, u64> {
+impl<'a> CompositeValue<'a, u64> {
+    pub(crate) fn element_backtrace_in_range(
+        &self,
+        start: u64,
+        end: u64,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        let range = start..end;
+        let range_len = end.checked_sub(start);
+
+        let overridden_count = self
+            .dyn_overrides
+            .iter()
+            .filter(|index| range.contains(index))
+            .count();
+
+        let dynamic_is_fully_overridden = u64::try_from(overridden_count).ok() == range_len;
+
+        let mut children: Vec<_> = self
+            .r#const
+            .iter()
+            .filter(|(index, _)| range.contains(index))
+            .filter_map(|(_, value)| value.backtrace())
+            .collect();
+
+        if !dynamic_is_fully_overridden && let Some(r#dyn) = &self.r#dyn {
+            children.push(r#dyn.clone());
+        }
+
+        LabelBacktrace::fold(&children, LabelBacktraceKind::Expression, None, location)
+    }
+
     pub(crate) fn copy_reindexed_range(
         &self,
         start: u64,
