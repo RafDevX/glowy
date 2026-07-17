@@ -553,8 +553,7 @@ fn is_integer_range_expr<'a>(ctx: &AnalysisContext<'a>, expr: &ExprNode<'a>) -> 
                 return true;
             };
 
-            let borrow = symbol.borrow();
-            let value = borrow.value().get();
+            let value = symbol.borrow().value().get();
 
             let Some(func) = value.as_function() else {
                 return false;
