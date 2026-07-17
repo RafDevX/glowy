@@ -225,16 +225,16 @@ impl<'a> SliceValue<'a> {
             location.clone(),
         );
 
-        if dependency.is_none()
-            && let Some((end, maximum)) = self.end.known.zip(self.maximum.known)
-        {
+        if let Some((end, maximum)) = self.end.known.zip(self.maximum.known) {
             if end >= maximum {
                 self.allocate_for_append(value, location);
 
                 return;
             }
 
-            if let [single_backing] = self.backings.as_slice() {
+            if dependency.is_none()
+                && let [single_backing] = self.backings.as_slice()
+            {
                 single_backing.write(Some(end), value, Cow::Borrowed(location));
 
                 self.end.known = end.checked_add(1);
@@ -261,28 +261,85 @@ impl<'a> SliceValue<'a> {
         let old_len = self.known_len();
         let new_len = old_len.and_then(|length| length.checked_add(1));
 
-        let old_value = ValueRef::from_backtrace_or_bottom_at(
-            self.backtrace_at_location(location.clone()),
-            || location.clone(),
-        );
+        let composite = if let Some((mut copied, precise_old_len)) =
+            self.copy_precise_range_for_append(new_len, location)
+        {
+            copied.set_const(precise_old_len, value);
 
-        let mut known = HashMap::new();
-        let mut others = vec![old_value];
-
-        if let Some(old_len) = old_len {
-            known.insert(old_len, value);
+            copied
         } else {
-            others.push(value);
-        }
+            let old_value = ValueRef::from_backtrace_or_bottom_at(
+                self.backtrace_at_location(location.clone()),
+                || location.clone(),
+            );
 
-        let composite = CompositeValue::new(known, others, None, new_len, location.clone());
+            // a sensitive or unknown start can select any backing element, so
+            // retaining particular old entries here would be unsound. keep
+            // their aggregate dependency, but strongly update the appended
+            // element when its relative index is known: allocation gives us a
+            // fresh backing, so that position cannot contain an old element
+            let mut others = vec![old_value];
+
+            if old_len.is_none() {
+                others.push(value.clone());
+            }
+
+            let mut composite = CompositeValue::new(
+                HashMap::new(), // no const; old flattened into dyn
+                others,
+                None,
+                new_len,
+                location.clone(),
+            );
+
+            if let Some(old_len) = old_len {
+                composite.set_const(old_len, value);
+            }
+
+            composite
+        };
+
         let length = SliceBound::new(new_len, self.len_backtrace(location.clone()));
 
+        // `append` keeps the same underlying (backing) array if there is enough
+        // capacity, but if we need to allocate (i.e., this function), then Go
+        // spec specifies that a new backing array is used instead
         self.backings = vec![SliceBacking::new(composite, location.clone())];
         self.start = SliceBound::new(Some(0), None);
         self.end = length.clone();
         self.maximum = SliceBound::new(None, length.backtrace.clone());
         self.access = None;
+    }
+
+    fn copy_precise_range_for_append(
+        &self,
+        new_len: Option<u64>,
+        location: &Pinned<'a, Location>,
+    ) -> Option<(CompositeValue<'a, u64>, u64)> {
+        // the end bound determines how many elements are copied, but a known
+        // end remains exact even when its provenance is labeled. in contrast,
+        // a labeled start is an element-selection dependency and must not be
+        // used to retain entries at particular backing indices
+        if self.access.is_some() || self.start.backtrace.is_some() {
+            return None;
+        }
+
+        let old_len = self.known_len()?;
+        let (start, end) = self.start.known.zip(self.end.known)?;
+
+        let copied = self
+            .backings
+            .iter()
+            .map(|backing| backing.copy_reindexed_range(start, end, new_len))
+            .reduce(|left, right| {
+                left.merge_with(
+                    &right,
+                    LabelBacktraceKind::Expression,
+                    Cow::Borrowed(location),
+                )
+            })?;
+
+        Some((copied, old_len))
     }
 
     pub fn extend(
@@ -740,6 +797,15 @@ impl<'a> SliceBacking<'a> {
 
     fn copy_shape(&self, backtrace: LabelBacktrace<'a>) -> Self {
         Self(self.0.copy_shape(backtrace))
+    }
+
+    fn copy_reindexed_range(
+        &self,
+        start: u64,
+        end: u64,
+        known_len: Option<u64>,
+    ) -> CompositeValue<'a, u64> {
+        self.as_array().copy_reindexed_range(start, end, known_len)
     }
 
     fn realize(

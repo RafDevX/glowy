@@ -184,6 +184,35 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
     }
 }
 
+impl CompositeValue<'_, u64> {
+    pub(crate) fn copy_reindexed_range(
+        &self,
+        start: u64,
+        end: u64,
+        known_len: Option<u64>,
+    ) -> Self {
+        let reindex = |index: &u64| (*index >= start && *index < end).then_some(*index - start);
+
+        let r#const = self
+            .r#const
+            .iter()
+            .filter_map(|(index, value)| Some((reindex(index)?, value.copy())))
+            .collect();
+
+        let dyn_overrides = self.dyn_overrides.iter().filter_map(reindex).collect();
+
+        Self {
+            r#const,
+            r#dyn: self.r#dyn.clone(),
+            dyn_overrides,
+            keys: self.keys.clone(),
+            // supplied by the caller because the new composite may include
+            // elements added immediately after the copied range
+            known_len,
+        }
+    }
+}
+
 impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
     fn backtrace_at_location(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
         let children: Vec<_> = self
