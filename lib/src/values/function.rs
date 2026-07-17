@@ -32,8 +32,9 @@ use crate::{
 pub struct FunctionValue<'a> {
     r#ref: FunctionRef<'a>,
     signature: Option<FunctionSignatureNode<'a>>, // None if no known decl
-    // ^ this will generally only be None for blackbox-inferred functions
-    has_receiver: bool,
+    // whether aliasing semantics should be employed for the receiver (if any)
+    // (unknown blackbox receivers are conservatively classified as pointers)
+    receiver_kind: Option<ReceiverKind>,
     // result types resolved at definition (context may be missing at call-time)
     declared_result_types: Vec<Option<Rc<TypeInfo<'a>>>>,
     // whether this value represents a type symbol that, when "called", really
@@ -84,14 +85,14 @@ impl<'a> FunctionValue<'a> {
     pub fn new(
         r#ref: FunctionRef<'a>,
         signature: Option<FunctionSignatureNode<'a>>,
-        has_receiver: bool,
+        receiver_kind: Option<ReceiverKind>,
         declared_result_types: Vec<Option<Rc<TypeInfo<'a>>>>,
         backtrace: Option<LabelBacktrace<'a>>,
     ) -> Self {
         Self {
             r#ref,
             signature,
-            has_receiver,
+            receiver_kind,
             declared_result_types,
             is_type_constructor: false,
             known_underlying_type: None,
@@ -146,7 +147,7 @@ impl<'a> FunctionValue<'a> {
             result,
         };
 
-        Self::new(r#ref, Some(signature), false, vec![None; n_returned], None)
+        Self::new(r#ref, Some(signature), None, vec![None; n_returned], None)
     }
 
     pub fn new_type_constructor(
@@ -172,7 +173,7 @@ impl<'a> FunctionValue<'a> {
         let mut value = Self::new(
             r#ref,
             Some(signature), // never actually used for analysis, so dummy values are ok
-            false,
+            None,
             vec![target_type],
             None,
         );
@@ -186,7 +187,10 @@ impl<'a> FunctionValue<'a> {
     pub fn new_unknown(backtrace: Option<LabelBacktrace<'a>>, has_receiver: bool) -> Self {
         let r#ref = FunctionRef::BlackboxInference(Uuid::new_v4());
 
-        Self::new(r#ref, None, has_receiver, Vec::new(), backtrace)
+        // conservatively preserve the possibility of mutable referent state
+        let receiver_kind = has_receiver.then_some(ReceiverKind::Pointer);
+
+        Self::new(r#ref, None, receiver_kind, Vec::new(), backtrace)
     }
 
     pub fn r#ref(&self) -> &FunctionRef<'a> {
@@ -198,7 +202,11 @@ impl<'a> FunctionValue<'a> {
     }
 
     pub fn has_receiver(&self) -> bool {
-        self.has_receiver
+        self.receiver_kind.is_some()
+    }
+
+    pub fn receiver_is_pointer(&self) -> bool {
+        self.receiver_kind == Some(ReceiverKind::Pointer)
     }
 
     pub fn declared_result_types(&self) -> &[Option<Rc<TypeInfo<'a>>>] {
@@ -321,10 +329,10 @@ impl<'a> FunctionValue<'a> {
             return false;
         }
 
-        if self.has_receiver != other.has_receiver {
-            // mismatching existence of receiver means a Receiver slot would
-            // have no counterpart in the other function and rebinding it
-            // would yield a placeholder that never gets realized
+        if self.receiver_kind != other.receiver_kind {
+            // a missing receiver would leave a Receiver slot without a
+            // counterpart, while differing receiver kinds would change whether
+            // deferred invocation observes mutable referent state
             return false;
         }
 
@@ -568,7 +576,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
-            has_receiver: self.has_receiver,
+            receiver_kind: self.receiver_kind,
             declared_result_types: self.declared_result_types.clone(),
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
@@ -602,7 +610,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
         Self {
             r#ref: self.r#ref.clone(),
             signature: self.signature.clone(),
-            has_receiver: self.has_receiver,
+            receiver_kind: self.receiver_kind,
             declared_result_types: self.declared_result_types.clone(),
             is_type_constructor: self.is_type_constructor,
             known_underlying_type: self.known_underlying_type.clone(),
@@ -633,7 +641,7 @@ impl SnapshotAware for FunctionValue<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.r#ref.snapshot_aware_eq(&other.r#ref)
             && self.signature == other.signature
-            && self.has_receiver == other.has_receiver
+            && self.receiver_kind == other.receiver_kind
             && self.declared_result_types == other.declared_result_types
             && self.is_type_constructor == other.is_type_constructor
             && self.known_underlying_type == other.known_underlying_type
@@ -767,6 +775,22 @@ impl SnapshotAware for FunctionRef<'_> {
                 Self::Named(_) | Self::Anonymous(_) | Self::BuiltIn(_) | Self::BlackboxInference(_),
                 _,
             ) => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReceiverKind {
+    Value,
+    Pointer,
+}
+
+impl From<&FunctionParamDeclNode<'_>> for ReceiverKind {
+    fn from(receiver: &FunctionParamDeclNode<'_>) -> Self {
+        if matches!(receiver.r#type, TypeNode::Pointer { .. }) {
+            Self::Pointer
+        } else {
+            Self::Value
         }
     }
 }

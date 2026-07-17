@@ -17,7 +17,7 @@ use crate::{
     policy::{BlanketDirective, BlanketDirectives},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
-    taint::{GotoConvergenceState, ResolvedCall},
+    taint::{DeferredCallReferents, GotoConvergenceState, ResolvedCall},
     types::TypeRegistry,
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -252,7 +252,12 @@ impl<'a> AnalysisContext<'a> {
         self.deferred_calls.pop();
     }
 
-    pub fn register_deferred_call(&mut self, node: CallNode<'a>, resolved: ResolvedCall<'a>) {
+    pub fn register_deferred_call(
+        &mut self,
+        node: CallNode<'a>,
+        resolved: ResolvedCall<'a>,
+        referents: DeferredCallReferents<'a>,
+    ) {
         // capture before the mutable borrow below; cheap if there's no backtrace
         let captured_branch_backtrace = self.branch_backtrace().cloned();
 
@@ -263,6 +268,7 @@ impl<'a> AnalysisContext<'a> {
         top.push(DeferredCall {
             node,
             resolved,
+            referents,
             captured_branch_backtrace,
         });
     }
@@ -596,6 +602,7 @@ impl AnalysisStage {
 pub struct DeferredCall<'a> {
     pub node: CallNode<'a>,
     pub resolved: ResolvedCall<'a>,
+    pub referents: DeferredCallReferents<'a>,
     pub captured_branch_backtrace: Option<LabelBacktrace<'a>>,
 }
 

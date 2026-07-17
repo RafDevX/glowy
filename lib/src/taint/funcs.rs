@@ -1,11 +1,14 @@
 use std::{borrow::Cow, rc::Rc};
 
 use parser::{
-    Annotation, Location,
-    ast::{BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionSignatureNode},
+    Annotation, Location, Span,
+    ast::{BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionSignatureNode, TypeNode},
 };
 
-pub use self::{captures::call_site::derive_stable_capture_concretes, returns::visit_return};
+pub use self::{
+    captures::call_site::derive_stable_capture_concretes, defers::DeferredCallReferents,
+    returns::visit_return,
+};
 use crate::{
     Pinned,
     context::{AnalysisContext, DeferredCall},
@@ -21,6 +24,7 @@ pub mod builtins;
 mod call_application;
 mod call_resolution;
 mod captures;
+mod defers;
 mod definitions;
 mod returns;
 
@@ -125,7 +129,9 @@ pub fn visit_defer<'a>(ctx: &mut AnalysisContext<'a>, expr: &ExprNode<'a>, locat
     match call_resolution::resolve_call(ctx, call) {
         CallResolution::Final(_) => {} // nothing left to do
         CallResolution::PendingApply(resolved) => {
-            ctx.register_deferred_call(call.clone(), resolved);
+            let referents = DeferredCallReferents::capture(ctx, &resolved, call);
+
+            ctx.register_deferred_call(call.clone(), resolved, referents);
         }
     }
 }
@@ -140,7 +146,8 @@ fn apply_deferred_calls(ctx: &mut AnalysisContext<'_>) {
     for pending in ctx.take_deferred_calls().into_iter().rev() {
         let DeferredCall {
             node,
-            resolved,
+            mut resolved,
+            referents,
             captured_branch_backtrace,
         } = pending;
 
@@ -148,6 +155,8 @@ fn apply_deferred_calls(ctx: &mut AnalysisContext<'_>) {
         if let Some(bt) = captured_branch_backtrace {
             ctx.push_branch_backtrace(bt);
         }
+
+        referents.observe(&mut resolved);
 
         call_application::apply_call(ctx, &node, resolved);
 
@@ -177,7 +186,7 @@ pub fn apply_predeclared_blanket_revocations<'a>(
     let mut fake_func = FunctionValue::new(
         FunctionRef::BuiltIn(name),
         None, // not relevant
-        false,
+        None,
         Vec::new(),
         None,
     );
@@ -223,4 +232,25 @@ pub fn calc_effective_call_site_branch_backtrace_for<'a>(
         LabelBacktraceKind::Branch,
         Cow::Borrowed(at_location),
     )
+}
+
+fn collect_parameter_slots<'sig, 'a>(
+    signature: &'sig FunctionSignatureNode<'a>,
+) -> Vec<(Option<&'sig Span<'a>>, bool, &'sig TypeNode<'a>)> {
+    let mut slots = vec![];
+
+    for param in &signature.params {
+        if param.ids.is_empty() {
+            slots.push((None, param.variadic, &param.r#type));
+        } else {
+            let iter = param
+                .ids
+                .iter()
+                .map(|id| (Some(id), param.variadic, &param.r#type));
+
+            slots.extend(iter);
+        }
+    }
+
+    slots
 }

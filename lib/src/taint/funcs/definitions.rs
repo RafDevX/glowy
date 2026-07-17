@@ -17,7 +17,9 @@ use crate::{
     symbols::Symbol,
     taint::{self, annotations, funcs::captures, goto},
     types::TypeInfo,
-    values::{FunctionValue, InherentSink, InherentSourceOrRevocation, Value, ValueRef},
+    values::{
+        FunctionValue, InherentSink, InherentSourceOrRevocation, ReceiverKind, Value, ValueRef,
+    },
 };
 
 #[expect(
@@ -262,7 +264,7 @@ fn build_function_value<'a>(
     let mut func_val = FunctionValue::new(
         r#ref.clone(),
         Some(signature.clone()),
-        receiver.is_some(),
+        receiver.map(ReceiverKind::from),
         declared_result_types,
         explicit_backtrace,
     );

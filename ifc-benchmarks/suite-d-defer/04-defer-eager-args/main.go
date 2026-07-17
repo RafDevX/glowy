@@ -13,11 +13,11 @@ func main() {
 
 	x = 7
 
+	// glowy::assert:{}
+	fmt.Println(x)
+
 	// glowy::label::{high}
 	y = 0
-
-	// glowy::assert::{}
-	fmt.Println(x)
 
 	// glowy::assert::{high}
 	fmt.Println(y)

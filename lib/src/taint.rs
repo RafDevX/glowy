@@ -30,7 +30,7 @@ mod implicit;
 mod mutation;
 mod types;
 
-pub use funcs::ResolvedCall;
+pub use funcs::{DeferredCallReferents, ResolvedCall};
 pub use goto::GotoConvergenceState;
 
 #[expect(

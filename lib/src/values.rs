@@ -18,6 +18,7 @@ pub use self::{
     expandable::ExpandableValue,
     function::{
         CaptureBinding, FunctionRef, FunctionValue, InherentSink, InherentSourceOrRevocation,
+        ReceiverKind,
     },
     mobius::MobiusValue,
     package_ref::PackageRefValue,
@@ -142,6 +143,10 @@ impl<'a> ValueRef<'a> {
 
     pub fn set_declared_type(&mut self, declared_type: Rc<TypeInfo<'a>>) {
         self.declared_type = Some(declared_type);
+    }
+
+    pub fn is_copy_by_reference(&self) -> bool {
+        self.value.borrow().is_copy_by_reference()
     }
 
     pub fn is_simple(&self) -> bool {

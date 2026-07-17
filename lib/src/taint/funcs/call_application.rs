@@ -57,7 +57,7 @@ pub fn apply_call<'a>(
     // reconstruct now that we have callee borrowed again
     let func: &FunctionValue<'a> = blackbox_replacement.as_deref().unwrap_or(&value_func);
 
-    let ids = func.signature().map(collect_param_id_slots);
+    let ids = func.signature().map(super::collect_parameter_slots);
 
     let with_backtraces: Vec<_> = arg_values.iter().map(|v| (v, v.backtrace())).collect();
 
@@ -253,27 +253,6 @@ pub fn apply_call<'a>(
     }
 
     result
-}
-
-fn collect_param_id_slots<'sig, 'a>(
-    signature: &'sig FunctionSignatureNode<'a>,
-) -> Vec<(Option<&'sig Span<'a>>, bool, &'sig TypeNode<'a>)> {
-    let mut ids = vec![];
-
-    for param in &signature.params {
-        if param.ids.is_empty() {
-            ids.push((None, param.variadic, &param.r#type));
-        } else {
-            let iter = param
-                .ids
-                .iter()
-                .map(|id| (Some(id), param.variadic, &param.r#type));
-
-            ids.extend(iter);
-        }
-    }
-
-    ids
 }
 
 fn visit_blackbox_call<'a>(
