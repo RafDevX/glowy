@@ -146,9 +146,30 @@ pub fn get_expr_backtrace_and_const<'a>(
     node: &ExprNode<'a>,
 ) -> (Option<LabelBacktrace<'a>>, Option<SimpleConstValue>) {
     // resolve before visiting so that the expression observes the symbol state
-    // at its own point in Go's evaluation order
+    // at its own point in Go's defined evaluation order
     let known_const = try_resolve_simple_const(ctx, node);
-    let backtrace = visit_single_expr(ctx, node).backtrace();
+    let backtrace = get_expr_backtrace(ctx, node);
+
+    (backtrace, known_const)
+}
+
+pub fn get_expr_backtrace_and_untainted_const<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &ExprNode<'a>,
+) -> (Option<LabelBacktrace<'a>>, Option<SimpleConstValue>) {
+    // we cannot conditionally resolve known_const based on backtrace since we
+    // need const resolution to happen before the expr has been visited,
+    // otherwise we would take into account the symbol state at an incorrect
+    // point in Go's defined evaluation order
+
+    let (backtrace, known_const) = get_expr_backtrace_and_const(ctx, node);
+
+    // even if a const value was resolvable, in many cases we do not want to use
+    // it, since a labeled value may have been initialized from a literal and
+    // its calculated label is important run-time information not present in the
+    // resolved known_const, only carried by backtrace, so we cannot mislead
+    // taint propagation in places where it matters (e.g., composite reads)
+    let known_const = backtrace.is_none().then_some(known_const).flatten();
 
     (backtrace, known_const)
 }

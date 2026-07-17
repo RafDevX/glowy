@@ -471,7 +471,7 @@ pub fn visit_delete<'a>(
     capture_arg_const(ctx, key, arg_consts, 1);
 
     // evaluate before map to trigger side-effects in the correct order
-    let (key_backtrace, key_const) = exprs::get_expr_backtrace_and_const(ctx, key);
+    let (key_backtrace, key_const) = exprs::get_expr_backtrace_and_untainted_const(ctx, key);
 
     #[expect(
         clippy::shadow_unrelated,

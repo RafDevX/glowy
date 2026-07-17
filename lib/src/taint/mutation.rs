@@ -474,7 +474,11 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
         // evaluate index before base to trigger side-effects in order
-        let (index_backtrace, index_const) = exprs::get_expr_backtrace_and_const(ctx, &self.index);
+        #[rustfmt::skip]
+        let (index_backtrace, index_const) = exprs::get_expr_backtrace_and_untainted_const(
+            ctx,
+            &self.index
+        );
 
         #[expect(
             clippy::shadow_unrelated,
