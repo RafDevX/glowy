@@ -349,7 +349,7 @@ fn get_for_range_values<'a>(
     // backtrace after this call returns, so we avoid tainting the channel with
     // its own label (complicating the tree).
     // we intentionally exclude immutable roots (Go consts) because they can't
-    // be channels and `assign_with` would spuriously flag ImmutableLeftValue
+    // be channels and the mutation would spuriously flag ImmutableLeftValue
     let should_fold = ctx.branch_backtrace().is_some()
         && range_expr.root_operand().is_some_and(|root| {
             ctx.symtab()
@@ -359,29 +359,34 @@ fn get_for_range_values<'a>(
 
     let value = if should_fold {
         // we can only visit range_expr once, so we need to hijack the existing
-        // `assign_with` visit and extract the value it calculated so that we
+        // `mutate_target` visit and extract the value it calculated so that we
         // can use it later during the main part of this function
         let extracted = Cell::new(None);
 
-        range_expr.assign_with(
-            ctx,
-            LabelBacktraceKind::Receive,
-            location.inner(),
-            &|_ctx, operand| {
-                extracted.set(Some(operand.clone()));
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through a closure"
+        )]
+        range_expr.mutate_target(ctx, location.inner(), &|ctx, mut operand| {
+            extracted.set(Some(operand.clone()));
 
-                // note that we don't actually have to change `operand`, since
-                // what we actually care about is the boilerplate already
-                // handled transparently by `assign_with` which folds the
-                // current branch backtrace into the value
+            // fold only for values that turn out to actually be channels, per
+            // the rationale above: returning None aborts the entire mutation,
+            // which is exactly what we want if the operand is not actually a
+            // channel (which we could not have known in advance)
+            if !operand.is_channel() {
+                return None;
+            }
 
-                // fold only for values that turn out to actually be channels,
-                // per the rationale above: returning None aborts the entire
-                // mutation, which is exactly what we want if the operand is not
-                // actually a channel (which we could not have known in advance)
-                operand.is_channel().then_some(operand)
-            },
-        );
+            let mut channel = operand.as_channel_mut().unwrap();
+
+            if let Some(branch_backtrace) = ctx.branch_backtrace().cloned() {
+                channel.record_receive(branch_backtrace, &location);
+            }
+
+            drop(channel);
+            Some((operand, None))
+        });
 
         extracted
             .into_inner()
@@ -404,7 +409,7 @@ fn get_for_range_values<'a>(
         && let Some(channel) = value.as_channel()
     {
         // the branch-folding was already applied above, if applicable
-        return vec![channel.receive(location)];
+        return vec![channel.receive(&location).0];
     }
 
     // array / slice / map: 2 values (key/index, element i.e. coll[k])

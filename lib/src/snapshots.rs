@@ -183,6 +183,15 @@ impl<K: Eq, V: SnapshotAware> SnapshotAware for BTreeMap<K, V> {
     }
 }
 
+impl<T: SnapshotAware> SnapshotAware for Rc<T> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        let self_ref: &T = self;
+        let other_ref: &T = other;
+
+        self_ref.snapshot_aware_eq(other_ref)
+    }
+}
+
 // trivial implementations for some basic types
 // (cannot have a blanket impl for T: Copy because &refs are Copy too)
 

@@ -441,6 +441,12 @@ impl<'a> ValueRef<'a> {
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::Channel)).ok()
     }
 
+    pub fn as_channel_mut(&mut self) -> Option<RefMut<'_, ChannelValue<'a>>> {
+        self.try_upgrade_to(Value::Channel);
+
+        RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Channel)).ok()
+    }
+
     pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, u64>>> {
         self.try_upgrade_to(Value::Slice);
 

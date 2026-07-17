@@ -18,7 +18,7 @@ use parser::ast::{CallNode, ExprNode, MakeNode, TypeNode};
 use crate::{
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{exprs, mutation::LeftValue, types},
     values::{
         BacktraceContainer, ChannelValue, CompositeValue, CompositeValueAdapter, SimpleConstValue,
@@ -134,11 +134,9 @@ pub fn visit_make<'a>(
                 exprs::get_expr_backtrace(ctx, expr)
             });
 
-            ValueRef::new(
-                Value::Channel(ChannelValue::new(initial)),
-                location,
-                declared_type,
-            )
+            let channel = ChannelValue::new_allocated(initial, location.clone());
+
+            ValueRef::new(Value::Channel(channel), location, declared_type)
         }
         _ => {
             // we don't know what this is, so there's nothing we can do...
@@ -398,8 +396,8 @@ pub fn visit_close<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
 ) {
-    // close doesn't actually do anything except if there's a branch backtrace
-    // set, so we assign to None to essentially mix in the branch backtrace
+    // closing under secret-dependent control is observable through a later
+    // receive, so record the current branch backtrace on the shared state.
 
     // Note: `close` has no return value.
 
@@ -413,20 +411,41 @@ pub fn visit_close<'a>(
         return;
     };
 
-    let location = ctx.pin(node.location.clone());
-
     capture_arg_const(ctx, arg, arg_consts, 0);
 
-    arg.assign(
-        ctx,
-        LabelBacktraceKind::ChannelClose,
-        ValueRef::new_bottom(location, None),
-        None,
-        false, // don't want to overwrite
-        None,
-        &Label::Bottom,
-        &node.location,
-    );
+    if arg.root_operand().is_some() {
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through a closure"
+        )]
+        arg.mutate_target(ctx, &node.location, &|ctx, mut target| {
+            close_channel(ctx, &mut target, &node.location);
+
+            Some((target, None))
+        });
+    } else {
+        let mut target = exprs::visit_single_expr(ctx, arg);
+
+        close_channel(ctx, &mut target, &node.location);
+    }
+}
+
+fn close_channel<'a>(
+    ctx: &AnalysisContext<'a>,
+    target: &mut ValueRef<'a>,
+    location: &parser::Location,
+) {
+    let Some(branch_backtrace) = ctx.branch_backtrace().cloned() else {
+        return;
+    };
+
+    let Some(mut channel) = target.as_channel_mut() else {
+        return;
+    };
+
+    let pinned = ctx.pin(location.clone());
+
+    channel.close(Some(branch_backtrace), &pinned);
 }
 
 pub fn visit_delete<'a>(

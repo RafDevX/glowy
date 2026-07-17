@@ -15,7 +15,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::{SinkDescriptor, SinkKind},
     taint::{annotations, enforcement, mutation::LeftValue},
-    values::ValueRef,
+    values::{BacktraceContainer, ExpandableValue, SelfAwareBacktraceContainer, Value, ValueRef},
 };
 
 pub fn visit_receive<'a>(
@@ -27,62 +27,88 @@ pub fn visit_receive<'a>(
 
     // a receive inside a secret-dependent branch is externally observable:
     // any other holder of the same channel can determine that the receive
-    // happened by observing subsequent channel state, so we need to fold the
-    // current branch backtrace into the channel's own label. this is only
-    // relevant when the operand is a mutable channel that we can reach through
-    // a symbol; for example, a temporary value like `<-foo()` has no visible
-    // aliases to leak through, so the plain-receive path below is enough
+    // happened by observing subsequent channel state. mutable left-values go
+    // through the normal mutation path so closure captures also record the
+    // effect; other expressions can update their shared channel object directly.
     if ctx.branch_backtrace().is_some() && operand.root_operand().is_some() {
         let received = Cell::new(None);
 
         #[expect(
             clippy::shadow_unrelated,
-            reason = "Same context, just threaded through the transformer"
+            reason = "Same context, just threaded through a closure"
         )]
-        operand.assign_with(
-            ctx,
-            LabelBacktraceKind::Receive,
-            location,
-            &|ctx, operand| {
-                let Some(channel) = operand.as_channel() else {
-                    ctx.report_error(AnalysisErrorKind::InvalidReceiveOperand {
-                        location: location.clone(),
-                    });
+        operand.mutate_target(ctx, location, &|ctx, mut target| {
+            let result = receive_from_channel(ctx, &mut target, location, &pinned);
+            let succeeded = result.is_some();
 
-                    return None; // abort mutation
-                };
+            received.set(result);
 
-                received.set(Some(channel.receive(pinned.clone())));
+            succeeded.then_some((target, None))
+        });
 
-                drop(channel);
-
-                // note that we don't actually have to change operand (besides
-                // perhaps upgrading it to a channel), since what we actually
-                // care about is the boilerplate handled by `assign_with` which
-                // folds the current branch backtrace into the value
-                Some(operand)
-            },
-        );
-
-        return received
+        received
             .into_inner()
-            .unwrap_or_else(|| ValueRef::new_bottom(pinned, None));
+            .unwrap_or_else(|| ValueRef::new_bottom(pinned, None))
+    } else {
+        let mut value = exprs::visit_single_expr(ctx, operand);
+
+        receive_from_channel(ctx, &mut value, location, &pinned)
+            .unwrap_or_else(|| ValueRef::new_bottom(pinned, None))
     }
+}
 
-    let value = exprs::visit_single_expr(ctx, operand);
-
-    let Some(channel) = value.as_channel() else {
+fn receive_from_channel<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    target: &mut ValueRef<'a>,
+    location: &Location,
+    pinned: &crate::Pinned<'a, Location>,
+) -> Option<ValueRef<'a>> {
+    let Some(mut channel) = target.as_channel_mut() else {
         ctx.report_error(AnalysisErrorKind::InvalidReceiveOperand {
             location: location.clone(),
         });
 
-        return ValueRef::new_bottom(pinned, None);
+        return None;
     };
 
-    channel.receive(pinned)
+    if let Some(branch_backtrace) = ctx.branch_backtrace().cloned() {
+        channel.record_receive(branch_backtrace, pinned);
+    }
+
+    let (primary, success) = channel.receive(pinned);
+
+    Some(ValueRef::new(
+        Value::Expandable(ExpandableValue::new(primary, vec![success])),
+        pinned.clone(),
+        None,
+    ))
 }
 
 pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
+    // per the Go spec, the channel expression is evaluated before the value
+    if node.channel.root_operand().is_some() {
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through a closure"
+        )]
+        node.channel
+            .mutate_target(ctx, &node.location, &|ctx, mut target| {
+                send_through_channel(ctx, node, &mut target);
+
+                Some((target, None))
+            });
+    } else {
+        let mut target = exprs::visit_single_expr(ctx, &node.channel);
+
+        send_through_channel(ctx, node, &mut target);
+    }
+}
+
+fn send_through_channel<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &SendNode<'a>,
+    target: &mut ValueRef<'a>,
+) {
     let base = exprs::visit_single_expr(ctx, &node.expr);
 
     let mut explicit_backtrace = None;
@@ -114,9 +140,7 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
                 );
 
                 if let Some(sink) = sink {
-                    let backtrace = base.backtrace();
-
-                    enforcement::trigger_sink(ctx, Cow::Owned(sink), backtrace);
+                    enforcement::trigger_sink(ctx, Cow::Owned(sink), base.backtrace());
                 } else {
                     ctx.report_error(AnalysisErrorKind::InvalidDenySinkSemantics {
                         location: annotation.location.clone(),
@@ -125,24 +149,34 @@ pub fn visit_send<'a>(ctx: &mut AnalysisContext<'a>, node: &SendNode<'a>) {
             }
             annotations::SendDirective::Assert => {
                 let sequence = Label::sequence_from_tags(&annotation.tags);
-                let backtrace = base.backtrace();
 
-                enforcement::trigger_assertion(ctx, &sequence, backtrace, node.location.clone());
+                enforcement::trigger_assertion(
+                    ctx,
+                    &sequence,
+                    base.backtrace(),
+                    node.location.clone(),
+                );
             }
         }
     }
 
-    // we take send as syntactic sugar for a complex assignment
-    node.channel.assign(
-        ctx,
+    let pinned = ctx.pin(node.location.clone());
+
+    let mut sent = base.nest_backtrace(
         LabelBacktraceKind::Send,
-        base,
         None,
-        false, // don't overwrite ever
-        explicit_backtrace.as_ref(),
-        &subtract,
-        &node.location,
+        pinned.clone(),
+        explicit_backtrace,
     );
+    sent.subtract_label(&subtract);
+
+    let branch_backtrace = ctx.branch_backtrace().cloned();
+
+    let Some(mut channel) = target.as_channel_mut() else {
+        return;
+    };
+
+    channel.send(sent.backtrace(), branch_backtrace, &pinned);
 }
 
 pub fn visit_select<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectNode<'a>) {

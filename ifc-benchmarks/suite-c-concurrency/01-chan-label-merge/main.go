@@ -10,8 +10,12 @@ const beta = 2
 
 func main() {
 	ch := make(chan int, 2)
-	ch <- alpha
-	ch <- beta
+	go func() {
+		ch <- alpha
+	}()
+	go func() {
+		ch <- beta
+	}()
 
 	v := <-ch
 
