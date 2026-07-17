@@ -4,8 +4,8 @@ use parser::{
     Annotation, Location,
     ast::{BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionSignatureNode},
 };
-pub use returns::visit_return;
 
+pub use self::{captures::call_site::derive_stable_capture_concretes, returns::visit_return};
 use crate::{
     Pinned,
     context::{AnalysisContext, DeferredCall},

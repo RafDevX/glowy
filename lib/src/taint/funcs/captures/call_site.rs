@@ -318,6 +318,22 @@ fn derive_best_backtraces_for_captures<'a>(
     func: &FunctionValue<'a>,
     call_site_concretes: &CallSiteConcretes<'a>,
 ) -> CaptureConcretes<'a> {
+    let mut concretes = derive_stable_capture_concretes(ctx, func);
+
+    // we need to realize the captures' backtraces to get rid of any references
+    // coming from function params, since we have each param's concrete already
+    // calculated at this point
+    for (_, concrete) in &mut concretes {
+        *concrete = call_site_concretes.realize_backtrace_for_params(func.r#ref(), concrete.take());
+    }
+
+    concretes
+}
+
+pub fn derive_stable_capture_concretes<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+) -> CaptureConcretes<'a> {
     let capture_env_snapshot = CaptureEnvSnapshot::derive_new_stable(ctx, func);
 
     let mut concretes: CaptureConcretes<'a> = func
@@ -335,13 +351,6 @@ fn derive_best_backtraces_for_captures<'a>(
 
     // for determinism
     concretes.sort_by_key(|(index, _)| *index);
-
-    // we need to realize the captures' backtraces to get rid of any references
-    // coming from function params, since we have each param's concrete already
-    // calculated at this point
-    for (_, concrete) in &mut concretes {
-        *concrete = call_site_concretes.realize_backtrace_for_params(func.r#ref(), concrete.take());
-    }
 
     concretes
 }

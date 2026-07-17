@@ -473,6 +473,16 @@ fn get_iter_function_range_values<'a>(
     yield_signature: &FunctionSignatureNode<'a>,
     location: &Pinned<'a, Location>,
 ) -> Vec<ValueRef<'a>> {
+    let mut func = Cow::Borrowed(func);
+
+    for (index, concrete) in funcs::derive_stable_capture_concretes(ctx, &func) {
+        func = Cow::Owned(func.realize(
+            func.r#ref(),
+            SyntheticSlot::Capture(index),
+            concrete.as_ref(),
+        ));
+    }
+
     let downgraded = func.downgrade_as_call(ctx, location.clone());
 
     let n_values: usize = yield_signature.count_inputs();
@@ -506,7 +516,7 @@ fn get_iter_function_range_values<'a>(
             .collect();
     }
 
-    let call_branch = funcs::calc_effective_call_site_branch_backtrace_for(ctx, func, location);
+    let call_branch = funcs::calc_effective_call_site_branch_backtrace_for(ctx, &func, location);
 
     yield_acc
         .iter()
