@@ -486,6 +486,10 @@ impl<'a> ValueRef<'a> {
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Slice)).ok()
     }
 
+    pub fn as_map(&self) -> Option<Ref<'_, CompositeValue<'a, SimpleConstValue>>> {
+        Ref::filter_map(self.value.borrow(), extract_inner!(Value::Map)).ok()
+    }
+
     pub fn as_map_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, SimpleConstValue>>> {
         self.try_upgrade_to(Value::Map);
 

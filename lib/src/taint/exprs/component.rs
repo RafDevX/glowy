@@ -313,7 +313,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
     visit_indexing_with(
         ctx,
         &base,
-        index_backtrace,
+        index_backtrace.as_ref(),
         index_const.as_ref(),
         last_pos,
         &node.location,
@@ -323,7 +323,7 @@ pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>
 pub(super) fn visit_indexing_with<'a>(
     ctx: &mut AnalysisContext<'a>,
     base: &ValueRef<'a>,
-    index_backtrace: Option<LabelBacktrace<'a>>,
+    index_backtrace: Option<&LabelBacktrace<'a>>,
     index_const: Option<&SimpleConstValue>,
     last_pos: bool,
     location: &Location,
@@ -348,21 +348,29 @@ pub(super) fn visit_indexing_with<'a>(
 
     let result = composite.get_at_key(index_const, pinned.clone());
 
-    let result = match index_backtrace {
-        Some(index_backtrace) => result.nest_backtrace(
+    let nest_index_backtrace = |value: ValueRef<'a>| match index_backtrace {
+        Some(index_backtrace) => value.nest_backtrace(
             LabelBacktraceKind::Expression,
             None,
             pinned.clone(),
-            [index_backtrace],
+            [(*index_backtrace).clone()],
         ),
-        None => result,
+        None => value,
     };
+
+    let result = nest_index_backtrace(result);
 
     if base.is_map() {
         // indexing a map returns a second value corresponding to whether the
-        // key was or not present in the map. here, we assume that this presence
-        // value has the same label as the actual returned value
-        let presence = result.downgrade(|| pinned.clone());
+        // key was or not present in the map. presence depends on the map's key
+        // set and the lookup key, but not on the contents of the stored value
+        let presence = ValueRef::from_backtrace_or_bottom_at(
+            base.as_map()
+                .and_then(|map| map.key_backtrace(pinned.clone())),
+            || pinned.clone(),
+        );
+
+        let presence = nest_index_backtrace(presence);
 
         let expandable = ExpandableValue::new(result, vec![presence]);
 

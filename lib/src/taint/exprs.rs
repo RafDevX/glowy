@@ -515,7 +515,7 @@ fn visit_ambiguous_bracket_access<'a>(
     component::visit_indexing_with(
         ctx,
         &base,
-        index_backtrace,
+        index_backtrace.as_ref(),
         index_const.as_ref(),
         last_pos,
         &node.location,

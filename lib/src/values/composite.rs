@@ -95,6 +95,10 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
         }
     }
 
+    pub fn key_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
+        self.keys.backtrace_at_location(location)
+    }
+
     pub fn get_const(&self, key: &K, at_location: Pinned<'a, Location>) -> ValueRef<'a> {
         let value = match self.r#const.get(key).cloned() {
             Some(value) => value,

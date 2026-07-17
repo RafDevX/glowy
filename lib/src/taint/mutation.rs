@@ -486,6 +486,8 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         )]
         self.base
             .mutate_target(ctx, assignment_location, &|ctx, mut target| {
+                let target_is_map = target.is_map();
+
                 let Some(mut composite) = target.as_composite_mut() else {
                     ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
                         location: self.location.clone(),
@@ -507,6 +509,13 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                     index_backtrace.clone(),
                     ctx.pin(assignment_location.clone()),
                 );
+
+                if target_is_map {
+                    composite.record_key_backtrace(
+                        ctx.branch_backtrace().cloned(),
+                        ctx.pin(assignment_location.clone()),
+                    );
+                }
 
                 drop(composite);
                 Some((target, None))
