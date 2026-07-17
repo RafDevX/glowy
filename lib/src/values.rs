@@ -208,12 +208,12 @@ impl<'a> ValueRef<'a> {
         // collapse it first to expose the inner Simple to the upgrade below
         self.try_singularize_simple_mobius();
 
-        let borrow = self.value.borrow();
+        let borrowed = self.value.borrow();
 
-        if let Value::Simple(backtrace) = &*borrow {
+        if let Value::Simple(backtrace) = &*borrowed {
             let inner = C::upgrade(backtrace.clone(), Cow::Borrowed(&self.location));
 
-            drop(borrow); // release the immutable borrow
+            drop(borrowed); // release the immutable borrow
 
             *self.value.borrow_mut() = f(inner);
         }
