@@ -204,7 +204,15 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             // handle the case where we know a `goto` stmt targets this label
             goto::visit_label_in_goto_context(ctx, *label);
 
-            visit_statement(ctx, inner);
+            if let StatementNode::For(r#for) = inner.as_ref() {
+                // visit_statement would just have delegated to visit_for
+                // anyway, but this way we get to tell the visitor that a
+                // label has been set for this loop
+
+                implicit::visit_for(ctx, r#for, Some(label.content()));
+            } else {
+                visit_statement(ctx, inner);
+            }
 
             if let StatementNode::For(_) = inner.as_ref() {
                 ctx.trigger_defer_target(DeferTarget::LabeledLoop(label.content()));
@@ -213,7 +221,7 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
         StatementNode::Block(block) => visit_block(ctx, block),
         StatementNode::Decl(decl) => visit_decl(ctx, decl),
         StatementNode::If(r#if) => implicit::visit_if(ctx, r#if),
-        StatementNode::For(r#for) => implicit::visit_for(ctx, r#for),
+        StatementNode::For(r#for) => implicit::visit_for(ctx, r#for, None),
         StatementNode::Select(select) => channels::visit_select(ctx, select),
         StatementNode::Switch(switch) => implicit::visit_switch(ctx, switch),
         StatementNode::Fallthrough { location } => {
@@ -223,9 +231,10 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                 location: location.clone(),
             });
         }
-        StatementNode::Continue { label, location } | StatementNode::Break { label, location } => {
-            implicit::visit_continue_break(ctx, *label, location);
+        StatementNode::Continue { label, location } => {
+            implicit::visit_continue(ctx, *label, location);
         }
+        StatementNode::Break { label, location } => implicit::visit_break(ctx, *label, location),
         StatementNode::Return { exprs, location } => funcs::visit_return(ctx, exprs, location),
         StatementNode::Goto { label, location } => goto::visit_goto(ctx, *label, location),
         StatementNode::Go { expr, location } => {

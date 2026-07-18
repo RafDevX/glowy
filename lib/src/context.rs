@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
     fmt, mem,
     path::Path,
@@ -86,6 +87,8 @@ pub struct AnalysisContext<'a> {
     error_suppression_depth: u8,
     /// Stack of per-function `goto` convergence loop context state.
     goto_states: Vec<GotoConvergenceState<'a>>,
+    /// Stack of convergence state for control-flow back-edges from `continue`.
+    loop_states: Vec<LoopConvergenceState<'a>>,
     /// Locations of currently active split control-flow regions.
     split_control_flow_regions: Vec<Pinned<'a, Location>>,
 
@@ -118,6 +121,7 @@ impl<'a> AnalysisContext<'a> {
             error_suppression_depth: 0,
             split_control_flow_regions: Vec::new(),
             goto_states: Vec::new(),
+            loop_states: Vec::new(),
             saw_enforcement_checks: false,
             blanket_directives,
             reverse_imports: HashMap::new(),
@@ -408,6 +412,58 @@ impl<'a> AnalysisContext<'a> {
         self.goto_states.last_mut()
     }
 
+    pub fn push_loop_convergence_context(&mut self, label: Option<&'a str>) {
+        self.loop_states.push(LoopConvergenceState::new(label));
+    }
+
+    pub fn pop_loop_convergence_context(&mut self) {
+        self.loop_states.pop();
+    }
+
+    pub fn loop_iteration_backtrace(&self) -> Option<&LabelBacktrace<'a>> {
+        let state = self.loop_states.last()?;
+
+        state.incoming.as_ref()
+    }
+
+    pub fn loop_iteration_has_converged(&self) -> bool {
+        self.loop_states.last().is_some_and(|state| state.converged)
+    }
+
+    pub fn advance_loop_convergence_iteration(&mut self) {
+        let state = self
+            .loop_states
+            .last_mut()
+            .expect("loop convergence iteration outside a loop");
+
+        state.converged = state.incoming.snapshot_aware_eq(&state.outgoing);
+        state.incoming = mem::take(&mut state.outgoing);
+    }
+
+    pub fn record_continue_branch_backtrace(&mut self, label: Option<&str>, location: Location) {
+        let contribution = self.branch_backtrace().cloned();
+        let location = self.pin(location);
+
+        let state = if let Some(label) = label {
+            self.loop_states
+                .iter_mut()
+                .rfind(|state| state.label == Some(label))
+        } else {
+            self.loop_states.last_mut()
+        };
+
+        let Some(state) = state else {
+            return;
+        };
+
+        state.outgoing = LabelBacktrace::combine_options(
+            state.outgoing.take(),
+            contribution,
+            LabelBacktraceKind::Branch,
+            Cow::Owned(location),
+        );
+    }
+
     pub fn push_split_control_flow(&mut self, location: Location) {
         self.split_control_flow_regions.push(self.pin(location));
     }
@@ -618,6 +674,24 @@ struct DeferredBranchBacktrace<'a> {
 pub struct DeferredBranchBacktraceCheckpoint<'a> {
     deferred: Vec<DeferredBranchBacktrace<'a>>,
     composite: Option<LabelBacktrace<'a>>,
+}
+
+struct LoopConvergenceState<'a> {
+    label: Option<&'a str>,               // for `continue Label`
+    incoming: Option<LabelBacktrace<'a>>, // from previous iteration
+    outgoing: Option<LabelBacktrace<'a>>, // from current iteration
+    converged: bool,
+}
+
+impl<'a> LoopConvergenceState<'a> {
+    fn new(label: Option<&'a str>) -> Self {
+        Self {
+            label,
+            incoming: None,
+            outgoing: None,
+            converged: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

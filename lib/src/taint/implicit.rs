@@ -63,7 +63,7 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     ctx.pop_split_control_flow();
 }
 
-pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
+pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>, label: Option<&'a str>) {
     ctx.push_split_control_flow(node.location.clone());
 
     // Go spec: each if, for and switch is considered to be in its own
@@ -71,6 +71,8 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
     ctx.symtab_mut().select_next_child_scope();
 
     ctx.increase_branch_scope_depth();
+
+    ctx.push_loop_convergence_context(label);
 
     match &node.header {
         ForHeaderNode::Clause(clause) => {
@@ -80,6 +82,8 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>) {
             visit_for_range(ctx, range, &node.body, &node.header_location);
         }
     }
+
+    ctx.pop_loop_convergence_context();
 
     // we decrease before triggering since that is also what would happen if the
     // target were a LabeledLoop (triggering happens after visit of inner stmt)
@@ -156,26 +160,49 @@ fn visit_for_clause<'a>(
     ctx.push_error_suppression();
 
     loop {
+        // a conditional `continue` is a control-flow back-edge: mutations in
+        // the next iteration may only happen because that branch was taken, so
+        // we need to apply the previous iteration's contribution while
+        // evaluating the repeated condition and body, then iterate until that
+        // contribution stabilizes
+        let iteration_pushed = if let Some(backtrace) = ctx.loop_iteration_backtrace().cloned() {
+            ctx.push_branch_backtrace(backtrace);
+
+            true
+        } else {
+            false
+        };
+
         let cond_backtrace = clause
             .cond
             .as_ref()
             .and_then(|cond| exprs::get_expr_backtrace(ctx, cond));
 
-        let stable = prev_cond_backtrace
-            .as_ref()
-            .snapshot_aware_eq(&Some(&cond_backtrace));
+        let stable = ctx.loop_iteration_has_converged()
+            && prev_cond_backtrace
+                .as_ref()
+                .snapshot_aware_eq(&Some(&cond_backtrace));
 
         if stable {
+            if iteration_pushed {
+                ctx.pop_branch_backtrace();
+            }
+
             break;
         }
 
         inner_visit!(cond_backtrace);
+
+        if iteration_pushed {
+            ctx.pop_branch_backtrace();
+        }
 
         // the next iteration must re-enter the same body scope (and not a
         // sibling), so undo the cursor advance that `visit_block` performed
         ctx.symtab_mut().rewind_child_scope_cursor();
 
         ctx.restore_deferred_state(pre_body_deferred.clone());
+        ctx.advance_loop_convergence_iteration();
         prev_cond_backtrace = Some(cond_backtrace);
     }
 
@@ -185,12 +212,25 @@ fn visit_for_clause<'a>(
     // shrink, the cond backtrace computed here is guaranteed to match the one
     // that broke the loop above, so the branch backtrace is the same as it
     // would have been on the (never-executed) stable iteration
+
+    let iteration_pushed = if let Some(backtrace) = ctx.loop_iteration_backtrace().cloned() {
+        ctx.push_branch_backtrace(backtrace);
+
+        true
+    } else {
+        false
+    };
+
     let cond_backtrace = clause
         .cond
         .as_ref()
         .and_then(|cond| exprs::get_expr_backtrace(ctx, cond));
 
     inner_visit!(cond_backtrace);
+
+    if iteration_pushed {
+        ctx.pop_branch_backtrace();
+    }
 }
 
 fn visit_for_range<'a>(
@@ -251,9 +291,21 @@ fn visit_for_range<'a>(
 
         rhs_values.truncate(lhs_len);
 
-        let stable = prev_rhs_backtrace
-            .as_ref()
-            .is_some_and(|prev| prev.snapshot_aware_eq(&rhs_backtrace));
+        let stable = ctx.loop_iteration_has_converged()
+            && prev_rhs_backtrace
+                .as_ref()
+                .is_some_and(|prev| prev.snapshot_aware_eq(&rhs_backtrace));
+
+        // unlike a three-clause loop condition, the range expression is not
+        // evaluated again on each iteration, so install the continue back-edge
+        // only after deriving its abstract iteration values
+        let iteration_pushed = if let Some(backtrace) = ctx.loop_iteration_backtrace().cloned() {
+            ctx.push_branch_backtrace(backtrace);
+
+            true
+        } else {
+            false
+        };
 
         // branch backtrace must come before assignment since it'll only take
         // place if the for loop actually iterates (i.e., range expr is
@@ -316,6 +368,10 @@ fn visit_for_range<'a>(
             ctx.pop_branch_backtrace();
         }
 
+        if iteration_pushed {
+            ctx.pop_branch_backtrace();
+        }
+
         if stable {
             break;
         }
@@ -325,6 +381,7 @@ fn visit_for_range<'a>(
         ctx.symtab_mut().rewind_child_scope_cursor();
 
         ctx.restore_deferred_state(pre_body_deferred.clone());
+        ctx.advance_loop_convergence_iteration();
         prev_rhs_backtrace = Some(rhs_backtrace);
     }
 }
@@ -592,7 +649,28 @@ fn is_integer_range_expr<'a>(ctx: &AnalysisContext<'a>, expr: &ExprNode<'a>) -> 
     }
 }
 
-pub fn visit_continue_break<'a>(
+pub fn visit_continue<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    label: Option<Span<'a>>,
+    location: &Location,
+) {
+    // record before deferring: the back-edge contribution is the branch context
+    // at the continue itself, not the composite created for statements that
+    // lexically follow it in this iteration
+    ctx.record_continue_branch_backtrace(label.as_ref().map(Span::content), location.clone());
+
+    defer_loop_abort(ctx, label, location);
+}
+
+pub fn visit_break<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    label: Option<Span<'a>>,
+    location: &Location,
+) {
+    defer_loop_abort(ctx, label, location);
+}
+
+fn defer_loop_abort<'a>(
     ctx: &mut AnalysisContext<'a>,
     label: Option<Span<'a>>,
     location: &Location,
