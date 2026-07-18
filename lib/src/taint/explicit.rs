@@ -230,50 +230,62 @@ pub fn visit_raw_binding_decl_spec<'a>(
             continue;
         }
 
-        let initial_value = ValueRef::new_bottom(
-            pinned.clone(),
-            declared_type.cloned(), // cheap
-        );
+        let declaration = ctx.pin(name);
 
-        let symbol = Symbol::new_ref(
-            ctx.pin(name),
-            true, // we initially always set the symbol as mutable
-            initial_value,
-            None,
-        );
-        let symbol2 = Rc::clone(&symbol); // for later use if needed
+        let existing_declaration = if short {
+            ctx.symtab()
+                .get_symbol_in_current_scope(name.content())
+                .and_then(|existing| {
+                    let existing = existing.borrow().declared_name();
 
-        if short {
-            // declare manually to hold errors until we're sure
-            if let Some(existing) = ctx.symtab_mut().declare_new_symbol(name.content(), symbol) {
-                let borrowed = existing.borrow();
+                    matches!(
+                        declaration
+                            .pinned_location()
+                            .partial_cmp(&existing.pinned_location()),
+                        None | Some(cmp::Ordering::Greater)
+                    )
+                    .then_some(existing)
+                })
+        } else {
+            None
+        };
 
-                if matches!(
-                    ctx.pin(name)
-                        .pinned_location()
-                        .partial_cmp(&borrowed.declared_name().pinned_location()),
-                    None | Some(cmp::Ordering::Greater)
-                ) {
-                    redeclarations.push(AnalysisErrorKind::IllegalRedeclaration {
-                        previous: borrowed.declared_name(),
-                        found: name,
-                    });
+        let (backtrace_kind, declared_symbol) = if let Some(existing) = existing_declaration {
+            // a short declaration may redeclare a variable from the same block
+            // as long as another non-blank identifier is new. this is an
+            // assignment to the existing variable, not a shadowing declaration
+            redeclarations.push(AnalysisErrorKind::IllegalRedeclaration {
+                previous: existing,
+                found: name,
+            });
 
-                    continue;
-                }
-            }
+            (LabelBacktraceKind::Assignment, None)
+        } else {
+            let initial_value = ValueRef::new_bottom(
+                pinned.clone(),
+                declared_type.cloned(), // cheap
+            );
+
+            let symbol = Symbol::new_ref(
+                declaration,
+                true, // initially mutable so initialization can assign to it
+                initial_value,
+                None,
+            );
 
             any_new = true;
-        } else {
-            // just report any errors
-            ctx.declare_new_symbol(symbol);
-        }
 
-        // now that symbol is declared, we can assign a value to it
+            ctx.declare_new_symbol(Rc::clone(&symbol));
+
+            (LabelBacktraceKind::DeclarationInitialization, Some(symbol))
+        };
+
+        // all rhs expressions were evaluated before this loop, so assigning a
+        // redeclared name here preserves Go's simultaneous assignment semantics
 
         name.assign(
             ctx,
-            LabelBacktraceKind::DeclarationInitialization,
+            backtrace_kind,
             rhs,
             known_const,
             true,
@@ -283,9 +295,9 @@ pub fn visit_raw_binding_decl_spec<'a>(
         );
 
         // now, after assigning, we can set the symbol to immutable if that was
-        // the case (before we created it as mutable to allow the assignment)
-        if !mutable {
-            symbol2.borrow_mut().mark_immutable();
+        // the case (before, we created it as mutable to allow the assignment)
+        if !mutable && let Some(symbol) = declared_symbol {
+            symbol.borrow_mut().mark_immutable();
         }
     }
 

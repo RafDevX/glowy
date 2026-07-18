@@ -272,6 +272,10 @@ impl<'a> SymbolTable<'a> {
         Self::get_symbol_from_scope_chain(self, Some(Rc::clone(&self.current_scope)), name)
     }
 
+    pub fn get_symbol_in_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
+        self.current_scope.borrow().get_local_symbol(name)
+    }
+
     pub fn get_symbol_above_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
         Self::get_symbol_from_scope_chain(self, self.get_parent_scope(), name)
     }
