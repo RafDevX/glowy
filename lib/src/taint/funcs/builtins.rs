@@ -376,6 +376,13 @@ pub fn visit_clear<'a>(
 
     capture_arg_const(ctx, arg, arg_consts, 0);
 
+    // a `clear` inside split control flow might not execute, so clearing a
+    // value declared outside that split must be a weak (non-overriding) update.
+    // keeping the current map lets `assign_with` add the branch backtrace to
+    // its value/presence state without discarding entries from any possible
+    // path where `clear` did not run
+    let should_clear_map = arg.should_override(ctx, true);
+
     #[expect(
         clippy::shadow_unrelated,
         reason = "Same context, just threaded through the transformer"
@@ -386,8 +393,12 @@ pub fn visit_clear<'a>(
         &node.location,
         &|ctx, mut current| {
             if current.is_map() {
-                // overwrite to bottom
-                return Some(ValueRef::new_bottom(location.clone(), None));
+                if should_clear_map {
+                    let mut map = current.as_map_mut().unwrap();
+                    *map = CompositeValue::empty(None);
+                }
+
+                return Some(current);
             }
 
             let Some(mut slice) = current.as_slice_mut() else {
