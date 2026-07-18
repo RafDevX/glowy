@@ -192,7 +192,12 @@ pub fn visit_function_def<'a>(
 
     visit_function_body(ctx, body);
 
+    // named results need to be in scope before defers run
+    super::returns::prepare_named_result_params_for_defers(ctx, &signature.result, &body.location);
+
     super::apply_deferred_calls(ctx); // from `defer` statements
+
+    super::returns::finalize_named_result_outcome(ctx, &signature.result, &body.location);
 
     captures::record_capture_fallbacks(ctx, &mut value);
 

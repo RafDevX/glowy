@@ -16,6 +16,13 @@ use crate::{
 
 type CaptureConcretes<'a> = Vec<(usize, Option<LabelBacktrace<'a>>)>;
 
+pub struct CallCaptureConcretes<'a> {
+    // call-entry values for realizing flow-sensitive enforcement checks
+    pub at_entry: CaptureConcretes<'a>,
+    // conservative union of values observable throughout the function body
+    pub for_outcome: CaptureConcretes<'a>,
+}
+
 struct CallSiteConcretes<'a> {
     params: Vec<Option<LabelBacktrace<'a>>>,
     branch: Option<LabelBacktrace<'a>>,
@@ -85,12 +92,12 @@ impl<'a> CallSiteConcretes<'a> {
     }
 }
 
-pub fn apply_capture_mutations_and_merge_capture_backtraces<'a>(
+pub fn apply_capture_mutations_and_derive_concretes<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
-) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
+) -> CallCaptureConcretes<'a> {
     // each captured variable has only one assigned synthetic slot, which means
     // that different reads of the same captured variable are indistinguishable
     // during realization: all <0> become {concrete}, and there is nothing else
@@ -114,13 +121,24 @@ pub fn apply_capture_mutations_and_merge_capture_backtraces<'a>(
 
     let call_site = CallSiteConcretes::new(ctx, func, args, location);
 
+    let at_entry = if func.deferred_checks().is_empty() {
+        Vec::new()
+    } else {
+        derive_capture_backtraces_at_entry(ctx, func, &call_site)
+    };
+
     let before_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
 
     apply_capture_mutations_with(ctx, func, &call_site, &before_mutation, location);
 
     let after_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
 
-    merge_capture_backtrace_snapshots(before_mutation, after_mutation, location)
+    let for_outcome = merge_capture_backtrace_snapshots(before_mutation, after_mutation, location);
+
+    CallCaptureConcretes {
+        at_entry,
+        for_outcome,
+    }
 }
 
 fn merge_capture_backtrace_snapshots<'a>(
@@ -318,8 +336,32 @@ fn derive_best_backtraces_for_captures<'a>(
     func: &FunctionValue<'a>,
     call_site_concretes: &CallSiteConcretes<'a>,
 ) -> CaptureConcretes<'a> {
-    let mut concretes = derive_stable_capture_concretes(ctx, func);
+    realize_capture_backtraces_for_call_site(
+        derive_stable_capture_concretes(ctx, func),
+        func,
+        call_site_concretes,
+    )
+}
 
+fn derive_capture_backtraces_at_entry<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+    call_site_concretes: &CallSiteConcretes<'a>,
+) -> CaptureConcretes<'a> {
+    let snapshot = CaptureEnvSnapshot::derive_new_at_entry(ctx, func);
+
+    realize_capture_backtraces_for_call_site(
+        capture_concretes_from_snapshot(func, &snapshot),
+        func,
+        call_site_concretes,
+    )
+}
+
+fn realize_capture_backtraces_for_call_site<'a>(
+    mut concretes: CaptureConcretes<'a>,
+    func: &FunctionValue<'a>,
+    call_site_concretes: &CallSiteConcretes<'a>,
+) -> CaptureConcretes<'a> {
     // we need to realize the captures' backtraces to get rid of any references
     // coming from function params, since we have each param's concrete already
     // calculated at this point
@@ -336,6 +378,13 @@ pub fn derive_stable_capture_concretes<'a>(
 ) -> CaptureConcretes<'a> {
     let capture_env_snapshot = CaptureEnvSnapshot::derive_new_stable(ctx, func);
 
+    capture_concretes_from_snapshot(func, &capture_env_snapshot)
+}
+
+fn capture_concretes_from_snapshot<'a>(
+    func: &FunctionValue<'a>,
+    capture_env_snapshot: &CaptureEnvSnapshot<'a>,
+) -> CaptureConcretes<'a> {
     let mut concretes: CaptureConcretes<'a> = func
         .captures()
         .map(|(outer_decl, binding)| {

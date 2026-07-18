@@ -13,7 +13,10 @@ use crate::{
     policy::{SinkDescriptor, SinkKind},
     taint::{
         annotations, enforcement,
-        funcs::{ResolvedCall, captures},
+        funcs::{
+            ResolvedCall,
+            captures::{self, call_site::CallCaptureConcretes},
+        },
     },
     values::{
         BacktraceContainer, FunctionValue, InherentSourceOrRevocation, MobiusValue,
@@ -26,7 +29,7 @@ struct CallRealization<'call, 'a> {
     receiver: Option<Option<&'call LabelBacktrace<'a>>>,
     ids: &'call [(Option<&'call Span<'a>>, bool, &'call TypeNode<'a>)],
     args: &'call [(ValueRef<'a>, Option<&'call LabelBacktrace<'a>>)],
-    capture_concretes: &'call [(usize, Option<LabelBacktrace<'a>>)],
+    capture_concretes: &'call CallCaptureConcretes<'a>,
     location: &'call Pinned<'a, Location>,
 }
 
@@ -198,13 +201,12 @@ pub fn apply_call<'a>(
         None => None,
     };
 
-    let capture_concretes =
-        captures::call_site::apply_capture_mutations_and_merge_capture_backtraces(
-            ctx,
-            func,
-            &with_backtraces_ref,
-            &call_location,
-        );
+    let capture_concretes = captures::call_site::apply_capture_mutations_and_derive_concretes(
+        ctx,
+        func,
+        &with_backtraces_ref,
+        &call_location,
+    );
 
     let call_realization = CallRealization {
         receiver: receiver.as_ref().map(Option::as_ref),
@@ -470,7 +472,11 @@ fn handle_deferred_checks<'a>(
             .collect();
     }
 
-    for (index, concrete) in call.capture_concretes {
+    // a deferred check's backtrace already represents mutations that happened
+    // before that check in the function body. realizing it against the entry
+    // snapshot preserves that ordering; the entry/exit union used for outcomes
+    // would incorrectly make later capture mutations flow backwards in time
+    for (index, concrete) in &call.capture_concretes.at_entry {
         deferred_checks = deferred_checks
             .iter()
             .filter_map(|check| {
@@ -574,7 +580,7 @@ fn calculate_call_result<'a>(
             };
         }
 
-        for (index, concrete) in call.capture_concretes {
+        for (index, concrete) in &call.capture_concretes.for_outcome {
             if realized.is_bottom() && realized.allows_lossless_downgrade() {
                 // no sense in continuing, we'll never evolve from this state
 

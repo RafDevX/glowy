@@ -23,10 +23,22 @@ impl<'a> CaptureEnvSnapshot<'a> {
     }
 
     pub fn derive_new_stable(ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
+        Self::derive_new(ctx, func, true)
+    }
+
+    pub fn derive_new_at_entry(ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
+        Self::derive_new(ctx, func, false)
+    }
+
+    fn derive_new(
+        ctx: &AnalysisContext<'a>,
+        func: &FunctionValue<'a>,
+        include_body_mutations: bool,
+    ) -> Self {
         let mut current = Self::empty();
 
         loop {
-            let next = current.derive_next_step(ctx, func);
+            let next = current.derive_next_step(ctx, func, include_body_mutations);
 
             if next.snapshot_aware_eq(&current) {
                 return current; // stabilization achieved
@@ -36,7 +48,12 @@ impl<'a> CaptureEnvSnapshot<'a> {
         }
     }
 
-    fn derive_next_step(&self, ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
+    fn derive_next_step(
+        &self,
+        ctx: &AnalysisContext<'a>,
+        func: &FunctionValue<'a>,
+        include_body_mutations: bool,
+    ) -> Self {
         let mut captures: Vec<_> = func.captures().collect();
 
         // for determinism
@@ -51,6 +68,7 @@ impl<'a> CaptureEnvSnapshot<'a> {
                     *outer_decl,
                     binding,
                     self,
+                    include_body_mutations,
                 );
 
                 // capture mutations can introduce mutual dependencies (e.g.,
@@ -97,6 +115,7 @@ fn derive_concrete_backtrace_or_fallback<'a>(
     outer_decl: Pinned<'a, Span<'a>>,
     binding: &CaptureBinding<'a>,
     capture_env_snapshot: &CaptureEnvSnapshot<'a>,
+    include_body_mutations: bool,
 ) -> Option<LabelBacktrace<'a>> {
     let symbol = super::resolve_capture_symbol(ctx, outer_decl);
 
@@ -119,16 +138,24 @@ fn derive_concrete_backtrace_or_fallback<'a>(
         hybrid
     };
 
-    // finally, we need to merge the concrete with all other intermediate
-    // possible values for the capture, based on whatever mutations took place
-    // during the function body so that we can properly support read+mutate+read
-    // gadgets; see `apply_capture_mutations_and_merge_capture_backtraces`
-    LabelBacktrace::combine_options(
-        concrete,
-        binding.mutation_backtrace().cloned(),
-        LabelBacktraceKind::ClosureCaptureBinding,
-        Cow::Borrowed(&value_location),
-    )
+    if include_body_mutations {
+        // we need to merge the concrete with all other intermediate possible
+        // values for the capture, based on whatever mutations took place during
+        // the function body so that we can properly support read+mutate+read
+        // gadgets; see `apply_capture_mutations_and_merge_capture_backtraces`
+
+        LabelBacktrace::combine_options(
+            concrete,
+            binding.mutation_backtrace().cloned(),
+            LabelBacktraceKind::ClosureCaptureBinding,
+            Cow::Borrowed(&value_location),
+        )
+    } else {
+        // the union above is not suitable for enforcement checks, since their
+        // stored backtraces already encode mutations preceding the check
+
+        concrete
+    }
 }
 
 fn has_inactive_synthetics<'a>(

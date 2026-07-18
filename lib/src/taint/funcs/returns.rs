@@ -8,8 +8,8 @@ use parser::{
 use crate::{
     context::{AnalysisContext, DeferTarget},
     errors::AnalysisErrorKind,
-    labels::LabelBacktraceKind,
-    taint::exprs,
+    labels::{Label, LabelBacktraceKind},
+    taint::{exprs, mutation::LeftValue},
     values::{Mergeable, SelfAwareBacktraceContainer, ValueRef},
 };
 
@@ -152,4 +152,88 @@ fn merge_outcomes<'a>(
     }
 
     merged
+}
+
+pub fn prepare_named_result_params_for_defers<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    result: &FunctionResultNode<'a>,
+    location: &Location,
+) {
+    let FunctionResultNode::Params(params) = result else {
+        return;
+    };
+
+    let Some((_, outcome)) = get_current_function_outcome(ctx) else {
+        return;
+    };
+
+    for (name, value) in params.iter().flat_map(|param| &param.ids).zip(outcome) {
+        if name.content() == "_" {
+            continue;
+        }
+
+        name.assign(
+            ctx,
+            LabelBacktraceKind::Return,
+            value,
+            None,
+            true,
+            None,
+            &Label::Bottom,
+            location,
+        );
+    }
+}
+
+pub fn finalize_named_result_outcome<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    result: &FunctionResultNode<'a>,
+    location: &Location,
+) {
+    let FunctionResultNode::Params(params) = result else {
+        return;
+    };
+
+    let Some((mut value, mut outcome)) = get_current_function_outcome(ctx) else {
+        return;
+    };
+
+    let pinned_location = ctx.pin(location.clone());
+    let branch_backtrace = ctx.branch_backtrace();
+
+    for (slot, name) in params.iter().flat_map(|param| &param.ids).enumerate() {
+        if name.content() == "_" {
+            continue;
+        }
+
+        let Some(current) = outcome.get_mut(slot) else {
+            // return cardinality validation already took place, so an error was
+            // already reported; just bail and keep what we have so far
+            break;
+        };
+
+        let Some(symbol) = ctx.symtab().get_symbol_by_declaration(ctx.pin(*name)) else {
+            continue;
+        };
+
+        *current = symbol.borrow().value().get().nest_backtrace(
+            LabelBacktraceKind::Return,
+            None,
+            pinned_location.clone(),
+            branch_backtrace.cloned(),
+        );
+    }
+
+    if let Some(mut func_mut) = value.as_function_mut() {
+        func_mut.set_outcome(outcome);
+    }
+}
+
+fn get_current_function_outcome<'a>(
+    ctx: &AnalysisContext<'a>,
+) -> Option<(ValueRef<'a>, Vec<ValueRef<'a>>)> {
+    let value = ctx.current_function()?;
+    let outcome = value.as_function()?.outcome().cloned()?;
+
+    Some((value, outcome))
 }
