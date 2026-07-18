@@ -263,7 +263,9 @@ pub fn resolve_operand_name<'a>(
             .symtab()
             .get_qualified_symbol(qualifier.content(), name.content())
         {
-            QualifiedSymbolResolutionResult::Success(symbol) => Some(symbol),
+            QualifiedSymbolResolutionResult::Success(symbol) => {
+                Some(funcs::resolve_accessed_capture(ctx, &symbol))
+            }
             QualifiedSymbolResolutionResult::UnknownSymbol => None,
             QualifiedSymbolResolutionResult::PendingAnalysis => {
                 // this is likely the accessing of blackbox package for which we

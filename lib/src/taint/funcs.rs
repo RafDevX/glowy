@@ -6,7 +6,8 @@ use parser::{
 };
 
 pub use self::{
-    captures::call_site::derive_stable_capture_concretes, defers::DeferredCallReferents,
+    captures::{call_site::derive_stable_capture_concretes, resolve_accessed_capture},
+    defers::DeferredCallReferents,
     returns::visit_return,
 };
 use crate::{

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 
 use parser::{
     Span,
@@ -9,8 +9,8 @@ use crate::{
     Pinned,
     context::AnalysisContext,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
-    symbols::{Symbol, SymbolRef},
-    taint::funcs::captures::realization::CaptureEnvSnapshot,
+    symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
+    taint::funcs::captures::{collector::CapturedSymbol, realization::CaptureEnvSnapshot},
     values::{FunctionRef, ValueRef},
 };
 
@@ -40,11 +40,31 @@ pub fn register_captures<'a>(
 
     referenced.sort_unstable();
 
-    let mut captures = BTreeMap::new();
+    let mut captures: BTreeMap<_, (_, bool)> = BTreeMap::new();
 
-    for name in referenced {
-        let Some(symbol) = ctx.symtab().get_symbol_above_current_scope(name) else {
-            continue;
+    for captured in referenced {
+        let (symbol, bind_in_function_scope) = match captured {
+            CapturedSymbol::Unqualified(name) => {
+                let Some(symbol) = ctx.symtab().get_symbol_above_current_scope(name) else {
+                    continue;
+                };
+
+                (symbol, true)
+            }
+            CapturedSymbol::Qualified { qualifier, name } => {
+                if ctx.symtab().get_symbol(qualifier).is_some() {
+                    // not actually a real import qualifier, just field access
+                    continue;
+                }
+
+                let QualifiedSymbolResolutionResult::Success(symbol) =
+                    ctx.symtab().get_qualified_symbol(qualifier, name)
+                else {
+                    continue;
+                };
+
+                (symbol, false)
+            }
         };
 
         let borrowed = symbol.borrow();
@@ -53,7 +73,7 @@ pub fn register_captures<'a>(
             let declaration = borrowed.declared_name();
             drop(borrowed);
 
-            captures.insert(declaration, symbol);
+            insert_capture(&mut captures, declaration, symbol, bind_in_function_scope);
 
             continue;
         }
@@ -77,7 +97,12 @@ pub fn register_captures<'a>(
         // that global mutations can survive relay calls
         for (declaration, _) in symbol_func.captures() {
             if let Some(captured_symbol) = ctx.symtab().get_symbol_by_declaration(declaration) {
-                captures.insert(declaration, captured_symbol);
+                insert_capture(
+                    &mut captures,
+                    declaration,
+                    captured_symbol,
+                    bind_in_function_scope,
+                );
             }
         }
     }
@@ -88,7 +113,7 @@ pub fn register_captures<'a>(
         return;
     };
 
-    for (outer_decl, outer_symbol) in captures {
+    for (outer_decl, (outer_symbol, bind_in_function_scope)) in captures {
         let outer_value = outer_symbol.borrow().value();
 
         let local_symbol = func.register_capture_with(outer_decl, |index| {
@@ -116,8 +141,38 @@ pub fn register_captures<'a>(
             Symbol::new_ref(outer_decl, true, local_value, None)
         });
 
-        ctx.symtab_mut().declare_synthetic_symbol(local_symbol);
+        if bind_in_function_scope {
+            ctx.symtab_mut().declare_synthetic_symbol(local_symbol);
+        }
     }
+}
+
+fn insert_capture<'a>(
+    captures: &mut BTreeMap<Pinned<'a, Span<'a>>, (SymbolRef<'a>, bool)>,
+    declaration: Pinned<'a, Span<'a>>,
+    symbol: SymbolRef<'a>,
+    bind_in_function_scope: bool,
+) {
+    captures
+        .entry(declaration)
+        .and_modify(|(_, existing_bind)| *existing_bind |= bind_in_function_scope)
+        .or_insert((symbol, bind_in_function_scope));
+}
+
+pub fn resolve_accessed_capture<'a>(
+    ctx: &AnalysisContext<'a>,
+    symbol: &SymbolRef<'a>,
+) -> SymbolRef<'a> {
+    let borrowed = symbol.borrow();
+
+    if !borrowed.mutable() {
+        return Rc::clone(symbol);
+    }
+
+    let declaration = borrowed.declared_name();
+    drop(borrowed);
+
+    resolve_capture_symbol(ctx, declaration)
 }
 
 pub fn resolve_capture_symbol<'a>(

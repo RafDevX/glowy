@@ -13,7 +13,7 @@ use crate::{
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     symbols::{QualifiedSymbolResolutionResult, SymbolRef},
-    taint::exprs,
+    taint::{exprs, funcs},
     types::{PromotedField, StructFieldInfo, TypeInfo, TypeKind},
     values::{
         BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef,
@@ -647,6 +647,8 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 .get_qualified_symbol(qualifier.content(), self.selector.content())
             {
                 QualifiedSymbolResolutionResult::Success(symbol) => {
+                    let symbol = funcs::resolve_accessed_capture(ctx, &symbol);
+
                     mutate_through_symbol(
                         ctx,
                         &symbol,

@@ -16,11 +16,19 @@ use parser::{
 
 use crate::taint::mutation::LeftValue;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CapturedSymbol<'a> {
+    Unqualified(&'a str),
+    Qualified { qualifier: &'a str, name: &'a str },
+}
+
+type CapturedSymbols<'a> = HashSet<CapturedSymbol<'a>>;
+
 pub fn collect_captured_symbols<'a>(
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
     body: &BlockNode<'a>,
-) -> HashSet<&'a str> {
+) -> CapturedSymbols<'a> {
     let mut declared = extract_names_from_signature(signature, receiver);
 
     let mut captured = HashSet::new();
@@ -60,7 +68,7 @@ fn extract_names_from_signature<'a>(
 trait SymbolCaptureCollector<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     );
 }
@@ -68,7 +76,7 @@ trait SymbolCaptureCollector<'a> {
 impl<'a> SymbolCaptureCollector<'a> for BlockNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.stmts.collect_captured_symbols(captured, declared);
@@ -78,7 +86,7 @@ impl<'a> SymbolCaptureCollector<'a> for BlockNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for Vec<StatementNode<'a>> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let mut declared = declared.clone();
@@ -92,7 +100,7 @@ impl<'a> SymbolCaptureCollector<'a> for Vec<StatementNode<'a>> {
 impl<'a> SymbolCaptureCollector<'a> for StatementNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -125,7 +133,7 @@ impl<'a> SymbolCaptureCollector<'a> for StatementNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for SendNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.channel.collect_captured_symbols(captured, declared);
@@ -136,7 +144,7 @@ impl<'a> SymbolCaptureCollector<'a> for SendNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for AssignmentNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.lhs.collect_captured_symbols(captured, declared);
@@ -148,7 +156,7 @@ impl<'a> SymbolCaptureCollector<'a> for AssignmentNode<'a> {
             if name != "_" && !declared.contains(name) {
                 // assigning to something not declared within this closure means
                 // that we're capturing an outer symbol
-                captured.insert(name);
+                captured.insert(CapturedSymbol::Unqualified(name));
             }
         }
     }
@@ -157,7 +165,7 @@ impl<'a> SymbolCaptureCollector<'a> for AssignmentNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ShortVarDeclNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.exprs.collect_captured_symbols(captured, declared);
@@ -175,7 +183,7 @@ impl<'a> SymbolCaptureCollector<'a> for ShortVarDeclNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for DeclNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -191,7 +199,7 @@ impl<'a> SymbolCaptureCollector<'a> for DeclNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for Vec<BindingDeclSpecNode<'a>> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         for spec in self {
@@ -203,7 +211,7 @@ impl<'a> SymbolCaptureCollector<'a> for Vec<BindingDeclSpecNode<'a>> {
 impl<'a> SymbolCaptureCollector<'a> for BindingDeclSpecNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         // fake node to avoid repeating code
@@ -221,7 +229,7 @@ impl<'a> SymbolCaptureCollector<'a> for BindingDeclSpecNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for FunctionDeclNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         if self.name.content() != "_" {
@@ -247,7 +255,7 @@ impl<'a> SymbolCaptureCollector<'a> for FunctionDeclNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for IfNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let mut declared = declared.clone();
@@ -268,7 +276,7 @@ impl<'a> SymbolCaptureCollector<'a> for IfNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ElseNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -283,7 +291,7 @@ impl<'a> SymbolCaptureCollector<'a> for ElseNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ForNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let mut declared = declared.clone();
@@ -298,7 +306,7 @@ impl<'a> SymbolCaptureCollector<'a> for ForNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ForHeaderNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -313,7 +321,7 @@ impl<'a> SymbolCaptureCollector<'a> for ForHeaderNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ForClauseNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         if let Some(init) = &self.init {
@@ -333,7 +341,7 @@ impl<'a> SymbolCaptureCollector<'a> for ForClauseNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ForRangeNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -362,7 +370,7 @@ impl<'a> SymbolCaptureCollector<'a> for ForRangeNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for SelectNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         for clause in &self.clauses {
@@ -374,7 +382,7 @@ impl<'a> SymbolCaptureCollector<'a> for SelectNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for SelectClauseNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         if let Some(case) = &self.case {
@@ -388,7 +396,7 @@ impl<'a> SymbolCaptureCollector<'a> for SelectClauseNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for SwitchNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -403,7 +411,7 @@ impl<'a> SymbolCaptureCollector<'a> for SwitchNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ExprSwitchNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let mut declared = declared.clone();
@@ -425,7 +433,7 @@ impl<'a> SymbolCaptureCollector<'a> for ExprSwitchNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ExprSwitchCaseClause<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.exprs.collect_captured_symbols(captured, declared);
@@ -436,7 +444,7 @@ impl<'a> SymbolCaptureCollector<'a> for ExprSwitchCaseClause<'a> {
 impl<'a> SymbolCaptureCollector<'a> for TypeSwitchNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let mut declared = declared.clone();
@@ -464,7 +472,7 @@ impl<'a> SymbolCaptureCollector<'a> for TypeSwitchNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for TypeSwitchCaseClause<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.body.collect_captured_symbols(captured, declared);
@@ -474,7 +482,7 @@ impl<'a> SymbolCaptureCollector<'a> for TypeSwitchCaseClause<'a> {
 impl<'a> SymbolCaptureCollector<'a> for Vec<ExprNode<'a>> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         for expr in self {
@@ -486,7 +494,7 @@ impl<'a> SymbolCaptureCollector<'a> for Vec<ExprNode<'a>> {
 impl<'a> SymbolCaptureCollector<'a> for ExprNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -517,13 +525,13 @@ impl<'a> SymbolCaptureCollector<'a> for ExprNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for Span<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let name = self.content();
 
         if !declared.contains(name) {
-            captured.insert(name);
+            captured.insert(CapturedSymbol::Unqualified(name));
         }
     }
 }
@@ -531,7 +539,7 @@ impl<'a> SymbolCaptureCollector<'a> for Span<'a> {
 impl<'a> SymbolCaptureCollector<'a> for LiteralNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -569,7 +577,7 @@ impl<'a> SymbolCaptureCollector<'a> for LiteralNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for CompositeLiteralElementNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         let sub: &dyn SymbolCaptureCollector = match self {
@@ -584,7 +592,7 @@ impl<'a> SymbolCaptureCollector<'a> for CompositeLiteralElementNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for CompositeLiteralElementListNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         for (index, value) in self {
@@ -600,7 +608,7 @@ impl<'a> SymbolCaptureCollector<'a> for CompositeLiteralElementListNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for StructLiteralFieldsNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         match self {
@@ -621,7 +629,7 @@ impl<'a> SymbolCaptureCollector<'a> for StructLiteralFieldsNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for CallNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.func.collect_captured_symbols(captured, declared);
@@ -632,7 +640,7 @@ impl<'a> SymbolCaptureCollector<'a> for CallNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for MakeNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         if let Some(n) = &self.n {
@@ -648,9 +656,18 @@ impl<'a> SymbolCaptureCollector<'a> for MakeNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for SelectionNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
+        if let ExprNode::Name(qualifier) = &*self.base
+            && !declared.contains(qualifier.content())
+        {
+            captured.insert(CapturedSymbol::Qualified {
+                qualifier: qualifier.content(),
+                name: self.selector.content(),
+            });
+        }
+
         self.base.collect_captured_symbols(captured, declared);
     }
 }
@@ -658,7 +675,7 @@ impl<'a> SymbolCaptureCollector<'a> for SelectionNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for IndexingNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.index.collect_captured_symbols(captured, declared);
@@ -669,7 +686,7 @@ impl<'a> SymbolCaptureCollector<'a> for IndexingNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for SlicingNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         if let Some(low) = &self.low {
@@ -691,7 +708,7 @@ impl<'a> SymbolCaptureCollector<'a> for SlicingNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for TypeInstantiationNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         // type arguments live in the type namespace, not the value namespace,
@@ -703,7 +720,7 @@ impl<'a> SymbolCaptureCollector<'a> for TypeInstantiationNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for AmbiguousBracketAccessNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         // we don't know which interpretation will be chosen, so we have to be
@@ -716,7 +733,7 @@ impl<'a> SymbolCaptureCollector<'a> for AmbiguousBracketAccessNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for ConversionNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.expr.collect_captured_symbols(captured, declared);
@@ -726,7 +743,7 @@ impl<'a> SymbolCaptureCollector<'a> for ConversionNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for TypeAssertionNode<'a> {
     fn collect_captured_symbols(
         &self,
-        captured: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
         self.expr.collect_captured_symbols(captured, declared);
