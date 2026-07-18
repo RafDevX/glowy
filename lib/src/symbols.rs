@@ -792,6 +792,9 @@ impl<'a> Scope<'a> {
         predeclared_function!("panic", &["value"], false, 0);
         predeclared_function!("recover", &[], false, 1);
 
+        predeclared_function!("print", &["args"], true, 0);
+        predeclared_function!("println", &["args"], true, 0);
+
         predeclared_function!("complex", &["realPart", "imaginaryPart"], false, 1);
         predeclared_function!("real", &["c"], false, 1);
         predeclared_function!("imag", &["c"], false, 1);
