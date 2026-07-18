@@ -444,6 +444,8 @@ pub enum LabelBacktraceKind {
     DeclarationInitialization,
     /// Compounded label derived from the parts of a composite expression.
     Expression,
+    /// Implicit label from potential short-circuiting of a logical operation.
+    ShortCircuit,
     /// Aggregate label implicitly inherited from surrounding control flows.
     Branch,
     /// Label originating from a value sent into a given channel.

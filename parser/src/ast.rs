@@ -363,6 +363,16 @@ pub enum BinaryOpKind {
     LogicalOr,  // x || y
 }
 
+impl BinaryOpKind {
+    #[must_use]
+    #[inline]
+    pub fn short_circuits(&self) -> bool {
+        // Bitwise operators do not short-circuit, only Logical ones, per spec
+
+        matches!(self, Self::LogicalAnd | Self::LogicalOr)
+    }
+}
+
 impl<'a> From<LiteralNode<'a>> for ExprNode<'a> {
     #[inline]
     fn from(node: LiteralNode<'a>) -> Self {

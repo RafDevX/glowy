@@ -603,6 +603,12 @@ fn label_backtrace_to_snippets<'a>(
             LabelBacktraceKind::Expression => {
                 format!("{} has label {}", symbol!("expression"), backtrace.label())
             }
+            LabelBacktraceKind::ShortCircuit => {
+                format!(
+                    "logical operation could short-circuit with label {}",
+                    backtrace.label()
+                )
+            }
             LabelBacktraceKind::Branch => {
                 format!("execution branch has label {}", backtrace.label())
             }

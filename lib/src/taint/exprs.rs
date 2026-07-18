@@ -54,22 +54,66 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         } => channels::visit_receive(ctx, operand, location),
         ExprNode::UnaryOp { operand, .. } => visit_single_expr(ctx, operand),
         ExprNode::BinaryOp {
+            kind,
             left,
             right,
             location,
-            ..
         } => {
+            let pinned = ctx.pin(location.clone());
+
             let left = get_expr_backtrace(ctx, left);
-            let right = get_expr_backtrace(ctx, right);
+
+            let short_circuit_backtrace = left
+                .as_ref()
+                .filter(|_| kind.short_circuits())
+                .cloned()
+                .map(|implicit| {
+                    implicit.into_single_child(
+                        LabelBacktraceKind::ShortCircuit,
+                        None,
+                        pinned.clone(),
+                    )
+                });
+
+            let short_circuits = if let Some(backtrace) = short_circuit_backtrace {
+                // only when the left operand of a logical operation fails at
+                // short-circuiting is the right operand evaluated, so we need
+                // to make sure any side-effects caused by the latter take into
+                // account the calculated backtrace of the former
+                ctx.push_branch_backtrace(backtrace);
+
+                true
+            } else {
+                false
+            };
+
+            // now we can evaluate right
+            let mut right = get_expr_backtrace(ctx, right);
+
+            if short_circuits {
+                ctx.pop_branch_backtrace();
+
+                if let Some(raw) = right {
+                    // we use `left` instead of `short_circuit_backtrace`
+                    // because the latter would cause an extra level of
+                    // backtrace, for a total of two ShortCircuit kinds
+
+                    right = Some(raw.union(
+                        left.as_ref().unwrap(),
+                        LabelBacktraceKind::ShortCircuit,
+                        pinned.clone(),
+                    ));
+                }
+            }
 
             let backtrace = LabelBacktrace::combine_options(
                 left,
                 right,
                 LabelBacktraceKind::Expression,
-                Cow::Owned(ctx.pin(location.clone())),
+                Cow::Borrowed(&pinned),
             );
 
-            ValueRef::from_backtrace_or_bottom_at(backtrace, || ctx.pin(location.clone()))
+            ValueRef::from_backtrace_or_bottom_at(backtrace, || pinned)
         }
     };
 
