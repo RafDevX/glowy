@@ -23,8 +23,11 @@ func main() {
 	fmt.Println(arr[2])
 
 	for i, v := range arr {
+		// glowy::assert::{}
+		fmt.Println(i)
+
 		// glowy::assert::{alice, bob, charlie}
-		fmt.Println(i, v)
+		fmt.Println(v)
 	}
 
 	for i := range length {

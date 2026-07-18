@@ -281,9 +281,14 @@ fn visit_for_range<'a>(
         // need to do this every iteration as it might have changed
         let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
 
-        let children: Vec<_> = rhs_values.iter().filter_map(ValueRef::backtrace).collect();
+        // every range shape uses its first abstract value to carry the
+        // dependency of the loop's cardinality: length for arrays/slices, key
+        // state for maps, and the operand/yield dependency for other shapes.
+        // other later values just represent element payloads and do not
+        // propagate information on whether the body executes
+        let cardinality_backtrace = rhs_values.first().and_then(ValueRef::backtrace);
         let rhs_backtrace = LabelBacktrace::fold(
-            &children,
+            cardinality_backtrace.as_ref(),
             LabelBacktraceKind::Expression,
             None,
             rhs_location.clone(),
@@ -481,7 +486,19 @@ fn get_for_range_values<'a>(
         ];
     }
 
-    // array / map: 2 values (key/index, element i.e. coll[k])
+    // array: 2 values (index, element i.e. coll[index])
+    if value.is_array()
+        && let Some(array) = value.as_array()
+    {
+        let index_bt = array.len_backtrace(location.clone());
+
+        return vec![
+            ValueRef::from_backtrace_or_bottom_at(index_bt, || location.clone()),
+            array.get_dyn(location),
+        ];
+    }
+
+    // map: 2 values (key, element i.e. coll[key])
     if let Some(composite) = value.as_composite() {
         let index_bt = composite.backtrace_at_location(location.clone());
 
