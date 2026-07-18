@@ -285,12 +285,10 @@ pub fn visit_copy<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
 ) -> ValueRef<'a> {
-    // Note: `copy` in Go mutates the destination slice and returns the number
-    // of elements copied, which is min(len(src), len(dst)). This means dst's
-    // label must always be raised to the maximum of src and we cannot do
-    // anything fancy with const, since all elements matter to the length.
-    // Also: some parts of the destination slice might not be overwritten, so we
-    // need to remember its backtrace too.
+    // Note: `copy` in Go mutates the first min(len(src), len(dst)) destination
+    // elements and returns that count. Precise slice ranges can be copied
+    // element-by-element; unknown ranges require a weak aggregate update so a
+    // possibly untouched destination suffix is retained.
 
     let location = ctx.pin(node.location.clone());
 
@@ -307,8 +305,6 @@ pub fn visit_copy<'a>(
     capture_arg_const(ctx, dst_expr, arg_consts, 0);
     capture_arg_const(ctx, src_expr, arg_consts, 1);
 
-    let src = exprs::visit_single_expr(ctx, src_expr);
-
     // captured from inside the transformer so we can build `copy`'s return
     // value (the tainted element count) after the mutation completes
     let combined = Cell::new(None);
@@ -322,6 +318,12 @@ pub fn visit_copy<'a>(
         LabelBacktraceKind::SliceCopy,
         &node.location,
         &|ctx, mut dst| {
+            // call args are evaluated from left to right, and delaying the
+            // source visit until the destination mutation target has been
+            // resolved also lets copy_from snapshot overlapping storage just
+            // before the first write
+            let src = exprs::visit_single_expr(ctx, src_expr);
+
             combined.set(LabelBacktrace::combine_options(
                 dst.backtrace(),
                 src.backtrace(),
@@ -337,9 +339,14 @@ pub fn visit_copy<'a>(
                 return None; // abort mutation
             };
 
-            // a copy may leave a suffix of dst untouched, so we use a weak
-            // aggregate update to retain those pre-existing element labels
-            slice.set_dyn(&src, &location);
+            let src_slice = src.as_slice();
+
+            slice.copy_from(
+                src_slice.as_deref(),
+                &src,
+                ctx.branch_backtrace(),
+                &location,
+            );
 
             drop(slice);
 

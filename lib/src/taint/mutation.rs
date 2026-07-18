@@ -3,7 +3,8 @@ use std::borrow::Cow;
 use parser::{
     Location, Span,
     ast::{
-        AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, TypeNode, UnaryOpKind,
+        AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, SlicingNode, TypeNode,
+        UnaryOpKind,
     },
 };
 
@@ -119,11 +120,32 @@ fn as_valid_left_value<'a, 'b>(
     expr: &'b ExprNode<'a>,
     ctx: Option<&mut AnalysisContext<'a>>,
 ) -> Option<&'b dyn LeftValue<'a>> {
+    if matches!(expr, ExprNode::Slicing(_)) {
+        // slicing expressions are valid mutation targets (e.g., for `copy`),
+        // but they cannot be directly assigned to
+
+        if let Some(ctx) = ctx {
+            ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                location: expr.location().into_owned(),
+            });
+        }
+
+        return None;
+    }
+
+    as_mutation_target(expr, ctx)
+}
+
+fn as_mutation_target<'a, 'b>(
+    expr: &'b ExprNode<'a>,
+    ctx: Option<&mut AnalysisContext<'a>>,
+) -> Option<&'b dyn LeftValue<'a>> {
     let inner: &'b dyn LeftValue = match expr {
         ExprNode::Name(name) => name,
         ExprNode::Indexing(indexing) => indexing,
         ExprNode::AmbiguousBracketAccess(ambiguous) => ambiguous,
         ExprNode::Selection(selection) => selection,
+        ExprNode::Slicing(slicing) => slicing,
 
         // Glowy does not model heap addresses, so `&x` and `*p` are treated as
         // transparent over their operand (mirroring the read-side transparency
@@ -148,7 +170,6 @@ fn as_valid_left_value<'a, 'b>(
         ExprNode::Literal(_)
         | ExprNode::Call(_)
         | ExprNode::Make(_)
-        | ExprNode::Slicing(_)
         | ExprNode::Conversion(_)
         | ExprNode::TypeAssertion(_)
         | ExprNode::TypeInstantiation(_)
@@ -200,7 +221,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
     }
 
     fn root_operand(&self) -> Option<Span<'a>> {
-        as_valid_left_value(self, None)?.root_operand()
+        as_mutation_target(self, None)?.root_operand()
     }
 
     fn mutate_target(
@@ -209,7 +230,7 @@ impl<'a> LeftValue<'a> for ExprNode<'a> {
         assignment_location: &Location,
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
-        let Some(inner) = as_valid_left_value(self, Some(ctx)) else {
+        let Some(inner) = as_mutation_target(self, Some(ctx)) else {
             // error already reported
             return;
         };
@@ -567,6 +588,65 @@ impl<'a> LeftValue<'a> for AmbiguousBracketAccessNode<'a> {
         let indexing = IndexingNode::from(self.clone());
 
         indexing.mutate_target(ctx, assignment_location, mutator);
+    }
+}
+
+impl<'a> LeftValue<'a> for SlicingNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        _backtrace_kind: LabelBacktraceKind,
+        _rhs: ValueRef<'a>,
+        _known_const: Option<SimpleConstValue>,
+        _simple: bool,
+        _explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        _subtract: &Label<'a>,
+        _location: &Location,
+    ) {
+        // a slicing expression is not directly assignable in Go, even though it
+        // is a valid mutation target for some builtins uch as copy and clear
+
+        ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+            location: self.location.clone(),
+        });
+    }
+
+    fn root_operand(&self) -> Option<Span<'a>> {
+        self.base.root_operand()
+    }
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
+    ) {
+        if self.base.root_operand().is_none() {
+            // slice-valued expressions need not be assignable to expose mutable
+            // backing storage (for example, `copy(make([]int, 1)[:], src)`).
+            let target = exprs::visit_single_expr(ctx, &self.clone().into());
+
+            let _ = mutator(ctx, target);
+
+            return;
+        }
+
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.base
+            .mutate_target(ctx, assignment_location, &|ctx, target| {
+                // re-slicing creates a descriptor view over the same backing
+                // storage, so keep the base descriptor itself unchanged while
+                // the mutator updates storage through that view
+
+                let view = exprs::visit_slicing_with_base(ctx, self, &target);
+
+                mutator(ctx, view)?;
+
+                Some((target, None))
+            });
     }
 }
 

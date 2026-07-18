@@ -419,6 +419,14 @@ pub(super) fn is_last_position_indexing(
 pub fn visit_slicing<'a>(ctx: &mut AnalysisContext<'a>, node: &SlicingNode<'a>) -> ValueRef<'a> {
     let base = super::visit_single_expr(ctx, &node.base);
 
+    visit_slicing_with_base(ctx, node, &base)
+}
+
+pub fn visit_slicing_with_base<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &SlicingNode<'a>,
+    base: &ValueRef<'a>,
+) -> ValueRef<'a> {
     let location = ctx.pin(node.location.clone());
 
     let low = node.low.as_deref().map(|expr| visit_slice_bound(ctx, expr));

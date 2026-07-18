@@ -1,9 +1,6 @@
 use std::borrow::Cow;
 
-use parser::{
-    Span,
-    ast::{CallNode, ExprNode, TypeNode, UnaryOpKind},
-};
+use parser::ast::{CallNode, ExprNode, TypeNode, UnaryOpKind};
 
 use crate::{
     context::AnalysisContext,
@@ -139,7 +136,7 @@ struct DeferredReferent<'a>(SymbolRef<'a>);
 
 impl<'a> DeferredReferent<'a> {
     fn new(ctx: &AnalysisContext<'a>, expr: &ExprNode<'a>) -> Option<Self> {
-        let root = get_referenced_root_operand(expr)?;
+        let root = mutation::LeftValue::root_operand(expr)?;
         let symbol = ctx.symtab().get_symbol(root.content())?;
 
         Some(Self(symbol))
@@ -161,16 +158,5 @@ impl<'a> DeferredReferent<'a> {
             LabelBacktraceKind::Expression,
             Cow::Borrowed(saved.location()),
         )
-    }
-}
-
-// extends LeftValue::root_operand to slicing expressions: a slice is not by
-// itself assignable, but its descriptor still refers to its base's mutable
-// backing storage so we need to handle it specially as well
-fn get_referenced_root_operand<'a>(expr: &ExprNode<'a>) -> Option<Span<'a>> {
-    if let ExprNode::Slicing(slicing) = expr {
-        get_referenced_root_operand(&slicing.base)
-    } else {
-        mutation::LeftValue::root_operand(expr)
     }
 }

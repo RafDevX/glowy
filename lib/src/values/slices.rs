@@ -417,6 +417,50 @@ impl<'a> SliceValue<'a> {
         );
     }
 
+    pub fn copy_from(
+        &mut self,
+        source: Option<&Self>,
+        source_value: &ValueRef<'a>,
+        branch_backtrace: Option<&LabelBacktrace<'a>>,
+        location: &Pinned<'a, Location>,
+    ) {
+        if branch_backtrace.is_none()
+            && let Some(source) = source
+            && let Some(length) = self
+                .precise_len()
+                .zip(source.precise_len())
+                .map(|(dst, src)| dst.min(src))
+        {
+            // Go spec allows copying with overlapping source and destination
+            // slices, so we snapshot all source elements before mutating any
+            // potentially-shared backing storage
+            let copied: Vec<_> = (0..length)
+                .map(|index| {
+                    source
+                        .read_at_index(Some(index), location.clone())
+                        .nest_backtrace(LabelBacktraceKind::SliceCopy, None, location.clone(), [])
+                })
+                .collect();
+
+            for (index, value) in (0..length).zip(copied) {
+                self.write_at_index(Some(index), value, location.clone());
+            }
+        } else {
+            // unknown ranges may copy any source element to any destination
+            // position, and a branch-dependent copy might not execute, so it
+            // must retain the old destination. in both cases, weakly add the
+            // source aggregate rather than overwriting any existing element
+            let copied = source_value.nest_backtrace(
+                LabelBacktraceKind::SliceCopy,
+                None,
+                location.clone(),
+                branch_backtrace.cloned(),
+            );
+
+            self.set_dyn(&copied, location);
+        }
+    }
+
     pub fn clear(&mut self, location: &Pinned<'a, Location>) {
         let dependency = self.range_dependency(LabelBacktraceKind::Assignment, location.clone());
 
