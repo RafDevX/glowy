@@ -457,7 +457,16 @@ impl<'a> SliceValue<'a> {
                 branch_backtrace.cloned(),
             );
 
-            self.set_dyn(&copied, location);
+            let aggregate = copied.nest_backtrace(
+                LabelBacktraceKind::Assignment,
+                None,
+                location.clone(),
+                self.range_dependency(LabelBacktraceKind::Assignment, location.clone()),
+            );
+
+            for backing in &self.backings {
+                backing.write(None, aggregate.clone(), Cow::Borrowed(location));
+            }
         }
     }
 
@@ -489,19 +498,6 @@ impl<'a> SliceValue<'a> {
             for backing in &self.backings {
                 backing.write(None, zero.clone(), Cow::Borrowed(location));
             }
-        }
-    }
-
-    pub fn set_dyn(&mut self, value: &ValueRef<'a>, location: &Pinned<'a, Location>) {
-        let value = value.nest_backtrace(
-            LabelBacktraceKind::Assignment,
-            None,
-            location.clone(),
-            self.range_dependency(LabelBacktraceKind::Assignment, location.clone()),
-        );
-
-        for backing in &self.backings {
-            backing.write(None, value.clone(), Cow::Borrowed(location));
         }
     }
 
