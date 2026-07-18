@@ -10,9 +10,9 @@ use parser::{
     ast::{CallNode, FunctionParamDeclNode},
 };
 
+use self::per_iteration::PerIterationBindings;
 use crate::{
-    FullPackagePath, Pinned, SinkDescriptor,
-    decls::receiver_base_type_name,
+    FullPackagePath, Pinned, SinkDescriptor, decls,
     errors::{AnalysisError, AnalysisErrorKind},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     policy::{BlanketDirective, BlanketDirectives},
@@ -22,6 +22,8 @@ use crate::{
     types::TypeRegistry,
     values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
+
+mod per_iteration;
 
 pub struct AnalysisContext<'a> {
     /// Current step of the analysis.
@@ -89,8 +91,10 @@ pub struct AnalysisContext<'a> {
     goto_states: Vec<GotoConvergenceState<'a>>,
     /// Stack of convergence state for control-flow back-edges from `continue`.
     loop_states: Vec<LoopConvergenceState<'a>>,
-    /// Locations of currently active split control-flow regions.
-    split_control_flow_regions: Vec<Pinned<'a, Location>>,
+    /// Currently active split control-flow regions.
+    split_control_flow_regions: Vec<SplitControlFlowRegion<'a>>,
+    /// Path-sensitive cells for range variables declared using `:=`.
+    per_iteration_bindings: PerIterationBindings<'a>,
 
     /// Whether any security policy was encountered during the analysis.
     saw_enforcement_checks: bool,
@@ -120,6 +124,7 @@ impl<'a> AnalysisContext<'a> {
             current_branch_scope_depth: 0,
             error_suppression_depth: 0,
             split_control_flow_regions: Vec::new(),
+            per_iteration_bindings: PerIterationBindings::default(),
             goto_states: Vec::new(),
             loop_states: Vec::new(),
             saw_enforcement_checks: false,
@@ -469,11 +474,63 @@ impl<'a> AnalysisContext<'a> {
     }
 
     pub fn push_split_control_flow(&mut self, location: Location) {
-        self.split_control_flow_regions.push(self.pin(location));
+        let region = SplitControlFlowRegion {
+            location: self.pin(location),
+            selected_arm: None,
+        };
+
+        self.split_control_flow_regions.push(region);
     }
 
     pub fn pop_split_control_flow(&mut self) {
         self.split_control_flow_regions.pop();
+    }
+
+    pub fn set_current_split_arm(&mut self, arm: Option<SplitControlFlowArm>) {
+        if let Some(region) = self.split_control_flow_regions.last_mut() {
+            region.selected_arm = arm;
+        }
+    }
+
+    fn current_control_flow_path(&self) -> ControlFlowPath<'a> {
+        self.split_control_flow_regions
+            .iter()
+            .filter_map(|region| {
+                region
+                    .selected_arm
+                    .map(|arm| (region.location.clone(), arm))
+            })
+            .collect()
+    }
+
+    pub fn register_per_iteration_binding(&mut self, symbol: &SymbolRef<'a>) {
+        let path = self.current_control_flow_path();
+
+        self.per_iteration_bindings.register(symbol, path);
+    }
+
+    pub fn capture_iteration_cell(&mut self, symbol: &SymbolRef<'a>) -> Option<SymbolRef<'a>> {
+        if !self.per_iteration_bindings.contains(symbol) {
+            return None;
+        }
+
+        let path = self.current_control_flow_path();
+
+        self.per_iteration_bindings.capture_cell(symbol, path)
+    }
+
+    pub fn record_per_iteration_value(&mut self, symbol: &SymbolRef<'a>) {
+        if !self.per_iteration_bindings.contains(symbol) {
+            return;
+        }
+
+        let path = self.current_control_flow_path();
+
+        self.per_iteration_bindings.record_value(symbol, &path);
+    }
+
+    pub fn record_iteration_cell_value(&mut self, symbol: &SymbolRef<'a>) {
+        self.per_iteration_bindings.record_cell_value(symbol);
     }
 
     pub fn was_symbol_declared_within_active_split(&self, symbol: &SymbolRef<'a>) -> Option<bool> {
@@ -487,7 +544,7 @@ impl<'a> AnalysisContext<'a> {
         let within = self
             .split_control_flow_regions
             .iter()
-            .any(|region| declaration.contained_in(region));
+            .any(|region| declaration.contained_in(&region.location));
 
         Some(within)
     }
@@ -582,7 +639,7 @@ impl<'a> AnalysisContext<'a> {
         receiver: Option<&FunctionParamDeclNode<'a>>,
         symbol: SymbolRef<'a>,
     ) {
-        match receiver.and_then(|rcv| receiver_base_type_name(&rcv.r#type)) {
+        match receiver.and_then(|rcv| decls::receiver_base_type_name(&rcv.r#type)) {
             Some(receiver_type) => self.declare_new_method_symbol(receiver_type, symbol),
             None => self.declare_new_symbol(symbol),
         }
@@ -696,6 +753,19 @@ impl<'a> LoopConvergenceState<'a> {
             converged: false,
         }
     }
+}
+
+type ControlFlowPath<'a> = Vec<(Pinned<'a, Location>, SplitControlFlowArm)>;
+
+struct SplitControlFlowRegion<'a> {
+    location: Pinned<'a, Location>,
+    selected_arm: Option<SplitControlFlowArm>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitControlFlowArm {
+    IfThen,
+    IfElse,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

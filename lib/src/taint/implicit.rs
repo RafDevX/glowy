@@ -11,7 +11,7 @@ use parser::{
 
 use crate::{
     Pinned,
-    context::{AnalysisContext, DeferTarget},
+    context::{AnalysisContext, DeferTarget, SplitControlFlowArm},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     symbols::Symbol,
@@ -43,14 +43,20 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
         false
     };
 
+    ctx.set_current_split_arm(Some(SplitControlFlowArm::IfThen));
+
     // vvv this will create another scope for the if body, which is intended
     super::visit_block(ctx, &node.then);
+
+    ctx.set_current_split_arm(node.otherwise.as_ref().map(|_| SplitControlFlowArm::IfElse));
 
     match &node.otherwise {
         Some(ElseNode::If(else_if)) => visit_if(ctx, else_if),
         Some(ElseNode::Block(r#else)) => super::visit_block(ctx, r#else),
         None => {} // nothing to do
     }
+
+    ctx.set_current_split_arm(None);
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
 
@@ -346,6 +352,19 @@ fn visit_for_range<'a>(
                 None,
                 None,
             );
+
+            // variables declared by a range clause (`:=`) are fresh on every
+            // iteration, so we need to mark the abstract binding for closures
+            // to retain the environment of the iteration in which they were
+            // created, rather than being rebound through the declaration index
+            // to a later iteration's symbol
+            for name in lhs {
+                if name.content() != "_"
+                    && let Some(symbol) = ctx.symtab().get_symbol_in_current_scope(name.content())
+                {
+                    ctx.register_per_iteration_binding(&symbol);
+                }
+            }
         } else if let ForRangeNode::Assignment { lhs, .. } = range {
             explicit::visit_raw_assignment(
                 ctx,

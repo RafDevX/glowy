@@ -262,7 +262,13 @@ impl<'a> LeftValue<'a> for Span<'a> {
             reason = "Same context, just threaded through closures"
         )]
         self.mutate_target(ctx, location, &|ctx, target| {
-            let should_override = self.should_override(ctx, simple);
+            let should_override = self.should_override(ctx, simple)
+                || (rhs.is_function() && !target.is_function() && target.is_bottom());
+            // ^ a zero-valued (non-initialized) function variable has no
+            // callable body state to retain, so keeping that Bottom placeholder
+            // as the merge base in the function-specific branch below would
+            // discard the rhs function's outcome and captures
+
             let pinned_location = ctx.pin(location.clone());
 
             let mut mutated = if should_override {
@@ -403,6 +409,8 @@ fn mutate_through_symbol<'a>(
     );
 
     symbol.borrow_mut().set_value(mutated, known_const);
+
+    ctx.record_per_iteration_value(symbol);
 }
 
 pub fn record_active_function_capture_mutation<'a>(

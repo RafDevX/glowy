@@ -11,7 +11,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     taint::funcs::captures::{collector::CapturedSymbol, realization::CaptureEnvSnapshot},
-    values::{FunctionRef, ValueRef},
+    values::{CaptureBinding, FunctionRef, ValueRef},
 };
 
 pub mod call_site;
@@ -114,9 +114,16 @@ pub fn register_captures<'a>(
     };
 
     for (outer_decl, (outer_symbol, bind_in_function_scope)) in captures {
-        let outer_value = outer_symbol.borrow().value();
+        let iteration_cell = ctx.capture_iteration_cell(&outer_symbol);
 
-        let local_symbol = func.register_capture_with(outer_decl, |index| {
+        let captured_value = iteration_cell
+            .as_ref()
+            .unwrap_or(&outer_symbol)
+            .borrow()
+            .value()
+            .get();
+
+        let local_symbol = func.register_capture_with(outer_decl, iteration_cell, |index| {
             let synthetic = LabelTag::Synthetic {
                 func: r#ref.clone(),
                 slot: SyntheticSlot::Capture(index),
@@ -136,7 +143,7 @@ pub fn register_captures<'a>(
             // see the correct shape and employ the appropriate abstraction,
             // instead of coercing into an arbitrary default, but retain the
             // synthetic as the sole backtrace
-            let local_value = outer_value.get().copy_shape(capture_backtrace);
+            let local_value = captured_value.copy_shape(capture_backtrace);
 
             Symbol::new_ref(outer_decl, true, local_value, None)
         });
@@ -207,7 +214,7 @@ pub fn record_capture_fallbacks<'a>(ctx: &AnalysisContext<'a>, value: &mut Value
     };
 
     for (outer_decl, binding) in func.captures_mut() {
-        let Some(outer_symbol) = ctx.symtab().get_symbol_by_declaration(outer_decl) else {
+        let Some(outer_symbol) = lookup_capture_definition_symbol(ctx, outer_decl, binding) else {
             continue;
         };
 
@@ -219,4 +226,30 @@ pub fn record_capture_fallbacks<'a>(ctx: &AnalysisContext<'a>, value: &mut Value
 
         binding.set_hybrid_fallback(hybrid);
     }
+}
+
+fn lookup_capture_definition_symbol<'a>(
+    ctx: &AnalysisContext<'a>,
+    outer_decl: Pinned<'a, Span<'a>>,
+    binding: &CaptureBinding<'a>,
+) -> Option<SymbolRef<'a>> {
+    binding
+        .iteration_cell()
+        .cloned()
+        .or_else(|| ctx.symtab().get_symbol_by_declaration(outer_decl))
+}
+
+fn resolve_capture_runtime_symbol<'a>(
+    ctx: &AnalysisContext<'a>,
+    outer_decl: Pinned<'a, Span<'a>>,
+    binding: &CaptureBinding<'a>,
+) -> SymbolRef<'a> {
+    if let Some(iteration_cell) = binding.iteration_cell() {
+        return Rc::clone(iteration_cell);
+    }
+
+    // an ordinary capture may be relayed through an active enclosing closure,
+    // so its synthetic local must receive the write to allow the enclosing call
+    // to realize its placeholders before propagating the value any further
+    resolve_capture_symbol(ctx, outer_decl)
 }

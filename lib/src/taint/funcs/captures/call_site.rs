@@ -93,7 +93,7 @@ impl<'a> CallSiteConcretes<'a> {
 }
 
 pub fn apply_capture_mutations_and_derive_concretes<'a>(
-    ctx: &AnalysisContext<'a>,
+    ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
@@ -193,7 +193,7 @@ fn merge_capture_backtraces<'a>(
 }
 
 pub fn apply_capture_write_backs<'a>(
-    ctx: &AnalysisContext<'a>,
+    ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
@@ -212,7 +212,7 @@ pub fn apply_capture_write_backs<'a>(
 }
 
 fn apply_capture_write_backs_with<'a>(
-    ctx: &AnalysisContext<'a>,
+    ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     call_site_concretes: &CallSiteConcretes<'a>,
     capture_backtraces: &CaptureConcretes<'a>,
@@ -239,7 +239,7 @@ fn apply_capture_write_backs_with<'a>(
             continue;
         }
 
-        let outer_symbol = super::resolve_capture_symbol(ctx, outer_decl);
+        let outer_symbol = super::resolve_capture_runtime_symbol(ctx, outer_decl, binding);
 
         if !outer_symbol.borrow().mutable() {
             continue;
@@ -338,6 +338,8 @@ fn apply_capture_write_backs_with<'a>(
         outer_symbol
             .borrow_mut()
             .set_value(final_value, final_known_const);
+
+        ctx.record_iteration_cell_value(&outer_symbol);
     }
 }
 

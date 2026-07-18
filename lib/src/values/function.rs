@@ -21,7 +21,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     policy::{BlanketDirective, BlanketDirectiveKind, BlanketSourceArgPredicate, SinkKind},
     snapshots::SnapshotAware,
-    symbols::SymbolRef,
+    symbols::{Symbol, SymbolRef},
     types::TypeInfo,
     values::{
         BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade, ValueRef,
@@ -381,12 +381,17 @@ impl<'a> FunctionValue<'a> {
     pub fn register_capture_with(
         &mut self,
         outer_decl: Pinned<'a, Span<'a>>,
+        iteration_cell: Option<SymbolRef<'a>>,
         make_local_symbol: impl FnOnce(usize) -> SymbolRef<'a>,
     ) -> SymbolRef<'a> {
         let capture_index = self.captures.len();
 
         let binding = self.captures.entry(outer_decl).or_insert_with(|| {
-            CaptureBinding::new(capture_index, make_local_symbol(capture_index))
+            CaptureBinding::new(
+                capture_index,
+                make_local_symbol(capture_index),
+                iteration_cell,
+            )
         });
 
         binding.local_symbol()
@@ -805,6 +810,10 @@ pub struct CaptureBinding<'a> {
     // synthetic local symbol installed in the function scope for this capture
     // (with a placeholder synthetic tag as its label)
     local_symbol: SymbolRef<'a>,
+    // range variables declared with `:=` denote distinct storage on each
+    // iteration, so this state represents the particular abstract iteration
+    // environment captured by this closure
+    iteration_cell: Option<SymbolRef<'a>>,
     // currently best known hybrid backtrace for this capture's outer symbol,
     // used as a fallback when fetching the outer symbol's current value yields
     // a partially or fully synthetic label -- however, there is a risk that
@@ -826,10 +835,15 @@ pub struct CaptureBinding<'a> {
 }
 
 impl<'a> CaptureBinding<'a> {
-    fn new(index: usize, local_symbol: SymbolRef<'a>) -> Self {
+    fn new(
+        index: usize,
+        local_symbol: SymbolRef<'a>,
+        iteration_cell: Option<SymbolRef<'a>>,
+    ) -> Self {
         Self {
             index,
             local_symbol,
+            iteration_cell,
             hybrid_fallback: None,
             mutation_backtrace: None,
         }
@@ -841,6 +855,10 @@ impl<'a> CaptureBinding<'a> {
 
     pub fn local_symbol(&self) -> SymbolRef<'a> {
         Rc::clone(&self.local_symbol)
+    }
+
+    pub fn iteration_cell(&self) -> Option<&SymbolRef<'a>> {
+        self.iteration_cell.as_ref()
     }
 
     #[expect(
@@ -880,6 +898,29 @@ impl<'a> CaptureBinding<'a> {
     ) -> Self {
         let mut binding = self.clone();
 
+        binding.iteration_cell = binding.iteration_cell.map(|symbol| {
+            let (declared_name, mutable, current, known_const) = {
+                let symbol = symbol.borrow();
+
+                (
+                    symbol.declared_name(),
+                    symbol.mutable(),
+                    symbol.value().get(),
+                    symbol.known_const().cloned(),
+                )
+            };
+
+            let realized = current.realize(from_func, from_slot, concrete);
+
+            if realized.snapshot_aware_eq(&current) {
+                // preserve sharing between closures from the same iteration
+                // when this realization has nothing to substitute
+                symbol
+            } else {
+                Symbol::new_ref(declared_name, mutable, realized, known_const)
+            }
+        });
+
         if let Some(Some(fallback)) = binding.hybrid_fallback() {
             let realized = fallback.realize(from_func, from_slot, concrete);
 
@@ -892,13 +933,33 @@ impl<'a> CaptureBinding<'a> {
 
         binding
     }
+
+    fn iteration_cell_eq_by(
+        &self,
+        other: &Self,
+        cmp: impl FnOnce(&ValueRef<'a>, &ValueRef<'a>) -> bool,
+    ) -> bool {
+        match (&self.iteration_cell, &other.iteration_cell) {
+            (None, None) => true,
+            (Some(left), Some(right)) => {
+                let left = left.borrow();
+                let right = right.borrow();
+
+                left.known_const() == right.known_const()
+                    && cmp(&left.value().get(), &right.value().get())
+            }
+            _ => false,
+        }
+    }
 }
 
 impl SnapshotAware for CaptureBinding<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         // local_symbol is transient identity; its value is compared as part of
-        // the enclosing symbol-table snapshot instead
+        // the enclosing symbol-table snapshot. iteration_cell is not registered
+        // there, so its state must be compared explicitly
         self.index == other.index
+            && self.iteration_cell_eq_by(other, SnapshotAware::snapshot_aware_eq)
             && self
                 .hybrid_fallback
                 .snapshot_aware_eq(&other.hybrid_fallback)
@@ -912,6 +973,7 @@ impl PartialEq for CaptureBinding<'_> {
     fn eq(&self, other: &Self) -> bool {
         // local_symbol is implementation state, not capture metadata
         self.index == other.index
+            && self.iteration_cell_eq_by(other, PartialEq::eq)
             && self.hybrid_fallback == other.hybrid_fallback
             && self.mutation_backtrace == other.mutation_backtrace
     }
@@ -924,6 +986,7 @@ impl fmt::Debug for CaptureBinding<'_> {
         // omit local_symbol (implementation state, not capture metadata)
         f.debug_struct("CaptureBinding")
             .field("index", &self.index)
+            .field("has_iteration_cell", &self.iteration_cell.is_some())
             .field("hybrid_fallback", &self.hybrid_fallback)
             .field("mutation_backtrace", &self.mutation_backtrace)
             .finish_non_exhaustive()

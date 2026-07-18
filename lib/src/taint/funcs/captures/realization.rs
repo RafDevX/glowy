@@ -117,7 +117,7 @@ fn derive_concrete_backtrace_or_fallback<'a>(
     capture_env_snapshot: &CaptureEnvSnapshot<'a>,
     include_body_mutations: bool,
 ) -> Option<LabelBacktrace<'a>> {
-    let symbol = super::resolve_capture_symbol(ctx, outer_decl);
+    let symbol = super::resolve_capture_runtime_symbol(ctx, outer_decl, binding);
 
     let value_location = symbol.borrow().value().get().location().clone();
 
@@ -297,18 +297,16 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
             // inner function realization
             r#override.as_ref().map(Cow::Borrowed)
         } else {
-            let live_concrete =
-                ctx.symtab()
-                    .get_symbol_by_declaration(outer_decl)
-                    .and_then(|sym| {
-                        // take into account transitive captures
-                        derive_hybrid_symbol_backtrace_with_active(
-                            ctx,
-                            &sym,
-                            capture_env_snapshot,
-                            active_symbols,
-                        )
-                    });
+            // take into account transitive captures
+            let live_concrete = super::lookup_capture_definition_symbol(ctx, outer_decl, binding)
+                .and_then(|capture_symbol| {
+                    derive_hybrid_symbol_backtrace_with_active(
+                        ctx,
+                        &capture_symbol,
+                        capture_env_snapshot,
+                        active_symbols,
+                    )
+                });
 
             if live_concrete
                 .as_ref()
