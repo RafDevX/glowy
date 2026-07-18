@@ -70,11 +70,38 @@ pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
 }
 
 pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>, label: Option<&'a str>) {
-    ctx.push_split_control_flow(node.location.clone());
-
     // Go spec: each if, for and switch is considered to be in its own
     // implicit block, so we select it here
     ctx.symtab_mut().select_next_child_scope();
+
+    // a for-clause's init statement and a range loop's range expression
+    // are both evaluated exactly once, before control flow can split between
+    // zero or more iterations. keep their side effects outside the split and,
+    // for for-range, retain the evaluated operand for every abstract body visit
+
+    if let ForHeaderNode::Clause(ForClauseNode {
+        init: Some(init), ..
+    }) = &node.header
+    {
+        // executed even if it later turns out that the loop iterates zero times
+        super::visit_statement(ctx, init);
+    }
+
+    let range_operand = if let ForHeaderNode::Range(range) = &node.header {
+        let range_expr = match range {
+            ForRangeNode::Decl { range_expr, .. }
+            | ForRangeNode::Assignment { range_expr, .. }
+            | ForRangeNode::None { range_expr } => range_expr,
+        };
+
+        let location = ctx.pin(range_expr.location().into_owned());
+
+        Some(visit_for_range_operand(ctx, range_expr, &location))
+    } else {
+        None
+    };
+
+    ctx.push_split_control_flow(node.location.clone());
 
     ctx.increase_branch_scope_depth();
 
@@ -85,7 +112,13 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>, label: O
             visit_for_clause(ctx, clause, &node.body, &node.header_location);
         }
         ForHeaderNode::Range(range) => {
-            visit_for_range(ctx, range, &node.body, &node.header_location);
+            visit_for_range(
+                ctx,
+                range,
+                range_operand.as_ref().unwrap(),
+                &node.body,
+                &node.header_location,
+            );
         }
     }
 
@@ -107,12 +140,6 @@ fn visit_for_clause<'a>(
     body: &BlockNode<'a>,
     header_location: &Location,
 ) {
-    if let Some(init) = &clause.init {
-        // visit init regardless because it'll always be executed
-        // (and it only happens once, so no convergence loop is required)
-        super::visit_statement(ctx, init);
-    }
-
     // body+post must be re-visited until labels stabilize because assignments
     // inside them can taint variables that the cond depends on, which then
     // widens the branch backtrace that guards subsequent iterations.
@@ -242,6 +269,7 @@ fn visit_for_clause<'a>(
 fn visit_for_range<'a>(
     ctx: &mut AnalysisContext<'a>,
     range: &ForRangeNode<'a>,
+    range_operand: &ValueRef<'a>,
     body: &BlockNode<'a>,
     header_location: &Location,
 ) {
@@ -285,7 +313,12 @@ fn visit_for_range<'a>(
 
     loop {
         // need to do this every iteration as it might have changed
-        let mut rhs_values = get_for_range_values(ctx, range_expr, rhs_location.clone());
+        let mut rhs_values = get_for_range_values(
+            ctx,
+            range_expr,
+            range_operand, // already calc'd (visited exactly one)
+            rhs_location.clone(),
+        );
 
         // every range shape uses its first abstract value to carry the
         // dependency of the loop's cardinality: length for arrays/slices, key
@@ -410,12 +443,11 @@ fn visit_for_range<'a>(
     }
 }
 
-// always visits range_expr, to trigger side effects
-fn get_for_range_values<'a>(
+fn visit_for_range_operand<'a>(
     ctx: &mut AnalysisContext<'a>,
     range_expr: &ExprNode<'a>,
-    location: Pinned<'a, Location>,
-) -> Vec<ValueRef<'a>> {
+    location: &Pinned<'a, Location>,
+) -> ValueRef<'a> {
     // when there's an active branch backtrace and the operand is a mutable
     // left-value, we need special handling so that if the value turns out to
     // be a channel we can fold the current branch backtrace into the channel's
@@ -438,7 +470,7 @@ fn get_for_range_values<'a>(
                 .is_none_or(|sym| sym.borrow().mutable())
         });
 
-    let value = if should_fold {
+    if should_fold {
         // we can only visit range_expr once, so we need to hijack the existing
         // `mutate_target` visit and extract the value it calculated so that we
         // can use it later during the main part of this function
@@ -462,7 +494,7 @@ fn get_for_range_values<'a>(
             let mut channel = operand.as_channel_mut().unwrap();
 
             if let Some(branch_backtrace) = ctx.branch_backtrace().cloned() {
-                channel.record_receive(branch_backtrace, &location);
+                channel.record_receive(branch_backtrace, location);
             }
 
             drop(channel);
@@ -475,8 +507,15 @@ fn get_for_range_values<'a>(
     } else {
         // just visit the expression normally, no special handling required
         exprs::visit_single_expr(ctx, range_expr)
-    };
+    }
+}
 
+fn get_for_range_values<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    range_expr: &ExprNode<'a>,
+    value: &ValueRef<'a>,
+    location: Pinned<'a, Location>,
+) -> Vec<ValueRef<'a>> {
     // see https://go.dev/ref/spec#For_range for the per-type cardinality table;
     // the order below matches that table, with the trailing string/unknown
     // branch acting as the conservative catch-all
