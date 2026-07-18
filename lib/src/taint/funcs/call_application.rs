@@ -269,7 +269,7 @@ fn visit_blackbox_call<'a>(
     // initialized) variables in an effort to make them self-recursive, as the
     // whole point of closure capturing is that outer symbols are only really
     // "evaluated" when the closure is invoked
-    captures::call_site::apply_capture_mutations(ctx, func, args, call_location);
+    captures::call_site::apply_capture_write_backs(ctx, func, args, call_location);
 
     let bt = LabelBacktrace::fold(
         args.iter()
@@ -474,8 +474,9 @@ fn handle_deferred_checks<'a>(
 
     // a deferred check's backtrace already represents mutations that happened
     // before that check in the function body. realizing it against the entry
-    // snapshot preserves that ordering; the entry/exit union used for outcomes
-    // would incorrectly make later capture mutations flow backwards in time
+    // snapshot preserves that ordering; a mutation-enriched environment used
+    // for outcomes could incorrectly make later capture mutations flow
+    // backwards in time
     for (index, concrete) in &call.capture_concretes.at_entry {
         deferred_checks = deferred_checks
             .iter()

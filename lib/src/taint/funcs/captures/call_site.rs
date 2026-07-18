@@ -14,12 +14,12 @@ use crate::{
     values::{FunctionValue, Mergeable, SelfAwareBacktraceContainer, ValueRef},
 };
 
-type CaptureConcretes<'a> = Vec<(usize, Option<LabelBacktrace<'a>>)>;
+type CaptureConcretes<'a> = BTreeMap<usize, Option<LabelBacktrace<'a>>>;
 
 pub struct CallCaptureConcretes<'a> {
     // call-entry values for realizing flow-sensitive enforcement checks
     pub at_entry: CaptureConcretes<'a>,
-    // conservative union of values observable throughout the function body
+    // values suitable for realizing the function's summarized outcome
     pub for_outcome: CaptureConcretes<'a>,
 }
 
@@ -98,42 +98,30 @@ pub fn apply_capture_mutations_and_derive_concretes<'a>(
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
 ) -> CallCaptureConcretes<'a> {
-    // each captured variable has only one assigned synthetic slot, which means
-    // that different reads of the same captured variable are indistinguishable
-    // during realization: all <0> become {concrete}, and there is nothing else
-    // that can be done. however, if a closure mutates a captured variable
-    // between reads, those 2 reads are supposed to yield different labels, but
-    // our model does not support it since both are <0> and so both will become
-    // {concrete} (which concrete? probably the one at the end of the function
-    // body, post-mutations)
-
-    // to solve this, we conservatively merge all possible read results by
-    // merging the calculated concretes for the captured variable as determined
-    // for the start and for the end of the closure body (i.e., before and after
-    // capture mutations are applied), so as to obtain sound concretes for
-    // realization that actually are representative of all the capture's reads
-
-    // if there are multiple read+mutation+read gadgets, intermediate mutation
-    // backtraces would not be represented in either the start nor the end value
-    // of the capture's local fake symbol, but we already keep track of
-    // mutations in CaptureBinding and merge them into the concrete at the end
-    // of `derive_concrete_backtrace_or_fallback`, so nothing is lost
-
     let call_site = CallSiteConcretes::new(ctx, func, args, location);
 
-    let at_entry = if func.deferred_checks().is_empty() {
-        Vec::new()
+    let has_direct_capture_mutations = func
+        .captures()
+        .any(|(_, binding)| binding.mutation_backtrace().is_some());
+
+    let at_entry = if func.deferred_checks().is_empty() && !has_direct_capture_mutations {
+        BTreeMap::new()
     } else {
         derive_capture_backtraces_at_entry(ctx, func, &call_site)
     };
 
-    let before_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
+    let before_write_back = derive_best_backtraces_for_captures(ctx, func, &call_site);
 
-    apply_capture_mutations_with(ctx, func, &call_site, &before_mutation, location);
+    apply_capture_write_backs_with(ctx, func, &call_site, &before_write_back, location);
 
-    let after_mutation = derive_best_backtraces_for_captures(ctx, func, &call_site);
+    // some capture dependencies become visible only after write-back; for
+    // example, a closure may mutate `x` and then read it through another
+    // captured closure whose outcome transitively depends on `x`
+    let after_write_back = derive_best_backtraces_for_captures(ctx, func, &call_site);
 
-    let for_outcome = merge_capture_backtrace_snapshots(before_mutation, after_mutation, location);
+    let mut for_outcome = merge_capture_concretes(before_write_back, after_write_back, location);
+
+    restore_entry_concretes_for_directly_mutated_captures(func, &at_entry, &mut for_outcome);
 
     CallCaptureConcretes {
         at_entry,
@@ -141,31 +129,53 @@ pub fn apply_capture_mutations_and_derive_concretes<'a>(
     }
 }
 
-fn merge_capture_backtrace_snapshots<'a>(
-    before: Vec<(usize, Option<LabelBacktrace<'a>>)>,
-    after: Vec<(usize, Option<LabelBacktrace<'a>>)>,
+fn merge_capture_concretes<'a>(
+    mut before_write_back: CaptureConcretes<'a>,
+    after_write_back: CaptureConcretes<'a>,
     location: &Pinned<'a, Location>,
-) -> Vec<(usize, Option<LabelBacktrace<'a>>)> {
-    let mut by_capture_index: BTreeMap<_, _> = before.into_iter().collect();
-
-    for (index, after_bt) in after {
-        let Some(before_bt) = by_capture_index.remove(&index) else {
-            // this index was not in the map, so there is no `before` backtrace,
-            // meaning there is nothing to merge - we just insert `after`'s
-            by_capture_index.insert(index, after_bt);
+) -> CaptureConcretes<'a> {
+    for (index, after) in after_write_back {
+        let Some(before) = before_write_back.remove(&index) else {
+            // this index was not in the map, so there is no `before` concrete,
+            // meaning there is nothing to merge -- we just insert `after`'s
+            before_write_back.insert(index, after);
 
             continue;
         };
 
-        let merged = merge_capture_binding_backtraces(before_bt, after_bt, location);
+        let merged = merge_capture_backtraces(before, after, location);
 
-        by_capture_index.insert(index, merged);
+        before_write_back.insert(index, merged);
     }
 
-    by_capture_index.into_iter().collect()
+    before_write_back
 }
 
-fn merge_capture_binding_backtraces<'a>(
+fn restore_entry_concretes_for_directly_mutated_captures<'a>(
+    func: &FunctionValue<'a>,
+    at_entry: &CaptureConcretes<'a>,
+    for_outcome: &mut CaptureConcretes<'a>,
+) {
+    // a capture-local's own writes are already represented in the symbolic
+    // outcome. any occurrence of its original `Capture(i)` slot that remains
+    // therefore denotes a call-entry value, such as a local snapshot saved
+    // before the write
+
+    for (_, binding) in func
+        .captures()
+        .filter(|(_, binding)| binding.mutation_backtrace().is_some())
+    {
+        let index = binding.index();
+
+        let entry = at_entry
+            .get(&index)
+            .expect("directly mutated captures must have an entry concrete");
+
+        for_outcome.insert(index, entry.clone());
+    }
+}
+
+fn merge_capture_backtraces<'a>(
     before: Option<LabelBacktrace<'a>>,
     after: Option<LabelBacktrace<'a>>,
     location: &Pinned<'a, Location>,
@@ -182,7 +192,7 @@ fn merge_capture_binding_backtraces<'a>(
     )
 }
 
-pub fn apply_capture_mutations<'a>(
+pub fn apply_capture_write_backs<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
@@ -192,7 +202,7 @@ pub fn apply_capture_mutations<'a>(
 
     let capture_backtraces = derive_best_backtraces_for_captures(ctx, func, &call_site_concretes);
 
-    apply_capture_mutations_with(
+    apply_capture_write_backs_with(
         ctx,
         func,
         &call_site_concretes,
@@ -201,11 +211,11 @@ pub fn apply_capture_mutations<'a>(
     );
 }
 
-fn apply_capture_mutations_with<'a>(
+fn apply_capture_write_backs_with<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     call_site_concretes: &CallSiteConcretes<'a>,
-    capture_backtraces: &[(usize, Option<LabelBacktrace<'a>>)],
+    capture_backtraces: &CaptureConcretes<'a>,
     call_location: &Pinned<'a, Location>,
 ) {
     for (outer_decl, binding) in func.captures() {
@@ -365,7 +375,7 @@ fn realize_capture_backtraces_for_call_site<'a>(
     // we need to realize the captures' backtraces to get rid of any references
     // coming from function params, since we have each param's concrete already
     // calculated at this point
-    for (_, concrete) in &mut concretes {
+    for concrete in concretes.values_mut() {
         *concrete = call_site_concretes.realize_backtrace_for_params(func.r#ref(), concrete.take());
     }
 
@@ -385,8 +395,7 @@ fn capture_concretes_from_snapshot<'a>(
     func: &FunctionValue<'a>,
     capture_env_snapshot: &CaptureEnvSnapshot<'a>,
 ) -> CaptureConcretes<'a> {
-    let mut concretes: CaptureConcretes<'a> = func
-        .captures()
+    func.captures()
         .map(|(outer_decl, binding)| {
             (
                 binding.index(),
@@ -396,10 +405,5 @@ fn capture_concretes_from_snapshot<'a>(
                     .expect("capture snapshot must contain every registered capture"),
             )
         })
-        .collect();
-
-    // for determinism
-    concretes.sort_by_key(|(index, _)| *index);
-
-    concretes
+        .collect()
 }

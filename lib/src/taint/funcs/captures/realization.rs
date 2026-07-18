@@ -142,7 +142,7 @@ fn derive_concrete_backtrace_or_fallback<'a>(
         // we need to merge the concrete with all other intermediate possible
         // values for the capture, based on whatever mutations took place during
         // the function body so that we can properly support read+mutate+read
-        // gadgets; see `apply_capture_mutations_and_merge_capture_backtraces`
+        // gadgets; see `apply_capture_mutations_and_derive_concretes`
 
         LabelBacktrace::combine_options(
             concrete,
