@@ -253,6 +253,17 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn try_expand_to(&self, desired_len: usize) -> Option<Vec<Self>> {
+        // in a single-value context, Go selects the primary result of an
+        // otherwise multi-valued expression (for example, `v := <-ch` or
+        // `v := m[k]`). return the contained ValueRef rather than cloning its
+        // inner Value so reference identity and declared-type metadata survive
+        // the projection
+        if desired_len == 1 {
+            return self
+                .supports_overriding_expand_indices()
+                .then(|| vec![self.extract_collapsed_single()]);
+        }
+
         // this utility method enforces correctness by *always* checking for
         // Möbius *before* expandable: it is very important to always check
         // Möbius first and foremost, as otherwise it would be upgraded

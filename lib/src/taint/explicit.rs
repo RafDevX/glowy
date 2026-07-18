@@ -111,8 +111,7 @@ fn visit_binding_decl_spec<'a>(
 
     let mut rhs_values = exprs::visit_multi_exprs_with_consts(ctx, spec_exprs);
 
-    if node.ids.len() > 1
-        && let [(single, _)] = rhs_values.as_slice()
+    if let [(single, _)] = rhs_values.as_slice()
         && let Some(expanded) = single.try_expand_to(node.ids.len())
     {
         rhs_values = expanded.into_iter().map(|value| (value, None)).collect();
@@ -329,8 +328,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
 
     let mut rhs_values = exprs::visit_multi_exprs_with_consts(ctx, &node.rhs);
 
-    if node.lhs.len() > 1
-        && let [(single, _)] = rhs_values.as_slice()
+    if let [(single, _)] = rhs_values.as_slice()
         && let Some(expanded) = single.try_expand_to(node.lhs.len())
     {
         rhs_values = expanded.into_iter().map(|value| (value, None)).collect();

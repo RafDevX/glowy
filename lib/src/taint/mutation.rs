@@ -490,7 +490,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
 
                 let Some(mut composite) = target.as_composite_mut() else {
                     ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
-                        location: self.location.clone(),
+                        location: self.base.location().into_owned(),
                     });
 
                     return None;
