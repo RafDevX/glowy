@@ -339,7 +339,11 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn trigger_defer_target(&mut self, target: DeferTarget<'a>) {
         self.deferred_branch_backtraces.retain(|deferred| {
-            deferred.until != target && deferred.at_depth < self.current_branch_scope_depth
+            // only consume a matching deferral when analysis has crossed the
+            // boundary of the scope in which it was created. deferrals for an
+            // enclosing labeled target must survive unrelated inner loop
+            // boundaries, up until the end of the correspondingly labeled loop
+            deferred.until != target || deferred.at_depth <= self.current_branch_scope_depth
         });
 
         self.calculate_composite_branch_backtrace();
