@@ -30,7 +30,7 @@ In order to analyze a Go source file using the Glowy binary, one need only:
 - Optionally create a convenience link to the binary in the root directory or
   somewhere on the `$PATH`:
 
-  `$ ln -s target/release/glowy ./glowy`
+  `$ ln -s target/release/glowy-cli ./glowy-cli`
 
 - Annotate the target `.go` files with line comments specifying what source and
   sink label constraints should be enforced, e.g.:
@@ -43,13 +43,13 @@ In order to analyze a Go source file using the Glowy binary, one need only:
 
   // (...)
 
-  // glowy::sink::{}
+  // glowy::allow::{}
   fmt.Println(result)
   ```
 
 - Analyze the annotated source files:
 
-  `$ ./glowy path/to/go/module/directory`
+  `$ ./glowy-cli path/to/go/module/directory`
 
 Alternatively, Glowy can be compiled and run directly using `$ cargo run --release path/to/file.go`.
 
