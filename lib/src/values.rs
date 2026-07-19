@@ -23,7 +23,7 @@ pub use self::{
     mobius::MobiusValue,
     package_ref::PackageRefValue,
     shapes::Value,
-    slices::{SliceBound, SliceValue},
+    slice::{SliceBound, SliceValue},
 };
 use crate::{
     Pinned,
@@ -39,7 +39,7 @@ mod function;
 mod mobius;
 mod package_ref;
 mod shapes;
-mod slices;
+mod slice;
 
 // wrapper struct (vs. type alias) allows impl'ing despite orphan rule
 #[derive(Clone, PartialEq, Eq, Debug)]
