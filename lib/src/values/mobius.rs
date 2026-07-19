@@ -123,6 +123,21 @@ impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
         Self { inner, overrides }
     }
 
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        let inner = self.inner.realize_all(from_func, substitutions);
+        let overrides = self
+            .overrides
+            .iter()
+            .map(|(index, value)| (*index, value.realize_all(from_func, substitutions)))
+            .collect();
+
+        Self { inner, overrides }
+    }
+
     fn nest_backtrace(
         &self,
         parent_kind: LabelBacktraceKind,

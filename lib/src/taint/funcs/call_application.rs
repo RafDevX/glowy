@@ -443,52 +443,23 @@ fn handle_deferred_checks<'a>(
     func: &FunctionValue<'a>,
     call: &CallRealization<'_, 'a>,
 ) {
-    let mut deferred_checks = Vec::from(func.deferred_checks());
-
-    if let Some(receiver) = call.receiver {
-        deferred_checks = deferred_checks
-            .iter()
-            .filter_map(|check| check.realize(func.r#ref(), SyntheticSlot::Receiver, receiver))
-            .collect();
-    }
-
-    for (index, (id, variadic, r#type)) in call.ids.iter().copied().enumerate() {
-        #[rustfmt::skip]
-        let concrete = calculate_concrete_backtrace(
-            ctx,
-            index,
-            id,
-            variadic,
-            r#type,
-            call.args,
-            Cow::Borrowed(call.location),
-        );
-
-        deferred_checks = deferred_checks
-            .iter()
-            .filter_map(|check| {
-                check.realize(func.r#ref(), SyntheticSlot::Param(index), concrete.as_ref())
-            })
-            .collect();
-    }
-
-    // a deferred check's backtrace already represents mutations that happened
-    // before that check in the function body. realizing it against the entry
-    // snapshot preserves that ordering; a mutation-enriched environment used
-    // for outcomes could incorrectly make later capture mutations flow
-    // backwards in time
-    for (index, concrete) in &call.capture_concretes.at_entry {
-        deferred_checks = deferred_checks
-            .iter()
-            .filter_map(|check| {
-                check.realize(
-                    func.r#ref(),
-                    SyntheticSlot::Capture(*index),
-                    concrete.as_ref(),
-                )
-            })
-            .collect();
-    }
+    let parameter_concretes: Vec<_> = call
+        .ids
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, (id, variadic, r#type))| {
+            calculate_concrete_backtrace(
+                ctx,
+                index,
+                id,
+                variadic,
+                r#type,
+                call.args,
+                Cow::Borrowed(call.location),
+            )
+        })
+        .collect();
 
     #[rustfmt::skip]
     let call_branch = super::calc_effective_call_site_branch_backtrace_for(
@@ -497,15 +468,35 @@ fn handle_deferred_checks<'a>(
         call.location
     );
 
-    deferred_checks = deferred_checks
+    let substitutions: Vec<_> = parameter_concretes
         .iter()
-        .filter_map(|check| {
-            check.realize(
-                func.r#ref(),
-                SyntheticSlot::CallSiteBranch,
-                call_branch.as_ref(),
-            )
-        })
+        .enumerate()
+        .map(|(index, concrete)| (SyntheticSlot::Param(index), concrete.as_ref()))
+        .chain(
+            call.receiver
+                .map(|concrete| (SyntheticSlot::Receiver, concrete)),
+        )
+        .chain(iter::once((
+            SyntheticSlot::CallSiteBranch,
+            call_branch.as_ref(),
+        )))
+        // a deferred check's backtrace already represents mutations that
+        // happened before that check in the function body. realizing it against
+        // the entry snapshot preserves that ordering; a mutation-enriched
+        // environment used for outcomes could incorrectly make later capture
+        // mutations flow backwards in time
+        .chain(
+            call.capture_concretes
+                .at_entry
+                .iter()
+                .map(|(index, concrete)| (SyntheticSlot::Capture(*index), concrete.as_ref())),
+        )
+        .collect();
+
+    let deferred_checks: Vec<_> = func
+        .deferred_checks()
+        .iter()
+        .filter_map(|check| check.realize_all(func.r#ref(), &substitutions))
         .collect();
 
     // we don't need to -1 because this value is before the call count has been
@@ -528,85 +519,48 @@ fn calculate_call_result<'a>(
     outcome: &Vec<ValueRef<'a>>,
     call: &CallRealization<'_, 'a>,
 ) -> Vec<ValueRef<'a>> {
-    let mut result = vec![];
-
-    'components: for component in outcome {
-        let mut realized = component.clone();
-
-        if let Some(receiver) = call.receiver {
-            realized = realized.realize(func.r#ref(), SyntheticSlot::Receiver, receiver);
-        }
-
-        // vvv cannot actually do this because if/else would have diff types,
-        // vvv so we must create it manually instead...
-        //
-        // let iter = params
-        //     .iter()
-        //     .flat_map(|param| {
-        //         if param.ids.is_empty() {
-        //             iter::once((param.variadic, None))
-        //         } else {
-        //             param.ids.iter().map(|id| (param.variadic, Some(id)))
-        //         }
-        //     })
-        //     .enumerate();
-
-        for (index, (id, variadic, r#type)) in call.ids.iter().copied().enumerate() {
-            if realized.is_bottom() && realized.allows_lossless_downgrade() {
-                // no sense in continuing, we'll never evolve from this state
-
-                result.push(realized);
-
-                continue 'components;
-            }
-
-            #[rustfmt::skip]
-            let concrete = calculate_concrete_backtrace(
+    let parameter_concretes: Vec<_> = call
+        .ids
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, (id, variadic, r#type))| {
+            calculate_concrete_backtrace(
                 ctx,
                 index,
                 id,
                 variadic,
                 r#type,
                 call.args,
-                Cow::Borrowed(call.location)
-            );
+                Cow::Borrowed(call.location),
+            )
+        })
+        .collect();
 
-            #[rustfmt::skip]
-            {
-                realized = realized.realize(
-                    func.r#ref(),
-                    SyntheticSlot::Param(index),
-                    concrete.as_ref()
-                );
-            };
-        }
-
-        for (index, concrete) in &call.capture_concretes.for_outcome {
-            if realized.is_bottom() && realized.allows_lossless_downgrade() {
-                // no sense in continuing, we'll never evolve from this state
-
-                result.push(realized);
-
-                continue 'components;
-            }
-
-            realized = realized.realize(
-                func.r#ref(),
-                SyntheticSlot::Capture(*index),
-                concrete.as_ref(),
-            );
-        }
-
-        realized = realized.realize(
-            func.r#ref(),
+    let substitutions: Vec<_> = parameter_concretes
+        .iter()
+        .enumerate()
+        .map(|(index, concrete)| (SyntheticSlot::Param(index), concrete.as_ref()))
+        .chain(
+            call.receiver
+                .map(|concrete| (SyntheticSlot::Receiver, concrete)),
+        )
+        .chain(iter::once((
             SyntheticSlot::CallSiteBranch,
             ctx.branch_backtrace(),
-        );
+        )))
+        .chain(
+            call.capture_concretes
+                .for_outcome
+                .iter()
+                .map(|(index, concrete)| (SyntheticSlot::Capture(*index), concrete.as_ref())),
+        )
+        .collect();
 
-        result.push(realized);
-    }
-
-    result
+    outcome
+        .iter()
+        .map(|component| component.realize_all(func.r#ref(), &substitutions))
+        .collect()
 }
 
 fn tag_results_with_declared_types<'a>(func: &FunctionValue<'a>, results: &mut [ValueRef<'a>]) {

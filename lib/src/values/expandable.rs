@@ -143,6 +143,22 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
         Self { primary, secondary }
     }
 
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        let primary = self.primary.realize_all(from_func, substitutions);
+
+        let secondary = self
+            .secondary
+            .iter()
+            .map(|v| v.realize_all(from_func, substitutions))
+            .collect();
+
+        Self { primary, secondary }
+    }
+
     fn nest_backtrace(
         &self,
         parent_kind: LabelBacktraceKind,

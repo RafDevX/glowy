@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    iter,
 };
 
 use parser::{Location, Span};
@@ -79,17 +80,22 @@ impl<'a> CaptureEnvSnapshot<'a> {
                 // previous approximation. by deriving `backtrace` again each
                 // derivation step, this computes the least fixed point instead
                 // of repeatedly expanding a cycle
-                for (dependency_outer_decl, dependency_binding) in &captures {
-                    let dependency = self.get(dependency_outer_decl).and_then(Option::as_ref);
-
-                    backtrace = backtrace.and_then(|current| {
-                        current.realize(
-                            func.r#ref(),
+                let substitutions: Vec<_> = captures
+                    .iter()
+                    .map(|(dependency_outer_decl, dependency_binding)| {
+                        (
                             SyntheticSlot::Capture(dependency_binding.index()),
-                            dependency,
+                            self.get(dependency_outer_decl).and_then(Option::as_ref),
                         )
-                    });
-                }
+                    })
+                    .collect();
+
+                #[rustfmt::skip]
+                {
+                    backtrace = backtrace.and_then(
+                        |current| current.realize_all(func.r#ref(), &substitutions)
+                    );
+                };
 
                 (*outer_decl, backtrace)
             })
@@ -280,25 +286,27 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
         return cached_backtrace;
     };
 
-    let mut hybrid = derive_hybrid_function_outcome_backtrace(&func, symbol, location);
+    let Some(hybrid) = derive_hybrid_function_outcome_backtrace(&func, symbol, location) else {
+        // no point in continuing to realize if hybrid is already Bottom
+        return cached_backtrace;
+    };
 
-    for (outer_decl, binding) in func.captures() {
-        let Some(backtrace) = hybrid else {
-            // no point in continuing to realize if hybrid is already Bottom
-            break;
-        };
-
-        let capture_concrete = if let Some(r#override) = capture_env_snapshot.get(&outer_decl) {
-            // this function's outcome may contain synthetics for captures that
-            // also belong to the closure whose captures we are currently
-            // realizing (i.e., sibling captures). we use that closure's stable
-            // per-capture snapshot instead of rereading the mutable symbol
-            // table, otherwise sibling capture synthetics can survive this
-            // inner function realization
-            r#override.as_ref().map(Cow::Borrowed)
-        } else {
-            // take into account transitive captures
-            let live_concrete = super::lookup_capture_definition_symbol(ctx, outer_decl, binding)
+    let capture_concretes: Vec<_> = func
+        .captures()
+        .map(|(outer_decl, binding)| {
+            let capture_concrete = if let Some(r#override) = capture_env_snapshot.get(&outer_decl) {
+                // this function's outcome may contain synthetics for captures
+                // that also belong to the closure whose captures we are
+                // currently realizing (i.e., sibling captures). we use that
+                // closure's stable per-capture snapshot instead of rereading
+                // the mutable symbol table, otherwise sibling capture
+                // synthetics can survive this inner function realization
+                r#override.as_ref().map(Cow::Borrowed)
+            } else {
+                // take into account transitive captures
+                let live_concrete = super::lookup_capture_definition_symbol(
+                    ctx, outer_decl, binding,
+                )
                 .and_then(|capture_symbol| {
                     derive_hybrid_symbol_backtrace_with_active(
                         ctx,
@@ -308,32 +316,36 @@ fn derive_hybrid_value_backtrace_in_capture_environment<'a>(
                     )
                 });
 
-            if live_concrete
-                .as_ref()
-                .is_some_and(|bt| bt.label().has_any_synthetic())
-            {
-                // up-to-date outer symbol value is labeled with synthetic
-                // tags, so we cannot use it in LabelBacktrace::realize, or
-                // otherwise the synthetics will never be realized and
-                // eventually escape their respective function -- so we must
-                // use the fallback, which might be unsound if it has become
-                // stale
+                if live_concrete
+                    .as_ref()
+                    .is_some_and(|bt| bt.label().has_any_synthetic())
+                {
+                    // up-to-date outer symbol value is labeled with synthetic
+                    // tags, so we cannot use it in LabelBacktrace::realize, or
+                    // otherwise the synthetics will never be realized and
+                    // eventually escape their respective function -- so we must
+                    // use the fallback, which might be unsound if it has become
+                    // stale
 
-                binding.hybrid_fallback().unwrap().map(Cow::Borrowed)
-            } else {
-                // up-to-date outer symbol value is fully concrete, so we can
-                // use it
+                    binding.hybrid_fallback().unwrap().map(Cow::Borrowed)
+                } else {
+                    // up-to-date outer symbol value is fully concrete, so we
+                    // can use it
 
-                live_concrete.map(Cow::Owned)
-            }
-        };
+                    live_concrete.map(Cow::Owned)
+                }
+            };
 
-        hybrid = backtrace.realize(
-            func.r#ref(),
-            SyntheticSlot::Capture(binding.index()),
-            capture_concrete.as_deref(),
-        );
-    }
+            (SyntheticSlot::Capture(binding.index()), capture_concrete)
+        })
+        .collect();
+
+    let substitutions: Vec<_> = capture_concretes
+        .iter()
+        .map(|(slot, concrete)| (*slot, concrete.as_deref()))
+        .collect();
+
+    let hybrid = hybrid.realize_all(func.r#ref(), &substitutions);
 
     LabelBacktrace::combine_options(
         hybrid,
@@ -365,22 +377,19 @@ fn derive_hybrid_function_outcome_backtrace<'a>(
         location,
     )?;
 
-    realize_function_parameter_synthetics(func, concrete)
+    realize_function_parameter_synthetics(func, &concrete)
 }
 
 fn realize_function_parameter_synthetics<'a>(
     func: &FunctionValue<'a>,
-    mut concrete: LabelBacktrace<'a>,
+    concrete: &LabelBacktrace<'a>,
 ) -> Option<LabelBacktrace<'a>> {
     // note that this does not realize for captured variables
+    let substitutions: Vec<_> = (0..func.parameter_count().unwrap_or(0))
+        .map(|index| (SyntheticSlot::Param(index), None))
+        .chain(iter::once((SyntheticSlot::Receiver, None)))
+        .chain(iter::once((SyntheticSlot::CallSiteBranch, None)))
+        .collect();
 
-    for index in 0..func.parameter_count().unwrap_or(0) {
-        concrete = concrete.realize(func.r#ref(), SyntheticSlot::Param(index), None)?;
-    }
-
-    concrete = concrete.realize(func.r#ref(), SyntheticSlot::Receiver, None)?;
-
-    concrete = concrete.realize(func.r#ref(), SyntheticSlot::CallSiteBranch, None)?;
-
-    Some(concrete)
+    concrete.realize_all(func.r#ref(), &substitutions)
 }

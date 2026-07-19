@@ -241,18 +241,33 @@ impl<'a> LabelBacktrace<'a> {
         from_slot: SyntheticSlot,
         concrete: Option<&Self>,
     ) -> Option<Self> {
-        if !self
-            .label()
-            .tags()
-            .any(|tag| tag.is_synthetic_representation(from_func, from_slot))
-        {
+        self.realize_all(from_func, &[(from_slot, concrete)])
+    }
+
+    /// Realizes an ordered set of synthetic placeholders in one traversal.
+    ///
+    /// The order of `substitutions` has the same meaning as successive calls
+    /// to [`Self::realize`]: a concrete backtrace inserted for one slot is
+    /// itself affected only by substitutions which follow that slot.
+    pub(crate) fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&Self>)],
+    ) -> Option<Self> {
+        let Some(first_relevant) = substitutions.iter().position(|(slot, _)| {
+            self.label()
+                .contains_synthetic_representation(from_func, *slot)
+        }) else {
             // there is nothing left to be realized, so prevent recursion and
             // avoid all the downstream allocations / checks / etc.
 
             // this optimization leads to a 70% overall speedup in complex runs
 
             return Some(self.clone());
-        }
+        };
+
+        let (from_slot, concrete) = substitutions[first_relevant];
+        let remaining = &substitutions[first_relevant + 1..];
 
         // a function-valued capture can refer back to the closure whose
         // environment we are realizing, in which case its concrete backtrace
@@ -294,13 +309,15 @@ impl<'a> LabelBacktrace<'a> {
                 // is_synthetic_representation, if the label has a single tag,
                 // then we are a root synthetic that needs to be realized
 
-                Self::new(
+                let realized = Self::new(
                     from_slot.label_backtrace_kind(),
                     concrete.map_or(&Label::Bottom, Self::label).clone(),
                     self.symbol(),
                     self.location().clone(),
                     concrete,
-                )
+                );
+
+                realized?.realize_all(from_func, remaining)
             } else {
                 Some(self.clone())
             }
@@ -310,12 +327,12 @@ impl<'a> LabelBacktrace<'a> {
         {
             // this is the function's synthetic implicit branch backtrace, which
             // needs to be realized into the actual call-site branch backtrace
-            concrete.cloned()
+            concrete.cloned()?.realize_all(from_func, remaining)
         } else {
             let children: Vec<_> = self
                 .children()
                 .iter()
-                .filter_map(|child| child.realize(from_func, from_slot, concrete))
+                .filter_map(|child| child.realize_all(from_func, &substitutions[first_relevant..]))
                 .collect();
 
             Self::fold(

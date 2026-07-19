@@ -825,6 +825,35 @@ impl<'a> DeferredEnforcementCheck<'a> {
         Some(realized)
     }
 
+    pub fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Option<Self> {
+        let realized = match self {
+            Self::Sink { sink, found, file } => Self::Sink {
+                sink: sink.clone(),
+                found: found.realize_all(from_func, substitutions)?,
+                file,
+            },
+            Self::Assertion {
+                expected_sequence,
+                found,
+                file,
+                location,
+            } => Self::Assertion {
+                expected_sequence: expected_sequence.clone(),
+                found: found
+                    .as_ref()
+                    .and_then(|backtrace| backtrace.realize_all(from_func, substitutions)),
+                file,
+                location: location.clone(),
+            },
+        };
+
+        Some(realized)
+    }
+
     pub fn rebind_synthetic_func(
         &self,
         from_func: &FunctionRef<'a>,

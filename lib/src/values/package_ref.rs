@@ -53,6 +53,14 @@ impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
         self.clone()
     }
 
+    fn realize_all(
+        &self,
+        _from_func: &FunctionRef<'a>,
+        _substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        self.clone()
+    }
+
     fn nest_backtrace(
         &self,
         _parent_kind: LabelBacktraceKind,

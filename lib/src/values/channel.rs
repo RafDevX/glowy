@@ -292,6 +292,21 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ChannelValue<'a> {
         realized
     }
 
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        #[rustfmt::skip]
+        let mut realized = self.map_aggregates(
+            |aggregate| aggregate.realize_all(from_func, substitutions),
+        );
+
+        realized.commit_unbound_to_allocations();
+
+        realized
+    }
+
     fn realize_with_shape_preservation(
         &self,
         from_func: &FunctionRef<'a>,
@@ -481,6 +496,19 @@ impl<'a> ChannelAggregate<'a> {
             self.delivery.realize(from_func, from_slot, concrete),
             self.occupancy.realize(from_func, from_slot, concrete),
             self.capacity.realize(from_func, from_slot, concrete),
+        )
+    }
+
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        Self::new(
+            self.payload.realize_all(from_func, substitutions),
+            self.delivery.realize_all(from_func, substitutions),
+            self.occupancy.realize_all(from_func, substitutions),
+            self.capacity.realize_all(from_func, substitutions),
         )
     }
 

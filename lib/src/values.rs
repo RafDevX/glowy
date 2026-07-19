@@ -618,6 +618,12 @@ pub trait SelfAwareBacktraceContainer<'a>: Sized + BacktraceContainer<'a> {
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self;
 
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self;
+
     fn realize_with_shape_preservation(
         &self,
         from_func: &FunctionRef<'a>,
@@ -658,12 +664,20 @@ impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
         from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
-        let borrowed = self.value.borrow();
-
-        let realized = borrowed.realize(from_func, from_slot, concrete);
-
         Self::new(
-            realized,
+            self.value.borrow().realize(from_func, from_slot, concrete),
+            self.location.clone(),
+            self.declared_type.clone(), // cheap
+        )
+    }
+
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        Self::new(
+            self.value.borrow().realize_all(from_func, substitutions),
             self.location.clone(),
             self.declared_type.clone(), // cheap
         )
@@ -794,11 +808,15 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
         from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
-        if let Some(bt) = self {
-            bt.realize(from_func, from_slot, concrete)
-        } else {
-            None
-        }
+        self.as_ref()?.realize(from_func, from_slot, concrete)
+    }
+
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        self.as_ref()?.realize_all(from_func, substitutions)
     }
 
     fn nest_backtrace(

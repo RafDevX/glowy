@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, iter};
 
 use parser::Location;
 
@@ -72,20 +72,18 @@ impl<'a> CallSiteConcretes<'a> {
         func: &FunctionRef<'a>,
         initial: Option<LabelBacktrace<'a>>,
     ) -> Option<LabelBacktrace<'a>> {
-        let mut current = initial?;
+        let substitutions: Vec<_> = self
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, concrete)| (SyntheticSlot::Param(index), concrete.as_ref()))
+            .chain(iter::once((
+                SyntheticSlot::CallSiteBranch,
+                self.branch.as_ref(),
+            )))
+            .collect();
 
-        for (param_index, concrete) in self.params.iter().enumerate() {
-            #[rustfmt::skip]
-            {
-                current = current.realize(
-                    func,
-                    SyntheticSlot::Param(param_index),
-                    concrete.as_ref()
-                )?;
-            };
-        }
-
-        current.realize(func, SyntheticSlot::CallSiteBranch, self.branch.as_ref())
+        initial?.realize_all(func, &substitutions)
     }
 }
 
@@ -242,15 +240,19 @@ fn apply_capture_write_backs_with<'a>(
             continue;
         }
 
-        let mut realized = Cow::Borrowed(&local_value);
+        let substitutions_before: Vec<_> = call_site_concretes
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, concrete)| (SyntheticSlot::Param(index), concrete.as_ref()))
+            .chain(
+                capture_backtraces
+                    .range(..binding.index())
+                    .map(|(index, concrete)| (SyntheticSlot::Capture(*index), concrete.as_ref())),
+            )
+            .collect();
 
-        for (index, concrete) in call_site_concretes.params.iter().enumerate() {
-            realized = Cow::Owned(realized.realize(
-                func.r#ref(),
-                SyntheticSlot::Param(index),
-                concrete.as_ref(),
-            ));
-        }
+        let mut realized = local_value.realize_all(func.r#ref(), &substitutions_before);
 
         let (outer_value, outer_known_const) = {
             let borrowed = outer_symbol.borrow();
@@ -258,36 +260,33 @@ fn apply_capture_write_backs_with<'a>(
             (borrowed.value().get(), borrowed.known_const().cloned())
         };
 
-        for (index, backtrace) in capture_backtraces {
-            realized = Cow::Owned(if *index == binding.index() {
-                // try to avoid using `backtrace` (flattened value)
-                realized.realize_with_shape_preservation(
-                    func.r#ref(),
-                    SyntheticSlot::Capture(*index),
-                    &outer_value,
-                    outer_value.location().clone(),
-                )
-            } else {
-                realized.realize(
-                    func.r#ref(),
-                    SyntheticSlot::Capture(*index),
-                    backtrace.as_ref(),
-                )
-            });
-        }
-
-        realized = Cow::Owned(realized.realize(
+        // preserve the current capture's shape instead of substituting its
+        // flattened backtrace; this is the sole substitution which cannot be
+        // represented by the ordinary batched realization API via realize_all
+        realized = realized.realize_with_shape_preservation(
             func.r#ref(),
-            SyntheticSlot::CallSiteBranch,
-            call_site_concretes.branch.as_ref(),
-        ));
+            SyntheticSlot::Capture(binding.index()),
+            &outer_value,
+            outer_value.location().clone(),
+        );
 
-        if *realized == local_value {
+        let substitutions_after: Vec<_> = capture_backtraces
+            .range((binding.index() + 1)..) // continue from where we left off
+            .map(|(index, concrete)| (SyntheticSlot::Capture(*index), concrete.as_ref()))
+            .chain(iter::once((
+                SyntheticSlot::CallSiteBranch,
+                call_site_concretes.branch.as_ref(),
+            )))
+            .collect();
+
+        realized = realized.realize_all(func.r#ref(), &substitutions_after);
+
+        if realized == local_value {
             // no realization happened; ensure compliance with AssumedImmutable
-            realized = Cow::Owned(local_value.clone_inner());
+            realized = local_value.clone_inner();
         }
 
-        if (*realized).snapshot_aware_eq(&outer_value) && local_known_const == outer_known_const {
+        if realized.snapshot_aware_eq(&outer_value) && local_known_const == outer_known_const {
             // avoid unbounded growth of the outer symbol's backtrace tree
             // across repeated closure calls, as otherwise later backtrace
             // comparisons (e.g., the == at derive_best_backtraces_for_captures)
@@ -322,7 +321,7 @@ fn apply_capture_write_backs_with<'a>(
 
                 (merged, None)
             } else {
-                (realized.into_owned(), local_known_const)
+                (realized, local_known_const)
             };
 
         mutation::record_active_function_capture_mutation(

@@ -321,6 +321,29 @@ impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValu
         }
     }
 
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        let r#const = self
+            .r#const
+            .iter()
+            .map(|(k, v)| (k.clone(), v.realize_all(from_func, substitutions)))
+            .collect();
+
+        let r#dyn = self.r#dyn.realize_all(from_func, substitutions);
+        let keys = self.keys.realize_all(from_func, substitutions);
+
+        Self {
+            r#const,
+            r#dyn,
+            dyn_overrides: self.dyn_overrides.clone(),
+            keys,
+            known_len: self.known_len,
+        }
+    }
+
     // for precision; avoid flattening all components into one backtrace
     fn realize_with_shape_preservation(
         &self,

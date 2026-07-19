@@ -135,6 +135,31 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
         }
     }
 
+    fn realize_all(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
+    ) -> Self {
+        macro_rules! recurs {
+            ($sub:expr) => {
+                $sub.realize_all(from_func, substitutions)
+            };
+        }
+
+        match self {
+            Self::Simple(bt) => Self::Simple(recurs!(bt)),
+            Self::Expandable(exp) => Self::Expandable(recurs!(exp)),
+            Self::Mobius(mobius) => Self::Mobius(recurs!(mobius)),
+            Self::PackageRef(pkg) => Self::PackageRef(recurs!(pkg)),
+            Self::Channel(channel) => Self::Channel(recurs!(channel)),
+            Self::Array(composite) => Self::Array(recurs!(composite)),
+            Self::Slice(composite) => Self::Slice(recurs!(composite)),
+            Self::Map(composite) => Self::Map(recurs!(composite)),
+            Self::Struct(composite) => Self::Struct(recurs!(composite)),
+            Self::Function(func) => Self::Function(Box::new(recurs!(&**func))),
+        }
+    }
+
     fn realize_with_shape_preservation(
         &self,
         from_func: &FunctionRef<'a>,
