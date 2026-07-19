@@ -58,15 +58,16 @@ pub struct AnalysisContext<'a> {
     deferred_branch_backtraces: Vec<DeferredBranchBacktrace<'a>>,
     /// Composition of the last branch backtraces with all the deferred.
     current_calculated_branch_backtrace: Option<LabelBacktrace<'a>>,
-    /// How many levels deep analysis currently is within loops/functions.
+    /// How many levels deep analysis currently is within breakables/functions.
     ///
     /// Keeping track of this is necessary to correctly support
     /// [`Self::deferred_branch_backtraces`] so that nested structures (such as
-    /// loops or functions) can be analyzed properly. For example:
+    /// breakable statements or functions) can be analyzed properly. For
+    /// example:
     /// ```go
     /// for {
     ///     if cond {
-    ///         break // cond backtrace is deferred to boundary of InnermostLoop
+    ///         break // cond deferred to boundary of InnermostBreakable
     ///     }
     ///
     ///     for {
@@ -771,9 +772,11 @@ pub enum SplitControlFlowArm {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeferTarget<'a> {
-    Function,
-    InnermostLoop,
-    LabeledLoop(&'a str),
+    Function,                  // targeted by return
+    InnermostBreakable,        // targeted by break; not necessarily loops
+    LabeledBreakable(&'a str), // targeted by break; not necessarily loops
+    InnermostLoop,             // targeted by continue; specifically loops
+    LabeledLoop(&'a str),      // targeted by continue; specifically loops
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

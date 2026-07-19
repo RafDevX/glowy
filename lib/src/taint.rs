@@ -204,6 +204,12 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
             // handle the case where we know a `goto` stmt targets this label
             goto::visit_label_in_goto_context(ctx, *label);
 
+            let labels_loop = matches!(inner.as_ref(), StatementNode::For(_));
+            let labels_breakable = matches!(
+                inner.as_ref(),
+                StatementNode::For(_) | StatementNode::Select(_) | StatementNode::Switch(_)
+            );
+
             if let StatementNode::For(r#for) = inner.as_ref() {
                 // visit_statement would just have delegated to visit_for
                 // anyway, but this way we get to tell the visitor that a
@@ -214,8 +220,12 @@ fn visit_statement<'a>(ctx: &mut AnalysisContext<'a>, node: &StatementNode<'a>) 
                 visit_statement(ctx, inner);
             }
 
-            if let StatementNode::For(_) = inner.as_ref() {
+            if labels_loop {
                 ctx.trigger_defer_target(DeferTarget::LabeledLoop(label.content()));
+            }
+
+            if labels_breakable {
+                ctx.trigger_defer_target(DeferTarget::LabeledBreakable(label.content()));
             }
         }
         StatementNode::Block(block) => visit_block(ctx, block),

@@ -129,10 +129,11 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>, label: O
 
     ctx.pop_loop_convergence_context();
 
-    // we decrease before triggering since that is also what would happen if the
-    // target were a LabeledLoop (triggering happens after visit of inner stmt)
+    // we decrease before triggering since that is also what happens for a
+    // labeled target (triggering happens after visiting the labeled statement)
     ctx.decrease_branch_scope_depth();
     ctx.trigger_defer_target(DeferTarget::InnermostLoop);
+    ctx.trigger_defer_target(DeferTarget::InnermostBreakable);
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
 
@@ -793,7 +794,13 @@ pub fn visit_continue<'a>(
     // lexically follow it in this iteration
     ctx.record_continue_branch_backtrace(label.as_ref().map(Span::content), location.clone());
 
-    defer_loop_abort(ctx, label, location);
+    let target = if let Some(label) = label {
+        DeferTarget::LabeledLoop(label.content())
+    } else {
+        DeferTarget::InnermostLoop
+    };
+
+    ctx.defer_branch_backtrace(target, location.clone());
 }
 
 pub fn visit_break<'a>(
@@ -801,18 +808,10 @@ pub fn visit_break<'a>(
     label: Option<Span<'a>>,
     location: &Location,
 ) {
-    defer_loop_abort(ctx, label, location);
-}
-
-fn defer_loop_abort<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    label: Option<Span<'a>>,
-    location: &Location,
-) {
     let target = if let Some(label) = label {
-        DeferTarget::LabeledLoop(label.content())
+        DeferTarget::LabeledBreakable(label.content())
     } else {
-        DeferTarget::InnermostLoop
+        DeferTarget::InnermostBreakable
     };
 
     ctx.defer_branch_backtrace(target, location.clone());
@@ -830,10 +829,15 @@ pub fn visit_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &SwitchNode<'a>) {
     // implicit block, so we select it here
     ctx.symtab_mut().select_next_child_scope();
 
+    ctx.increase_branch_scope_depth();
+
     match node {
         SwitchNode::Expr(expr) => visit_expr_switch(ctx, expr),
         SwitchNode::Type(r#type) => visit_type_switch(ctx, r#type),
     }
+
+    ctx.decrease_branch_scope_depth();
+    ctx.trigger_defer_target(DeferTarget::InnermostBreakable);
 
     ctx.symtab_mut().select_parent_scope(); // pop implicit block
 

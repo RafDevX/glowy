@@ -7,7 +7,7 @@ use parser::{
 };
 
 use crate::{
-    context::{AnalysisContext, SplitControlFlowArm},
+    context::{AnalysisContext, DeferTarget, SplitControlFlowArm},
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind},
     taint::{self, explicit, exprs},
@@ -15,6 +15,8 @@ use crate::{
 };
 
 pub fn visit_select<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectNode<'a>) {
+    ctx.increase_branch_scope_depth();
+
     // all channel operands and send rhs expressions are evaluated exactly once,
     // in source order, upon entering the select. receive lhs expressions are
     // intentionally absent here as they are only evaluated after a case wins
@@ -68,6 +70,10 @@ pub fn visit_select<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectNode<'a>) {
     }
 
     ctx.pop_split_control_flow();
+
+    ctx.decrease_branch_scope_depth();
+
+    ctx.trigger_defer_target(DeferTarget::InnermostBreakable);
 }
 
 struct EvaluatedSelectClause<'a, 'clause> {
