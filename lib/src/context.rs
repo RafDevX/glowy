@@ -766,6 +766,7 @@ struct SplitControlFlowRegion<'a> {
 pub enum SplitControlFlowArm {
     IfThen,
     IfElse,
+    SelectClause(usize),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

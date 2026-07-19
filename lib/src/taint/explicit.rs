@@ -109,13 +109,10 @@ fn visit_binding_decl_spec<'a>(
         &node.exprs
     };
 
-    let mut rhs_values = exprs::visit_multi_exprs_with_consts(ctx, spec_exprs);
-
-    if let [(single, _)] = rhs_values.as_slice()
-        && let Some(expanded) = single.try_expand_to(node.ids.len())
-    {
-        rhs_values = expanded.into_iter().map(|value| (value, None)).collect();
-    }
+    let mut rhs_values = expand_rhs_values(
+        exprs::visit_multi_exprs_with_consts(ctx, spec_exprs),
+        node.ids.len(),
+    );
 
     // override the rhs values' declared_type with the spec's, if any: a typed
     // declaration necessarily produces a value of the specified type regardless
@@ -311,15 +308,22 @@ pub fn visit_raw_binding_decl_spec<'a>(
 }
 
 pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDeclNode<'a>) {
-    // for simplicity, we treat this as if it was a binding decl spec
+    let rhs_values = exprs::visit_multi_exprs_with_consts(ctx, &node.exprs);
 
-    visit_binding_decl_spec(
+    visit_short_var_decl_with(ctx, node, rhs_values);
+}
+
+pub fn visit_short_var_decl_with<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &ShortVarDeclNode<'a>,
+    rhs_values: Vec<(ValueRef<'a>, Option<SimpleConstValue>)>,
+) {
+    let rhs_values = expand_rhs_values(rhs_values, node.ids.len());
+
+    visit_raw_binding_decl_spec(
         ctx,
-        &BindingDeclSpecNode {
-            ids: node.ids.clone(),
-            exprs: node.exprs.clone(),
-            r#type: None,
-        },
+        &node.ids,
+        rhs_values.into_iter(),
         true,
         true,
         &node.location,
@@ -329,6 +333,16 @@ pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDe
 }
 
 pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode<'a>) {
+    let rhs_values = exprs::visit_multi_exprs_with_consts(ctx, &node.rhs);
+
+    visit_assignment_with(ctx, node, rhs_values);
+}
+
+pub fn visit_assignment_with<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &AssignmentNode<'a>,
+    rhs_values: Vec<(ValueRef<'a>, Option<SimpleConstValue>)>,
+) {
     if node.kind != AssignmentKind::Simple && node.lhs.len() != 1 {
         ctx.report_error(AnalysisErrorKind::MultiComplexAssignment {
             location: node.location.clone(),
@@ -338,13 +352,7 @@ pub fn visit_assignment<'a>(ctx: &mut AnalysisContext<'a>, node: &AssignmentNode
         return;
     }
 
-    let mut rhs_values = exprs::visit_multi_exprs_with_consts(ctx, &node.rhs);
-
-    if let [(single, _)] = rhs_values.as_slice()
-        && let Some(expanded) = single.try_expand_to(node.lhs.len())
-    {
-        rhs_values = expanded.into_iter().map(|value| (value, None)).collect();
-    }
+    let rhs_values = expand_rhs_values(rhs_values, node.lhs.len());
 
     let mut explicit_backtrace = None;
     let mut subtract = Label::Bottom;
@@ -464,4 +472,17 @@ pub fn visit_incdec<'a>(
             annotation: None,
         },
     );
+}
+
+fn expand_rhs_values(
+    values: Vec<(ValueRef<'_>, Option<SimpleConstValue>)>,
+    arity: usize,
+) -> Vec<(ValueRef<'_>, Option<SimpleConstValue>)> {
+    if let [(single, _)] = values.as_slice()
+        && let Some(expanded) = single.try_expand_to(arity)
+    {
+        return expanded.into_iter().map(|value| (value, None)).collect();
+    }
+
+    values
 }

@@ -124,6 +124,27 @@ impl<'a> ChannelValue<'a> {
         self.observation_backtrace(ChannelObservation::Capacity, location)
     }
 
+    // whether a communication may proceed
+    pub fn readiness_backtrace(
+        &self,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        let mut children = Vec::with_capacity(3 * (self.allocations.len() + 1));
+
+        for allocation in &self.allocations {
+            children.extend(allocation.aggregate.borrow().delivery_iter().cloned());
+        }
+
+        children.extend(self.unbound.delivery_iter().cloned());
+
+        LabelBacktrace::fold(
+            children.iter(),
+            LabelBacktraceKind::Expression,
+            None,
+            location,
+        )
+    }
+
     fn observation_backtrace(
         &self,
         observation: ChannelObservation,
