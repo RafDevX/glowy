@@ -30,13 +30,13 @@ impl<'a> ChannelValue<'a> {
     }
 
     pub fn new_allocated(
-        initial: Option<LabelBacktrace<'a>>,
+        capacity: Option<LabelBacktrace<'a>>,
         location: Pinned<'a, Location>,
     ) -> Self {
         Self {
             allocations: vec![Rc::new(ChannelAllocation {
                 allocation_site: location,
-                aggregate: RefCell::new(ChannelAggregate::new_uniform(initial)),
+                aggregate: RefCell::new(ChannelAggregate::new_with_capacity(capacity)),
             })],
             unbound: ChannelAggregate::new_bottom(),
         }
@@ -48,44 +48,52 @@ impl<'a> ChannelValue<'a> {
         control: Option<LabelBacktrace<'a>>,
         location: &Pinned<'a, Location>,
     ) {
-        self.record(payload, control, LabelBacktraceKind::Send, location);
+        self.record(
+            &ChannelAggregate::new_send(payload, control),
+            LabelBacktraceKind::Send,
+            location,
+        );
     }
 
     pub fn close(&mut self, control: Option<LabelBacktrace<'a>>, location: &Pinned<'a, Location>) {
-        self.record(None, control, LabelBacktraceKind::ChannelClose, location);
+        self.record(
+            &ChannelAggregate::new_close(control),
+            LabelBacktraceKind::ChannelClose,
+            location,
+        );
     }
 
     pub fn record_receive(&mut self, control: LabelBacktrace<'a>, location: &Pinned<'a, Location>) {
-        self.record(None, Some(control), LabelBacktraceKind::Receive, location);
+        self.record(
+            &ChannelAggregate::new_receive(control),
+            LabelBacktraceKind::Receive,
+            location,
+        );
     }
 
     fn record(
         &mut self,
-        payload: Option<LabelBacktrace<'a>>,
-        control: Option<LabelBacktrace<'a>>,
+        effect: &ChannelAggregate<'a>,
         kind: LabelBacktraceKind,
         location: &Pinned<'a, Location>,
     ) {
-        let effect = ChannelAggregate::new(payload, control);
-
         for allocation in &self.allocations {
-            allocation.merge_effect(&effect, kind, location);
+            allocation.merge_effect(effect, kind, location);
         }
 
         self.unbound = self
             .unbound
-            .merge_with(&effect, kind, Cow::Borrowed(location));
+            .merge_with(effect, kind, Cow::Borrowed(location));
     }
 
     pub fn receive(&self, location: &Pinned<'a, Location>) -> (ValueRef<'a>, ValueRef<'a>) {
         let state_count = self.allocations.len() + usize::from(!self.unbound.is_bottom());
-        let capacity = 2 * state_count;
-        let mut value_backtraces = Vec::with_capacity(capacity);
-        let mut success_backtraces = Vec::with_capacity(state_count);
+        let mut value_backtraces = Vec::with_capacity(4 * state_count);
+        let mut success_backtraces = Vec::with_capacity(3 * state_count);
 
         let mut append = |aggregate: &ChannelAggregate<'a>| {
             value_backtraces.extend(aggregate.iter().cloned());
-            success_backtraces.extend(aggregate.control().into_iter().cloned());
+            success_backtraces.extend(aggregate.delivery_iter().cloned());
         };
 
         for allocation in &self.allocations {
@@ -106,6 +114,41 @@ impl<'a> ChannelValue<'a> {
         };
 
         (fold(&value_backtraces), fold(&success_backtraces))
+    }
+
+    pub fn len_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
+        self.observation_backtrace(ChannelObservation::Occupancy, location)
+    }
+
+    pub fn cap_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
+        self.observation_backtrace(ChannelObservation::Capacity, location)
+    }
+
+    fn observation_backtrace(
+        &self,
+        observation: ChannelObservation,
+        location: Pinned<'a, Location>,
+    ) -> Option<LabelBacktrace<'a>> {
+        let mut children = Vec::with_capacity(self.allocations.len() + 1);
+
+        for allocation in &self.allocations {
+            children.extend(
+                allocation
+                    .aggregate
+                    .borrow()
+                    .observation(observation)
+                    .cloned(),
+            );
+        }
+
+        children.extend(self.unbound.observation(observation).cloned());
+
+        LabelBacktrace::fold(
+            children.iter(),
+            LabelBacktraceKind::Expression,
+            None,
+            location,
+        )
     }
 
     fn commit_unbound_to_allocations(&mut self) {
@@ -199,7 +242,9 @@ impl<'a> BacktraceContainer<'a> for ChannelValue<'a> {
 
     fn subtract_label(&mut self, subtract: &Label<'a>) {
         self.unbound.payload.subtract_label(subtract);
-        self.unbound.control.subtract_label(subtract);
+        self.unbound.delivery.subtract_label(subtract);
+        self.unbound.occupancy.subtract_label(subtract);
+        self.unbound.capacity.subtract_label(subtract);
     }
 }
 
@@ -323,17 +368,55 @@ impl SnapshotAware for ChannelValue<'_> {
 struct ChannelAggregate<'a> {
     // aggregate of values sent into the channel
     payload: Option<LabelBacktrace<'a>>,
-    // aggregate of delivery metainformation, i.e., if `close` was invoked
-    control: Option<LabelBacktrace<'a>>,
+    // delivery metainformation, i.e., whether `close` was invoked
+    delivery: Option<LabelBacktrace<'a>>,
+    // metainformation regarding the number of queued elements
+    occupancy: Option<LabelBacktrace<'a>>,
+    // metainformation regarding the channel's immutable buffer capacity
+    capacity: Option<LabelBacktrace<'a>>,
 }
 
 impl<'a> ChannelAggregate<'a> {
-    fn new(payload: Option<LabelBacktrace<'a>>, control: Option<LabelBacktrace<'a>>) -> Self {
-        Self { payload, control }
+    fn new(
+        payload: Option<LabelBacktrace<'a>>,
+        delivery: Option<LabelBacktrace<'a>>,
+        occupancy: Option<LabelBacktrace<'a>>,
+        capacity: Option<LabelBacktrace<'a>>,
+    ) -> Self {
+        Self {
+            payload,
+            delivery,
+            occupancy,
+            capacity,
+        }
     }
 
     fn new_uniform(backtrace: Option<LabelBacktrace<'a>>) -> Self {
-        Self::new(backtrace.clone(), backtrace)
+        Self::new(
+            backtrace.clone(),
+            backtrace.clone(),
+            backtrace.clone(),
+            backtrace,
+        )
+    }
+
+    fn new_with_capacity(capacity: Option<LabelBacktrace<'a>>) -> Self {
+        Self::new(None, None, None, capacity)
+    }
+
+    fn new_send(
+        payload: Option<LabelBacktrace<'a>>,
+        occupancy: Option<LabelBacktrace<'a>>,
+    ) -> Self {
+        Self::new(payload, None, occupancy, None)
+    }
+
+    fn new_close(delivery: Option<LabelBacktrace<'a>>) -> Self {
+        Self::new(None, delivery, None, None)
+    }
+
+    fn new_receive(occupancy: LabelBacktrace<'a>) -> Self {
+        Self::new(None, None, Some(occupancy), None)
     }
 
     fn new_bottom() -> Self {
@@ -341,15 +424,29 @@ impl<'a> ChannelAggregate<'a> {
     }
 
     fn is_bottom(&self) -> bool {
-        self.payload.is_none() && self.control.is_none()
+        self.iter().next().is_none()
     }
 
-    fn control(&self) -> Option<&LabelBacktrace<'a>> {
-        self.control.as_ref()
+    fn observation(&self, observation: ChannelObservation) -> Option<&LabelBacktrace<'a>> {
+        match observation {
+            ChannelObservation::Occupancy => self.occupancy.as_ref(),
+            ChannelObservation::Capacity => self.capacity.as_ref(),
+        }
     }
 
     fn iter(&self) -> impl Iterator<Item = &LabelBacktrace<'a>> {
-        self.payload.iter().chain(self.control.iter())
+        self.payload
+            .iter()
+            .chain(self.delivery.iter())
+            .chain(self.occupancy.iter())
+            .chain(self.capacity.iter())
+    }
+
+    fn delivery_iter(&self) -> impl Iterator<Item = &LabelBacktrace<'a>> {
+        self.delivery
+            .iter()
+            .chain(self.occupancy.iter())
+            .chain(self.capacity.iter())
     }
 
     fn realize(
@@ -360,7 +457,9 @@ impl<'a> ChannelAggregate<'a> {
     ) -> Self {
         Self::new(
             self.payload.realize(from_func, from_slot, concrete),
-            self.control.realize(from_func, from_slot, concrete),
+            self.delivery.realize(from_func, from_slot, concrete),
+            self.occupancy.realize(from_func, from_slot, concrete),
+            self.capacity.realize(from_func, from_slot, concrete),
         )
     }
 
@@ -378,7 +477,19 @@ impl<'a> ChannelAggregate<'a> {
                 parent_location.clone(),
                 extra_children.clone(),
             ),
-            self.control.nest_backtrace(
+            self.delivery.nest_backtrace(
+                parent_kind,
+                parent_symbol,
+                parent_location.clone(),
+                extra_children.clone(),
+            ),
+            self.occupancy.nest_backtrace(
+                parent_kind,
+                parent_symbol,
+                parent_location.clone(),
+                extra_children.clone(),
+            ),
+            self.capacity.nest_backtrace(
                 parent_kind,
                 parent_symbol,
                 parent_location,
@@ -399,19 +510,35 @@ impl<'a> Mergeable<'a> for ChannelAggregate<'a> {
             .payload
             .merge_with(&other.payload, with_kind, at_location.clone());
 
-        let control = self
-            .control
-            .merge_with(&other.control, with_kind, at_location);
+        let delivery = self
+            .delivery
+            .merge_with(&other.delivery, with_kind, at_location.clone());
 
-        Self::new(payload, control)
+        let occupancy = self
+            .occupancy
+            .merge_with(&other.occupancy, with_kind, at_location.clone());
+
+        let capacity = self
+            .capacity
+            .merge_with(&other.capacity, with_kind, at_location);
+
+        Self::new(payload, delivery, occupancy, capacity)
     }
 }
 
 impl SnapshotAware for ChannelAggregate<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.payload.snapshot_aware_eq(&other.payload)
-            && self.control.snapshot_aware_eq(&other.control)
+            && self.delivery.snapshot_aware_eq(&other.delivery)
+            && self.occupancy.snapshot_aware_eq(&other.occupancy)
+            && self.capacity.snapshot_aware_eq(&other.capacity)
     }
+}
+
+#[derive(Clone, Copy)]
+enum ChannelObservation {
+    Occupancy,
+    Capacity,
 }
 
 #[derive(Debug)]

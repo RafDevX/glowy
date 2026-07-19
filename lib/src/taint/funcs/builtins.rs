@@ -196,16 +196,15 @@ pub fn visit_make_channel<'a>(
 
     // buffer size determines when sends block (full buffer => sender waits),
     // and that blocking is easily observable to any receiver via send/receive
-    // timing -- so we seed the channel's inner backtrace with n's backtrace,
-    // ensuring everything later received from this channel inherits n's label
-    // as a sound over-approximation
-    let initial = node.n.as_ref().and_then(|expr| {
+    // timing -- so capacity remains part of every receive observation, while
+    // staying distinct from occupancy for the len and cap builtins
+    let capacity = node.n.as_ref().and_then(|expr| {
         capture_arg_const(ctx, expr, arg_consts, 1);
 
         exprs::get_expr_backtrace(ctx, expr)
     });
 
-    let channel = ChannelValue::new_allocated(initial, location.clone());
+    let channel = ChannelValue::new_allocated(capacity, location.clone());
 
     ValueRef::new(Value::Channel(channel), location, declared_type)
 }
@@ -555,7 +554,13 @@ pub fn visit_len<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
 ) -> ValueRef<'a> {
-    visit_collection_size(ctx, node, arg_consts, SliceValue::len_backtrace)
+    visit_collection_size(
+        ctx,
+        node,
+        arg_consts,
+        SliceValue::len_backtrace,
+        ChannelValue::len_backtrace,
+    )
 }
 
 pub fn visit_cap<'a>(
@@ -563,7 +568,13 @@ pub fn visit_cap<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
 ) -> ValueRef<'a> {
-    visit_collection_size(ctx, node, arg_consts, SliceValue::cap_backtrace)
+    visit_collection_size(
+        ctx,
+        node,
+        arg_consts,
+        SliceValue::cap_backtrace,
+        ChannelValue::cap_backtrace,
+    )
 }
 
 fn visit_collection_size<'a>(
@@ -571,6 +582,7 @@ fn visit_collection_size<'a>(
     node: &CallNode<'a>,
     arg_consts: &mut [Option<SimpleConstValue>],
     slice_size: impl FnOnce(&SliceValue<'a>, Pinned<'a, Location>) -> Option<LabelBacktrace<'a>>,
+    channel_size: impl FnOnce(&ChannelValue<'a>, Pinned<'a, Location>) -> Option<LabelBacktrace<'a>>,
 ) -> ValueRef<'a> {
     let location = ctx.pin(node.location.clone());
 
@@ -587,7 +599,7 @@ fn visit_collection_size<'a>(
     capture_arg_const(ctx, arg, arg_consts, 0);
     let value = exprs::visit_single_expr(ctx, arg);
 
-    // guard shape access to avoid upgrading strings or channels to arrays
+    // guard shape access to avoid upgrading e.g. strings to arrays
     let backtrace = if value.is_slice()
         && let Some(slice) = value.as_slice()
     {
@@ -596,6 +608,10 @@ fn visit_collection_size<'a>(
         && let Some(composite) = value.as_composite()
     {
         composite.length_backtrace_at_location(location.clone())
+    } else if value.is_channel()
+        && let Some(channel) = value.as_channel()
+    {
+        channel_size(&channel, location.clone())
     } else {
         value.backtrace()
     };
