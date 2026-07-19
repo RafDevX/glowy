@@ -234,17 +234,8 @@ pub fn visit_append<'a>(
     capture_arg_const(ctx, original, arg_consts, 0);
 
     let original = exprs::visit_single_expr(ctx, original);
-    let mut result = original.clone_inner(); // don't mutate original
 
-    let Some(mut slice) = result.as_slice_mut() else {
-        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
-            location: node.location.clone(),
-        });
-
-        return ValueRef::new_bottom(location, None);
-    };
-
-    if node.variadic {
+    let appended = if node.variadic {
         // argument is another slice (or a string)
         let [_, other] = node.args.as_slice() else {
             // too many arguments
@@ -258,18 +249,45 @@ pub fn visit_append<'a>(
         };
 
         capture_arg_const(ctx, other, arg_consts, 1);
-        let src_value = exprs::visit_single_expr(ctx, other);
 
-        let src_slice = src_value.as_slice();
-
-        slice.extend(src_slice.as_deref(), &src_value, &location);
+        vec![exprs::visit_single_expr(ctx, other)]
     } else {
         // multiple arguments corresponding to individual elements
-        for (index, el) in node.args.iter().enumerate().skip(1) {
-            capture_arg_const(ctx, el, arg_consts, index);
+        node.args
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(index, el)| {
+                capture_arg_const(ctx, el, arg_consts, index);
 
-            let value = exprs::visit_single_expr(ctx, el);
+                exprs::visit_single_expr(ctx, el)
+            })
+            .collect()
+    };
 
+    // the Go spec specifies that every call argument is evaluated before the
+    // function call is applied. in particular, for this case, evaluating a
+    // later append argument may read (or mutate) storage aliased by the
+    // destination, so we cannot retain a mutable RefCell borrow of the
+    // destination while those expressions are being visited
+    let mut result = original.clone_inner(); // don't mutate original
+
+    let Some(mut slice) = result.as_slice_mut() else {
+        ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+            location: node.location.clone(),
+        });
+
+        return ValueRef::new_bottom(location, None);
+    };
+
+    if node.variadic
+        && let [src_value] = appended.as_slice()
+    {
+        let src_slice = src_value.as_slice();
+
+        slice.extend(src_slice.as_deref(), src_value, &location);
+    } else {
+        for value in appended {
             slice.push(value, &location);
         }
     }

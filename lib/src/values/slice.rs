@@ -374,7 +374,18 @@ impl<'a> SliceValue<'a> {
 
         let old_end = self.end.clone();
 
-        let value = source_value.nest_backtrace(
+        // the appended value represents an element of the source, not the
+        // source slice descriptor itself. preserving the outer slice here can
+        // also create a cycle when source and destination overlap: the value
+        // written into a backing array then contains that same backing, and
+        // calculating its aggregate backtrace recursively borrows the backing
+        // while it is already mutably borrowed for the write
+        let source_element = source.map_or_else(
+            || source_value.clone_inner(),
+            |source| source.range_element(location.clone()),
+        );
+
+        let value = source_element.nest_backtrace(
             LabelBacktraceKind::Assignment,
             None,
             location.clone(),
