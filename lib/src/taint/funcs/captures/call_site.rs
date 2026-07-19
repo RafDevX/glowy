@@ -72,20 +72,17 @@ impl<'a> CallSiteConcretes<'a> {
         func: &FunctionRef<'a>,
         initial: Option<LabelBacktrace<'a>>,
     ) -> Option<LabelBacktrace<'a>> {
-        let Some(mut current) = initial else {
-            // nothing to realize
-            return None;
-        };
+        let mut current = initial?;
 
         for (param_index, concrete) in self.params.iter().enumerate() {
-            if let Some(realized) =
-                current.realize(func, SyntheticSlot::Param(param_index), concrete.as_ref())
+            #[rustfmt::skip]
             {
-                current = realized;
-            } else {
-                // nothing left to realize
-                return None;
-            }
+                current = current.realize(
+                    func,
+                    SyntheticSlot::Param(param_index),
+                    concrete.as_ref()
+                )?;
+            };
         }
 
         current.realize(func, SyntheticSlot::CallSiteBranch, self.branch.as_ref())
