@@ -37,6 +37,7 @@
               rust-analyzer
               clippy
               cargo-make
+              cargo-flamegraph
             ]);
 
           shellHook = ''
@@ -55,23 +56,38 @@
                 "deque",
                 "direnv",
                 "finl",
+                "flamegraph",
                 "funcs",
+                "getenv",
                 "glowy",
+                "goarch",
                 "hexdigit",
+                "ilog",
                 "imag",
                 "impls",
+                "indexmap",
+                "nixos",
                 "nixpkgs",
                 "pathbuf",
                 "peekable",
                 "pkgs",
                 "predeclared",
                 "println",
+                "referer",
+                "reqs",
+                "rfind",
                 "rsplit",
                 "rustc",
                 "scrutinee",
+                "serde",
                 "subenum",
+                "subspan",
                 "symtab",
-                "unseparated"
+                "syscall",
+                "unioned",
+                "unseparated",
+                "worklist",
+                "worklists"
               ]
             }
             EOF
