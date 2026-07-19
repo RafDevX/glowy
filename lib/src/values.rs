@@ -813,7 +813,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
             .chain(extra_children)
             .collect();
 
-        LabelBacktrace::fold_from_owned(children, parent_kind, parent_symbol, parent_location)
+        LabelBacktrace::fold(children.iter(), parent_kind, parent_symbol, parent_location)
     }
 }
 

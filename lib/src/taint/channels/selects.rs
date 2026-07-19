@@ -32,8 +32,8 @@ pub fn visit_select<'a>(ctx: &mut AnalysisContext<'a>, node: &SelectNode<'a>) {
         .filter_map(|clause| clause.readiness_backtrace(ctx))
         .collect();
 
-    let readiness = LabelBacktrace::fold_from_owned(
-        readiness_dependencies,
+    let readiness = LabelBacktrace::fold(
+        readiness_dependencies.iter(),
         LabelBacktraceKind::Branch,
         None,
         ctx.pin(node.location.clone()),

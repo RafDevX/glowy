@@ -51,9 +51,9 @@ pub struct LabelBacktrace<'a> {
     /// entire propagation tree. This is crucial for efficient "nothing to do"
     /// paths that just return `self.clone()`, among other very hot paths.
     ///
-    /// This is sound because published backtraces never expose mutable access
-    /// to `children`. Construction may use copy-on-write mutation while it has
-    /// ownership of a backtrace, but shared trees remain immutable.
+    /// This is sound because nothing ever mutates `children`, since there is no
+    /// way to get a mutable reference to a child (i.e., [`Arc::get_mut`] is
+    /// never invoked).
     ///
     /// Note that we use [`Arc`] instead of [`Rc`](std::rc::Rc) because
     /// [`LabelBacktrace`] must be [`Send`], as otherwise
@@ -119,14 +119,13 @@ impl<'a> LabelBacktrace<'a> {
             && child.location == location
             && child.symbol == symbol
         {
-            // avoid unnecessary repeated backtraces that just make everything
-            // more complex; for example, in the example below:
+            // avoid unnecessary repeated backtraces that just make everything more complex;
+            // for example, in the example below:
             // ```go
             // // glowy::label::{high}
             // var a = 3
             // ```
-            // we just want ExplicitAnnotation and not also Assignment another
-            // level up, so we just return the child
+            // we just want ExplicitAnnotation and not also Assignment another level up
             return Some(child.clone());
         }
 
@@ -138,55 +137,6 @@ impl<'a> LabelBacktrace<'a> {
             symbol,
             location,
             children,
-        })
-    }
-
-    // more efficient, but only when we already have a Vec<Self> of children
-    fn new_from_owned(
-        kind: LabelBacktraceKind,
-        label: Label<'a>,
-        symbol: Option<&'a str>,
-        location: Pinned<'a, Location>,
-        mut children: Vec<Self>,
-    ) -> Option<Self> {
-        if label.is_bottom() {
-            return None;
-        }
-
-        let mut remaining_label = label.clone();
-        children.retain_mut(|child| {
-            if !child.restrict_to_label_in_place(&remaining_label) {
-                return false;
-            }
-
-            remaining_label = remaining_label.difference(&child.label);
-
-            true
-        });
-
-        // if there is only one child
-        if let [child] = &*children
-            && *child.label == label
-            && child.location == location
-            && child.symbol == symbol
-        {
-            // avoid unnecessary repeated backtraces that just make everything
-            // more complex; for example, in the example below:
-            // ```go
-            // // glowy::label::{high}
-            // var a = 3
-            // ```
-            // we just want ExplicitAnnotation and not also Assignment another
-            // level up, so we just return the child
-            return children.pop();
-        }
-
-        Some(Self {
-            kind,
-            label: Arc::from(label),
-            symbol,
-            location,
-            children: Arc::from(children),
         })
     }
 
@@ -203,19 +153,6 @@ impl<'a> LabelBacktrace<'a> {
         let label = children.clone().into_iter().map(Self::label).sum();
 
         Self::new(with_kind, label, with_symbol, at_location, children)
-        // ^ None iff children are empty
-    }
-
-    // more efficient, but only when we already have a Vec<Self> of children
-    pub(crate) fn fold_from_owned(
-        children: Vec<Self>,
-        with_kind: LabelBacktraceKind,
-        with_symbol: Option<&'a str>,
-        at_location: Pinned<'a, Location>,
-    ) -> Option<Self> {
-        let label = children.iter().map(Self::label).sum();
-
-        Self::new_from_owned(with_kind, label, with_symbol, at_location, children)
         // ^ None iff children are empty
     }
 
@@ -381,8 +318,8 @@ impl<'a> LabelBacktrace<'a> {
                 .filter_map(|child| child.realize(from_func, from_slot, concrete))
                 .collect();
 
-            Self::fold_from_owned(
-                children,
+            Self::fold(
+                &children,
                 *self.kind(),
                 self.symbol(),
                 self.location().clone(),
@@ -415,8 +352,8 @@ impl<'a> LabelBacktrace<'a> {
                 .map(|child| child.rebind_synthetic_func(from_func, to_func))
                 .collect();
 
-            Self::fold_from_owned(
-                children,
+            Self::fold(
+                &children,
                 *self.kind(),
                 self.symbol(),
                 self.location().clone(),
@@ -457,59 +394,6 @@ impl<'a> LabelBacktrace<'a> {
         })
     }
 
-    #[must_use]
-    fn restrict_to_label_owned(mut self, constraint: &Label<'a>) -> Option<Self> {
-        self.restrict_to_label_in_place(constraint).then_some(self)
-    }
-
-    /// Returns `false` when `self` would have become `Bottom`.
-    #[must_use]
-    fn restrict_to_label_in_place(&mut self, constraint: &Label<'a>) -> bool {
-        if self.label.is_subset_of(constraint) {
-            // we already meet this restriction, so prevent recursion and avoid
-            // all the downstream allocations / intersections / etc.
-
-            // this optimization leads to a 50% overall speedup in complex runs
-
-            return true;
-        }
-
-        let new_label = self.label.intersect(constraint);
-
-        if new_label.is_bottom() {
-            return false;
-        }
-
-        self.label = Arc::from(new_label);
-
-        let must_prune = self
-            .children
-            .iter()
-            .any(|child| child.label.intersect(constraint).is_bottom());
-
-        if must_prune {
-            // Arc slices cannot be shortened in place. clone only the child
-            // headers here; their nested Arc allocations remain shared and
-            // are subsequently reused whenever the restriction permits it
-
-            self.children = self
-                .children
-                .iter()
-                .cloned()
-                .filter_map(|child| child.restrict_to_label_owned(constraint))
-                .collect();
-        } else {
-            // make_mut uses clone-on-write so we re-use Arcs where possible
-            for child in Arc::make_mut(&mut self.children) {
-                // we know this will never return false because otherwise we
-                // would have detected it above and `must_prune` would be true
-                let _ = child.restrict_to_label_in_place(constraint);
-            }
-        }
-
-        true
-    }
-
     /// Tries to mutate the present instance so that its label has certain tags
     /// removed, pruning children if they would have [`Label::Bottom`].
     ///
@@ -529,7 +413,13 @@ impl<'a> LabelBacktrace<'a> {
             return false;
         }
 
-        self.restrict_to_label_in_place(&constraint)
+        if let Some(new) = self.restrict_to_label(&constraint) {
+            *self = new;
+
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns the kind of operation that caused the label assignment.
