@@ -255,14 +255,33 @@ pub fn visit_operand_name<'a>(
 
     let symbol = resolve_operand_name(ctx, name, qualifier);
 
-    let value = if let Some(symbol) = &symbol {
+    visit_operand_name_with_symbol(ctx, name, qualifier, symbol.as_ref())
+}
+
+pub fn visit_resolved_unqualified_operand_name<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    name: Span<'a>,
+    symbol: &SymbolRef<'a>,
+) -> ValueRef<'a> {
+    visit_operand_name_with_symbol(ctx, name, None, Some(symbol))
+}
+
+fn visit_operand_name_with_symbol<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    name: Span<'a>,
+    qualifier: Option<Span<'a>>,
+    symbol: Option<&SymbolRef<'a>>,
+) -> ValueRef<'a> {
+    let location = ctx.pin(name.location());
+
+    let value = if let Some(symbol) = symbol {
         symbol.borrow().value().get()
     } else {
         // error already reported
         ValueRef::new_bottom(location.clone(), None)
     };
 
-    let blanket_directives = blanket_directives_for_operand(ctx, name, qualifier, symbol.as_ref());
+    let blanket_directives = blanket_directives_for_operand(ctx, name, qualifier, symbol);
 
     // embed any potential blanket source backtrace if there are any Source
     // blanket directives targeting this symbol (propagates the backtrace in

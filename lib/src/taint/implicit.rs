@@ -14,10 +14,15 @@ use crate::{
     context::{AnalysisContext, DeferTarget, SplitControlFlowArm},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
-    symbols::Symbol,
+    symbols::{Symbol, SymbolRef},
     taint::{explicit, exprs, funcs, mutation::LeftValue},
-    values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, ValueRef},
+    values::{FunctionRef, FunctionValue, Mergeable, SelfAwareBacktraceContainer, ValueRef},
 };
+
+struct EvaluatedRangeOperand<'a> {
+    value: ValueRef<'a>,
+    direct_map_symbol: Option<SymbolRef<'a>>,
+}
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
     ctx.push_split_control_flow(node.location.clone());
@@ -266,10 +271,14 @@ fn visit_for_clause<'a>(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Very tight coupling means it would become more confusing if split up"
+)]
 fn visit_for_range<'a>(
     ctx: &mut AnalysisContext<'a>,
     range: &ForRangeNode<'a>,
-    range_operand: &ValueRef<'a>,
+    range_operand: &EvaluatedRangeOperand<'a>,
     body: &BlockNode<'a>,
     header_location: &Location,
 ) {
@@ -312,11 +321,18 @@ fn visit_for_range<'a>(
     let pre_body_deferred = ctx.checkpoint_deferred_state();
 
     loop {
+        let current_operand = derive_current_for_range_operand(
+            ctx,
+            range_expr,
+            range_operand, // already calc'd (visited exactly once)
+            &rhs_location,
+        );
+
         // need to do this every iteration as it might have changed
         let mut rhs_values = get_for_range_values(
             ctx,
             range_expr,
-            range_operand, // already calc'd (visited exactly one)
+            &current_operand, // already calc'd (visited exactly once)
             rhs_location.clone(),
         );
 
@@ -443,11 +459,41 @@ fn visit_for_range<'a>(
     }
 }
 
+fn derive_current_for_range_operand<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    range_expr: &ExprNode<'a>,
+    operand: &EvaluatedRangeOperand<'a>,
+    location: &Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    let Some(symbol) = &operand.direct_map_symbol else {
+        return operand.value.clone();
+    };
+
+    // map mutations replace the symbol's ValueRef to preserve snapshot
+    // immutability, so the saved operand would otherwise miss mutations made
+    // directly through the ranged identifier. refresh that exact symbol
+    // (rather than resolving its name again, which a range binding may shadow),
+    // and merge it with the originally evaluated map so a variable rebind
+    // cannot change which map is being ranged. calls and all other expressions
+    // keep using their one-time result unchanged
+    let ExprNode::Name(name) = range_expr else {
+        unreachable!("a direct map symbol is only recorded for an operand name")
+    };
+
+    let current = exprs::visit_resolved_unqualified_operand_name(ctx, *name, symbol);
+
+    operand.value.merge_with(
+        &current,
+        LabelBacktraceKind::Assignment,
+        Cow::Borrowed(location),
+    )
+}
+
 fn visit_for_range_operand<'a>(
     ctx: &mut AnalysisContext<'a>,
     range_expr: &ExprNode<'a>,
     location: &Pinned<'a, Location>,
-) -> ValueRef<'a> {
+) -> EvaluatedRangeOperand<'a> {
     // when there's an active branch backtrace and the operand is a mutable
     // left-value, we need special handling so that if the value turns out to
     // be a channel we can fold the current branch backtrace into the channel's
@@ -470,7 +516,7 @@ fn visit_for_range_operand<'a>(
                 .is_none_or(|sym| sym.borrow().mutable())
         });
 
-    if should_fold {
+    let value = if should_fold {
         // we can only visit range_expr once, so we need to hijack the existing
         // `mutate_target` visit and extract the value it calculated so that we
         // can use it later during the main part of this function
@@ -507,6 +553,19 @@ fn visit_for_range_operand<'a>(
     } else {
         // just visit the expression normally, no special handling required
         exprs::visit_single_expr(ctx, range_expr)
+    };
+
+    let direct_map_symbol = if value.is_map()
+        && let ExprNode::Name(name) = range_expr
+    {
+        ctx.symtab().get_symbol(name.content())
+    } else {
+        None
+    };
+
+    EvaluatedRangeOperand {
+        value,
+        direct_map_symbol,
     }
 }
 
