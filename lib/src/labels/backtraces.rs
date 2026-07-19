@@ -254,6 +254,37 @@ impl<'a> LabelBacktrace<'a> {
             return Some(self.clone());
         }
 
+        // a function-valued capture can refer back to the closure whose
+        // environment we are realizing, in which case its concrete backtrace
+        // may contain the very capture placeholder being substituted. such a
+        // placeholder represents a recursive dependency, not an additional
+        // source: for the label equation `C = C ∪ X`, the least fixed point is
+        // `X`, so we remove that recursive term before substitution so it
+        // cannot be reintroduced into the realized result and escape its
+        // respective function (which would be a bug)
+        //
+        // note that this applies only to captures: a parameter or call-site
+        // branch can legitimately be realized with itself while summarizing a
+        // recursive call; those placeholders must survive until the outermost
+        // call site and so cannot be filtered out here
+        let concrete_without_recursive_capture = if matches!(from_slot, SyntheticSlot::Capture(_))
+            && let Some(concrete) = concrete
+            && concrete
+                .label()
+                .tags()
+                .any(|tag| tag.is_synthetic_representation(from_func, from_slot))
+        {
+            Some(concrete.realize(from_func, from_slot, None))
+        } else {
+            None
+        };
+
+        // borrow checker would not let us mutate concrete directly, since we
+        // may need to hold ownership for a new backtrace and concrete is a ref
+        let concrete = concrete_without_recursive_capture
+            .as_ref()
+            .map_or(concrete, Option::as_ref);
+
         if matches!(
             self.kind,
             LabelBacktraceKind::FunctionParameter | LabelBacktraceKind::ClosureCapture
