@@ -358,8 +358,8 @@ fn derive_hybrid_function_outcome_backtrace<'a>(
         .collect();
 
     #[rustfmt::skip]
-    let concrete = LabelBacktrace::fold(
-        &children,
+    let concrete = LabelBacktrace::fold_from_owned(
+        children,
         LabelBacktraceKind::Expression,
         symbol,
         location,

@@ -55,8 +55,8 @@ impl<'a, K: Eq + Hash> CompositeValue<'a, K> {
             .filter_map(|value| value.backtrace())
             .collect();
 
-        let r#dyn = LabelBacktrace::fold(
-            children.iter(),
+        let r#dyn = LabelBacktrace::fold_from_owned(
+            children,
             LabelBacktraceKind::Expression,
             None,
             location,
@@ -217,7 +217,7 @@ impl<'a> CompositeValue<'a, u64> {
             children.push(r#dyn.clone());
         }
 
-        LabelBacktrace::fold(&children, LabelBacktraceKind::Expression, None, location)
+        LabelBacktrace::fold_from_owned(children, LabelBacktraceKind::Expression, None, location)
     }
 
     pub(crate) fn copy_reindexed_range(
@@ -258,12 +258,7 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
             .chain(self.keys.clone())
             .collect();
 
-        LabelBacktrace::fold(
-            children.iter(),
-            LabelBacktraceKind::Expression,
-            None,
-            location,
-        )
+        LabelBacktrace::fold_from_owned(children, LabelBacktraceKind::Expression, None, location)
     }
 
     fn is_bottom(&self) -> bool {

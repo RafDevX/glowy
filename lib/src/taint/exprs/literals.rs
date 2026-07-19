@@ -249,8 +249,8 @@ fn visit_integer_keyed_composite_literal<'a>(
 
     let known_len = has_known_length.then(|| greatest_key.map_or(0, |key| key + 1));
 
-    let keys = LabelBacktrace::fold(
-        &key_backtraces,
+    let keys = LabelBacktrace::fold_from_owned(
+        key_backtraces,
         LabelBacktraceKind::Expression,
         None,
         location.clone(),
@@ -301,8 +301,8 @@ fn visit_map_composite_literal<'a>(
         }
     }
 
-    let keys = LabelBacktrace::fold(
-        &key_backtraces,
+    let keys = LabelBacktrace::fold_from_owned(
+        key_backtraces,
         LabelBacktraceKind::Expression,
         None,
         location.clone(),
@@ -431,8 +431,8 @@ fn visit_array_literal_element<'a>(
             } else {
                 let backtraces: Vec<_> = values.iter().filter_map(ValueRef::backtrace).collect();
 
-                let folded = LabelBacktrace::fold(
-                    &backtraces,
+                let folded = LabelBacktrace::fold_from_owned(
+                    backtraces,
                     LabelBacktraceKind::Expression,
                     None,
                     location.clone(),

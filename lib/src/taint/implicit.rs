@@ -894,8 +894,8 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
             .map(Cow::into_owned)
             .map_or(usize::MAX, |l| l.end);
 
-        let folded = LabelBacktrace::fold(
-            children.iter(),
+        let folded = LabelBacktrace::fold_from_owned(
+            children,
             LabelBacktraceKind::Branch,
             None,
             ctx.pin(start..end),

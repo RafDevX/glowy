@@ -96,12 +96,7 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
             .filter_map(ValueRef::backtrace)
             .collect();
 
-        LabelBacktrace::fold(
-            backtraces.iter(),
-            LabelBacktraceKind::Expression,
-            None,
-            location,
-        )
+        LabelBacktrace::fold_from_owned(backtraces, LabelBacktraceKind::Expression, None, location)
     }
 
     fn is_bottom(&self) -> bool {

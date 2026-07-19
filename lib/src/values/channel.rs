@@ -102,9 +102,9 @@ impl<'a> ChannelValue<'a> {
 
         append(&self.unbound);
 
-        let fold = |parts: &[LabelBacktrace<'a>]| {
-            let backtrace = LabelBacktrace::fold(
-                parts.iter(),
+        let fold = |parts: Vec<LabelBacktrace<'a>>| {
+            let backtrace = LabelBacktrace::fold_from_owned(
+                parts,
                 LabelBacktraceKind::Receive,
                 None,
                 location.clone(),
@@ -113,7 +113,7 @@ impl<'a> ChannelValue<'a> {
             ValueRef::from_backtrace_or_bottom_at(backtrace, || location.clone())
         };
 
-        (fold(&value_backtraces), fold(&success_backtraces))
+        (fold(value_backtraces), fold(success_backtraces))
     }
 
     pub fn len_backtrace(&self, location: Pinned<'a, Location>) -> Option<LabelBacktrace<'a>> {
@@ -137,12 +137,7 @@ impl<'a> ChannelValue<'a> {
 
         children.extend(self.unbound.delivery_iter().cloned());
 
-        LabelBacktrace::fold(
-            children.iter(),
-            LabelBacktraceKind::Expression,
-            None,
-            location,
-        )
+        LabelBacktrace::fold_from_owned(children, LabelBacktraceKind::Expression, None, location)
     }
 
     fn observation_backtrace(
@@ -164,12 +159,7 @@ impl<'a> ChannelValue<'a> {
 
         children.extend(self.unbound.observation(observation).cloned());
 
-        LabelBacktrace::fold(
-            children.iter(),
-            LabelBacktraceKind::Expression,
-            None,
-            location,
-        )
+        LabelBacktrace::fold_from_owned(children, LabelBacktraceKind::Expression, None, location)
     }
 
     fn commit_unbound_to_allocations(&mut self) {
