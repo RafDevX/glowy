@@ -685,13 +685,16 @@ impl<'a> Mergeable<'a> for SliceValue<'a> {
         with_kind: LabelBacktraceKind,
         at_location: Cow<Pinned<'a, Location>>,
     ) -> Self {
-        let mut backings = self.backings.clone();
+        let mut backings = Vec::with_capacity(self.backings.len() + other.backings.len());
 
-        for candidate in &other.backings {
-            if !backings
-                .iter()
-                .any(|backing| backing.shares_inner_with(candidate))
-            {
+        for candidate in self.backings.iter().chain(&other.backings) {
+            if let Some(existing) = backings.iter().find(|backing: &&SliceBacking<'a>| {
+                backing.allocation_site() == candidate.allocation_site()
+            }) {
+                if !existing.shares_inner_with(candidate) {
+                    existing.merge_with(candidate, with_kind, at_location.as_ref());
+                }
+            } else {
                 backings.push(candidate.clone());
             }
         }
@@ -824,6 +827,10 @@ impl<'a> SliceBacking<'a> {
             .expect("slice backing storage must be array-shaped")
     }
 
+    fn allocation_site(&self) -> &Pinned<'a, Location> {
+        self.0.location()
+    }
+
     fn read(&self, key: Option<u64>, location: Pinned<'a, Location>) -> ValueRef<'a> {
         let array = self.as_array();
 
@@ -868,6 +875,24 @@ impl<'a> SliceBacking<'a> {
         Self(self.0.realize(from_func, from_slot, concrete))
     }
 
+    fn merge_with(&self, other: &Self, kind: LabelBacktraceKind, location: &Pinned<'a, Location>) {
+        let mut aggregate = self.as_array_mut();
+
+        let merged = aggregate.merge_with(
+            &other.as_array(), // inner backing
+            kind,
+            Cow::Borrowed(location),
+        );
+
+        // repeated execution of one allocation expression represents more
+        // concrete backing arrays, not more abstract identities; join their
+        // effects into the allocation-site representative, preserving aliases
+        // while avoiding equivalent backtrace growth during convergence
+        if !aggregate.snapshot_aware_eq(&merged) {
+            *aggregate = merged;
+        }
+    }
+
     fn element_backtrace_in_range(
         &self,
         start: u64,
@@ -890,7 +915,7 @@ impl<'a> SliceBacking<'a> {
 
 impl SnapshotAware for SliceBacking<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        self.0.snapshot_aware_eq(&other.0)
+        self.allocation_site() == other.allocation_site() && self.0.snapshot_aware_eq(&other.0)
     }
 }
 
