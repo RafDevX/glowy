@@ -17,8 +17,8 @@ use crate::{
     policy::{self, BlanketDirective, BlanketDirectiveKind},
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     values::{
-        BacktraceContainer, ExpandableValue, FunctionValue, PackageRefValue,
-        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
+        ExpandableValue, FunctionValue, PackageRefValue, SelfAwareBacktraceContainer,
+        SimpleConstValue, Value, ValueRef,
     },
 };
 
@@ -312,7 +312,7 @@ fn visit_operand_name_with_symbol<'a>(
         function.absorb_blanket_directives(blanket_directives);
     }
 
-    apply_blanket_revocation(value, &blanket_revocation)
+    value.and_subtract_label(&blanket_revocation)
 }
 
 /// Reports error for unknown symbol or unknown qualifier, if applicable.
@@ -473,12 +473,6 @@ fn build_blanket_revocation_label<'a>(directives: &'a [BlanketDirective]) -> Lab
     label.accept_wildcards();
 
     label
-}
-
-fn apply_blanket_revocation<'a>(mut value: ValueRef<'a>, revocation: &Label<'a>) -> ValueRef<'a> {
-    value.subtract_label(revocation);
-
-    value
 }
 
 fn visit_make_with_revocations<'a>(

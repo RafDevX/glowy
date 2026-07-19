@@ -226,7 +226,7 @@ pub fn visit_selection_with_base<'a>(
 
         let value = ValueRef::new(Value::Function(Box::new(blackbox)), location, None);
 
-        return super::apply_blanket_revocation(value, &blanket_revocation);
+        return value.and_subtract_label(&blanket_revocation);
     }
 
     // ----------
@@ -268,7 +268,7 @@ fn nest_optional_backtrace<'a>(
         None => value,
     };
 
-    super::apply_blanket_revocation(value, revocation)
+    value.and_subtract_label(revocation)
 }
 
 fn lookup_field_tag_backtrace<'a>(
@@ -295,7 +295,7 @@ fn nest_field_backtraces<'a>(
         value.nest_backtrace(LabelBacktraceKind::Expression, None, at_location, extras)
     };
 
-    super::apply_blanket_revocation(value, revocation)
+    value.and_subtract_label(revocation)
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {

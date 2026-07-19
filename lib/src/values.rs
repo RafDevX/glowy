@@ -610,7 +610,7 @@ impl<'a> BacktraceContainer<'a> for ValueRef<'a> {
 
 // can't be part of BacktraceContainer because returning Self is sadly not
 // dyn-compatible (nor is `param: impl Trait`)
-pub trait SelfAwareBacktraceContainer<'a>: BacktraceContainer<'a> {
+pub trait SelfAwareBacktraceContainer<'a>: Sized + BacktraceContainer<'a> {
     fn realize(
         &self,
         from_func: &FunctionRef<'a>,
@@ -624,10 +624,7 @@ pub trait SelfAwareBacktraceContainer<'a>: BacktraceContainer<'a> {
         from_slot: SyntheticSlot,
         concrete: &Self,
         concrete_location: Pinned<'a, Location>,
-    ) -> Self
-    where
-        Self: Sized,
-    {
+    ) -> Self {
         // if this default implementation has been selected (the impl did not
         // provide another implementation), then it is not possible to preserve
         // shape, so we just fall back to normal realization instead
@@ -646,6 +643,12 @@ pub trait SelfAwareBacktraceContainer<'a>: BacktraceContainer<'a> {
     ) -> Self;
     // ^ ideally should be Item = &'b LabelBacktrace<'a>, but borrow checker
     // hates it and there doesn't seem to be any workaround to make it compile
+
+    fn and_subtract_label(mut self, subtract: &Label<'a>) -> Self {
+        self.subtract_label(subtract);
+
+        self
+    }
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {

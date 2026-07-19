@@ -100,8 +100,7 @@ impl<'a> SliceValue<'a> {
 
         let precise_key = absolute.filter(|_| dependency.is_none());
 
-        let mut result = self
-            .backings
+        self.backings
             .iter()
             .map(|backing| backing.read(precise_key, location.clone()))
             .reduce(|left, right| {
@@ -112,11 +111,8 @@ impl<'a> SliceValue<'a> {
                 )
             })
             .unwrap_or_else(|| ValueRef::new_bottom(location.clone(), None))
-            .nest_backtrace(LabelBacktraceKind::Expression, None, location, dependency);
-
-        result.subtract_label(&self.revocation);
-
-        result
+            .nest_backtrace(LabelBacktraceKind::Expression, None, location, dependency)
+            .and_subtract_label(&self.revocation)
     }
 
     fn write_at_index(
@@ -584,7 +580,7 @@ impl<'a> BacktraceContainer<'a> for SliceValue<'a> {
             })
             .collect();
 
-        let mut backtrace = LabelBacktrace::fold(
+        LabelBacktrace::fold(
             backing_backtraces
                 .iter()
                 .chain(&self.access)
@@ -594,11 +590,8 @@ impl<'a> BacktraceContainer<'a> for SliceValue<'a> {
             LabelBacktraceKind::Expression,
             None,
             location,
-        );
-
-        backtrace.subtract_label(&self.revocation);
-
-        backtrace
+        )
+        .and_subtract_label(&self.revocation)
     }
 
     fn is_bottom(&self) -> bool {
