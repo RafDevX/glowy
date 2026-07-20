@@ -20,7 +20,7 @@ use crate::{
     },
     values::{
         BacktraceContainer, FunctionValue, InherentSourceOrRevocation, MobiusValue,
-        SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
+        SelfAwareBacktraceContainer, SimpleConstValue, UnifiedRealization, Value, ValueRef,
     },
 };
 
@@ -496,7 +496,12 @@ fn handle_deferred_checks<'a>(
     let deferred_checks: Vec<_> = func
         .deferred_checks()
         .iter()
-        .filter_map(|check| check.realize_all(func.r#ref(), &substitutions))
+        .filter_map(|check| {
+            check.realize_unified(UnifiedRealization::Multiple {
+                from_func: func.r#ref(),
+                substitutions: &substitutions,
+            })
+        })
         .collect();
 
     // we don't need to -1 because this value is before the call count has been

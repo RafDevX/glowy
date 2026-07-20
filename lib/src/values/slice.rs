@@ -8,10 +8,10 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{
-        BacktraceContainer, CompositeValue, CompositeValueAdapter, FunctionRef, Mergeable,
+        BacktraceContainer, CompositeValue, CompositeValueAdapter, Mergeable,
         SelfAwareBacktraceContainer, SimpleConstValue, Upgrade, Value, ValueRef,
     },
 };
@@ -627,41 +627,17 @@ impl<'a> BacktraceContainer<'a> for SliceValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for SliceValue<'a> {
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
         Self {
             backings: self
                 .backings
                 .iter()
-                .map(|backing| backing.realize(from_func, from_slot, concrete))
+                .map(|backing| backing.realize_unified(unified))
                 .collect(),
-            start: self.start.realize(from_func, from_slot, concrete),
-            end: self.end.realize(from_func, from_slot, concrete),
-            maximum: self.maximum.realize(from_func, from_slot, concrete),
-            access: self.access.realize(from_func, from_slot, concrete),
-            revocation: self.revocation.clone(),
-        }
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        Self {
-            backings: self
-                .backings
-                .iter()
-                .map(|backing| backing.realize_all(from_func, substitutions))
-                .collect(),
-            start: self.start.realize_all(from_func, substitutions),
-            end: self.end.realize_all(from_func, substitutions),
-            maximum: self.maximum.realize_all(from_func, substitutions),
-            access: self.access.realize_all(from_func, substitutions),
+            start: self.start.realize_unified(unified),
+            end: self.end.realize_unified(unified),
+            maximum: self.maximum.realize_unified(unified),
+            access: self.access.realize_unified(unified),
             revocation: self.revocation.clone(),
         }
     }
@@ -885,21 +861,8 @@ impl<'a> SliceBacking<'a> {
         Self(self.0.copy_shape(backtrace))
     }
 
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
-        Self(self.0.realize(from_func, from_slot, concrete))
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        Self(self.0.realize_all(from_func, substitutions))
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+        Self(self.0.realize_unified(unified))
     }
 
     fn merge_with(&self, other: &Self, kind: LabelBacktraceKind, location: &Pinned<'a, Location>) {
@@ -977,27 +940,8 @@ impl<'a> SliceBound<'a> {
         Self::new(known, backtrace)
     }
 
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
-        Self::new(
-            self.known,
-            self.backtrace.realize(from_func, from_slot, concrete),
-        )
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        Self::new(
-            self.known,
-            self.backtrace.realize_all(from_func, substitutions),
-        )
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+        Self::new(self.known, self.backtrace.realize_unified(unified))
     }
 
     fn nest_backtrace(

@@ -297,43 +297,15 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
 }
 
 impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValue<'a, K> {
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
         let r#const = self
             .r#const
             .iter()
-            .map(|(k, v)| (k.clone(), v.realize(from_func, from_slot, concrete)))
+            .map(|(k, v)| (k.clone(), v.realize_unified(unified)))
             .collect();
 
-        let r#dyn = self.r#dyn.realize(from_func, from_slot, concrete);
-        let keys = self.keys.realize(from_func, from_slot, concrete);
-
-        Self {
-            r#const,
-            r#dyn,
-            dyn_overrides: self.dyn_overrides.clone(),
-            keys,
-            known_len: self.known_len,
-        }
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        let r#const = self
-            .r#const
-            .iter()
-            .map(|(k, v)| (k.clone(), v.realize_all(from_func, substitutions)))
-            .collect();
-
-        let r#dyn = self.r#dyn.realize_all(from_func, substitutions);
-        let keys = self.keys.realize_all(from_func, substitutions);
+        let r#dyn = self.r#dyn.realize_unified(unified);
+        let keys = self.keys.realize_unified(unified);
 
         Self {
             r#const,

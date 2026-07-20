@@ -2,9 +2,9 @@ use parser::{Location, Span};
 
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
-    values::{BacktraceContainer, FunctionRef, SelfAwareBacktraceContainer},
+    values::{BacktraceContainer, SelfAwareBacktraceContainer},
 };
 
 // represents a reference to another package by the name under which it was
@@ -44,20 +44,7 @@ impl<'a> BacktraceContainer<'a> for PackageRefValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
-    fn realize(
-        &self,
-        _from_func: &FunctionRef<'a>,
-        _from_slot: SyntheticSlot,
-        _concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
-        self.clone()
-    }
-
-    fn realize_all(
-        &self,
-        _from_func: &FunctionRef<'a>,
-        _substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
+    fn realize_unified<'b>(&self, _unified: super::UnifiedRealization<'a, 'b>) -> Self {
         self.clone()
     }
 

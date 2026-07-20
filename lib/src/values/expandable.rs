@@ -4,11 +4,9 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
-    values::{
-        BacktraceContainer, FunctionRef, Mergeable, SelfAwareBacktraceContainer, Upgrade, ValueRef,
-    },
+    values::{BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -126,34 +124,13 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
-        let primary = self.primary.realize(from_func, from_slot, concrete);
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+        let primary = self.primary.realize_unified(unified);
 
         let secondary = self
             .secondary
             .iter()
-            .map(|v| v.realize(from_func, from_slot, concrete))
-            .collect();
-
-        Self { primary, secondary }
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        let primary = self.primary.realize_all(from_func, substitutions);
-
-        let secondary = self
-            .secondary
-            .iter()
-            .map(|v| v.realize_all(from_func, substitutions))
+            .map(|v| v.realize_unified(unified))
             .collect();
 
         Self { primary, secondary }

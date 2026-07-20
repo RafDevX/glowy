@@ -270,39 +270,25 @@ impl<'a> BacktraceContainer<'a> for ChannelValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for ChannelValue<'a> {
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
         let mut realized = self.map_aggregates(|aggregate| {
             // realize all aggregates
-            aggregate.realize(from_func, from_slot, concrete)
+            aggregate.realize_unified(unified)
         });
 
-        if from_slot == SyntheticSlot::CallSiteBranch {
+        if matches!(
+            unified,
+            super::UnifiedRealization::Single {
+                from_slot: SyntheticSlot::CallSiteBranch,
+                ..
+            } | super::UnifiedRealization::Multiple { .. }
+        ) {
             // call-site branch realization is the final step in every existing
             // realization pipeline, so committing here avoids a second
             // deferred-state model while ensuring no unresolved synthetics
             // escape into a concrete channel allocation
             realized.commit_unbound_to_allocations();
         }
-
-        realized
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        #[rustfmt::skip]
-        let mut realized = self.map_aggregates(
-            |aggregate| aggregate.realize_all(from_func, substitutions),
-        );
-
-        realized.commit_unbound_to_allocations();
 
         realized
     }
@@ -485,30 +471,12 @@ impl<'a> ChannelAggregate<'a> {
             .chain(self.capacity.iter())
     }
 
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
         Self::new(
-            self.payload.realize(from_func, from_slot, concrete),
-            self.delivery.realize(from_func, from_slot, concrete),
-            self.occupancy.realize(from_func, from_slot, concrete),
-            self.capacity.realize(from_func, from_slot, concrete),
-        )
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        Self::new(
-            self.payload.realize_all(from_func, substitutions),
-            self.delivery.realize_all(from_func, substitutions),
-            self.occupancy.realize_all(from_func, substitutions),
-            self.capacity.realize_all(from_func, substitutions),
+            self.payload.realize_unified(unified),
+            self.delivery.realize_unified(unified),
+            self.occupancy.realize_unified(unified),
+            self.capacity.realize_unified(unified),
         )
     }
 

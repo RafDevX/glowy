@@ -541,98 +541,33 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
         // we need to recursively realize everything in the outcome, for example
         // to deal with the case where a function returns another function
         // (since then the inner function could depend on the outer's params)
-        let outcome = self.outcome.as_ref().map(|vec| {
-            vec.iter()
-                .map(|val| val.realize(from_func, from_slot, concrete))
-                .collect()
-        });
+        let outcome = self
+            .outcome
+            .as_ref()
+            .map(|vec| vec.iter().map(|val| val.realize_unified(unified)).collect());
 
-        let backtrace = self.backtrace.realize(from_func, from_slot, concrete);
+        let backtrace = self.backtrace.realize_unified(unified);
 
         let deferred_checks = self
             .deferred_checks
             .iter()
-            .filter_map(|check| check.realize(from_func, from_slot, concrete))
+            .filter_map(|check| check.realize_unified(unified))
             .collect();
 
         let captures = self
             .captures
             .iter()
-            .map(|(outer_decl, binding)| {
-                (*outer_decl, binding.realize(from_func, from_slot, concrete))
-            })
+            .map(|(outer_decl, binding)| (*outer_decl, binding.realize_unified(unified)))
             .collect();
 
         let yield_acc = self
             .yield_acc
             .iter()
-            .map(|slot| slot.realize(from_func, from_slot, concrete))
-            .collect();
-
-        Self {
-            r#ref: self.r#ref.clone(),
-            signature: self.signature.clone(),
-            receiver_kind: self.receiver_kind,
-            declared_result_types: self.declared_result_types.clone(),
-            is_type_constructor: self.is_type_constructor,
-            known_underlying_type: self.known_underlying_type.clone(),
-            outcome,
-            backtrace,
-            sources: self.sources.clone(),
-            revocations: self.revocations.clone(),
-            sinks: self.sinks.clone(),
-            deferred_checks,
-            captures,
-            yield_param: self.yield_param,
-            yield_acc,
-            call_count: Rc::clone(&self.call_count), // preserve link to shared val
-        }
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        // we need to recursively realize everything in the outcome, for example
-        // to deal with the case where a function returns another function
-        // (since then the inner function could depend on the outer's params)
-        let outcome = self.outcome.as_ref().map(|values| {
-            values
-                .iter()
-                .map(|value| value.realize_all(from_func, substitutions))
-                .collect()
-        });
-
-        let backtrace = self.backtrace.realize_all(from_func, substitutions);
-
-        let deferred_checks = self
-            .deferred_checks
-            .iter()
-            .filter_map(|check| check.realize_all(from_func, substitutions))
-            .collect();
-
-        let captures = self
-            .captures
-            .iter()
-            .map(|(outer_decl, binding)| {
-                (*outer_decl, binding.realize_all(from_func, substitutions))
-            })
-            .collect();
-
-        let yield_acc = self
-            .yield_acc
-            .iter()
-            .map(|slot| slot.realize_all(from_func, substitutions))
+            .map(|slot| slot.realize_unified(unified))
             .collect();
 
         Self {
@@ -947,12 +882,7 @@ impl<'a> CaptureBinding<'a> {
         );
     }
 
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
         let mut binding = self.clone();
 
         binding.iteration_cell = binding.iteration_cell.map(|symbol| {
@@ -967,7 +897,7 @@ impl<'a> CaptureBinding<'a> {
                 )
             };
 
-            let realized = current.realize(from_func, from_slot, concrete);
+            let realized = current.realize_unified(unified);
 
             if realized.snapshot_aware_eq(&current) {
                 // preserve sharing between closures from the same iteration
@@ -979,55 +909,12 @@ impl<'a> CaptureBinding<'a> {
         });
 
         if let Some(Some(fallback)) = binding.hybrid_fallback() {
-            let realized = fallback.realize(from_func, from_slot, concrete);
+            let realized = unified.dispatch(fallback);
 
             binding.set_hybrid_fallback(realized);
         }
 
-        binding.mutation_backtrace = binding
-            .mutation_backtrace
-            .and_then(|backtrace| backtrace.realize(from_func, from_slot, concrete));
-
-        binding
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        let mut binding = self.clone();
-
-        binding.iteration_cell = binding.iteration_cell.map(|symbol| {
-            let (declared_name, mutable, current, known_const) = {
-                let symbol = symbol.borrow();
-
-                (
-                    symbol.declared_name(),
-                    symbol.mutable(),
-                    symbol.value().get(),
-                    symbol.known_const().cloned(),
-                )
-            };
-
-            let realized = current.realize_all(from_func, substitutions);
-
-            if realized.snapshot_aware_eq(&current) {
-                // preserve sharing between closures from the same iteration
-                // when this realization has nothing to substitute
-                symbol
-            } else {
-                Symbol::new_ref(declared_name, mutable, realized, known_const)
-            }
-        });
-
-        if let Some(Some(fallback)) = binding.hybrid_fallback() {
-            binding.set_hybrid_fallback(fallback.realize_all(from_func, substitutions));
-        }
-
-        binding.mutation_backtrace = binding
-            .mutation_backtrace
-            .and_then(|backtrace| backtrace.realize_all(from_func, substitutions));
+        binding.mutation_backtrace = binding.mutation_backtrace.realize_unified(unified);
 
         binding
     }

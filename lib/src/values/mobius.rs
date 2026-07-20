@@ -4,11 +4,9 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
-    values::{
-        BacktraceContainer, FunctionRef, Mergeable, SelfAwareBacktraceContainer, Upgrade, ValueRef,
-    },
+    values::{BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, Upgrade, ValueRef},
 };
 
 // represents a value of unknown, adaptable cardinality -- similar to an
@@ -107,32 +105,13 @@ impl<'a> BacktraceContainer<'a> for MobiusValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
-    fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Self {
-        let inner = self.inner.realize(from_func, from_slot, concrete);
+    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+        let inner = self.inner.realize_unified(unified);
+
         let overrides = self
             .overrides
             .iter()
-            .map(|(index, value)| (*index, value.realize(from_func, from_slot, concrete)))
-            .collect();
-
-        Self { inner, overrides }
-    }
-
-    fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Self {
-        let inner = self.inner.realize_all(from_func, substitutions);
-        let overrides = self
-            .overrides
-            .iter()
-            .map(|(index, value)| (*index, value.realize_all(from_func, substitutions)))
+            .map(|(index, value)| (*index, value.realize_unified(unified)))
             .collect();
 
         Self { inner, overrides }

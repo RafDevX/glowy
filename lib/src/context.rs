@@ -14,13 +14,13 @@ use self::per_iteration::PerIterationBindings;
 use crate::{
     FullPackagePath, Pinned, SinkDescriptor, decls,
     errors::{AnalysisError, AnalysisErrorKind},
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::{BlanketDirective, BlanketDirectives},
     snapshots::SnapshotAware,
     symbols::{SymbolRef, SymbolTable},
     taint::{DeferredCallReferents, GotoConvergenceState, ResolvedCall},
     types::TypeRegistry,
-    values::{FunctionRef, SelfAwareBacktraceContainer, ValueRef},
+    values::{self, FunctionRef, SelfAwareBacktraceContainer, ValueRef},
 };
 
 mod per_iteration;
@@ -797,16 +797,11 @@ pub enum DeferredEnforcementCheck<'a> {
 impl<'a> DeferredEnforcementCheck<'a> {
     // might return None if a sink enforcement check no longer makes sense
     // (`found` is now Bottom, so the check would always pass)
-    pub fn realize(
-        &self,
-        from_func: &FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&LabelBacktrace<'a>>,
-    ) -> Option<Self> {
+    pub fn realize_unified<'b>(&self, unified: values::UnifiedRealization<'a, 'b>) -> Option<Self> {
         let realized = match self {
             Self::Sink { sink, found, file } => Self::Sink {
                 sink: sink.clone(),
-                found: found.realize(from_func, from_slot, concrete)?,
+                found: unified.dispatch(found)?,
                 file,
             },
             Self::Assertion {
@@ -816,36 +811,7 @@ impl<'a> DeferredEnforcementCheck<'a> {
                 location,
             } => Self::Assertion {
                 expected_sequence: expected_sequence.clone(),
-                found: found.realize(from_func, from_slot, concrete),
-                file,
-                location: location.clone(),
-            },
-        };
-
-        Some(realized)
-    }
-
-    pub fn realize_all(
-        &self,
-        from_func: &FunctionRef<'a>,
-        substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
-    ) -> Option<Self> {
-        let realized = match self {
-            Self::Sink { sink, found, file } => Self::Sink {
-                sink: sink.clone(),
-                found: found.realize_all(from_func, substitutions)?,
-                file,
-            },
-            Self::Assertion {
-                expected_sequence,
-                found,
-                file,
-                location,
-            } => Self::Assertion {
-                expected_sequence: expected_sequence.clone(),
-                found: found
-                    .as_ref()
-                    .and_then(|backtrace| backtrace.realize_all(from_func, substitutions)),
+                found: found.realize_unified(unified),
                 file,
                 location: location.clone(),
             },
