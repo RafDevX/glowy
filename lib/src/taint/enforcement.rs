@@ -22,6 +22,30 @@ pub fn trigger_sink<'a>(
     );
 
     let label = found.as_ref().map_or(&Label::Bottom, LabelBacktrace::label);
+    let pruned = label.prune_synthetics();
+
+    if !sink.accepts(&pruned) {
+        // synthetic tags can add more concrete taint when realized, but they
+        // cannot remove a violation already demonstrated by concrete tags.
+        // report that definite violation now instead of deferring it (which
+        // may never be replayed for externally registered callbacks)
+
+        ctx.record_saw_enforcement_check();
+
+        // since synthetics may still be present, we don't want to include them
+        // in the consumer-facing error, especially since we know they're
+        // irrelevant for this failure (only concretes matter)
+        let found = found.and_then(|bt| bt.restrict_to_label(&pruned)).unwrap();
+        // ^ unwrap is safe, since Bottom is always accepted (there must be at
+        // least one concrete present, causing this insecure flow)
+
+        ctx.report_error(AnalysisErrorKind::InsecureFlow {
+            sink: sink.into_owned(),
+            backtrace: found,
+        });
+
+        return;
+    }
 
     if label.has_any_synthetic() {
         // we cannot evaluate this sink at this point in time, since the passed
@@ -37,16 +61,6 @@ pub fn trigger_sink<'a>(
     }
 
     ctx.record_saw_enforcement_check();
-
-    if sink.accepts(label) {
-        // all good! value's label is compatible with the sink
-        return;
-    }
-
-    ctx.report_error(AnalysisErrorKind::InsecureFlow {
-        sink: sink.into_owned(),
-        backtrace: found.unwrap(), // safe, guaranteed by comparison above
-    });
 }
 
 pub fn trigger_assertion<'a>(

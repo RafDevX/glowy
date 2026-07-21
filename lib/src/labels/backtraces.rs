@@ -382,7 +382,7 @@ impl<'a> LabelBacktrace<'a> {
     /// Returns a new instance whose label only contains tags in a given
     /// constraint, pruning children if they would have [`Label::Bottom`].
     #[must_use]
-    fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
+    pub(crate) fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
         if self.label.is_subset_of(constraint) {
             // we already meet this restriction, so prevent recursion and avoid
             // all the downstream allocations / intersections / etc.

@@ -655,6 +655,24 @@ impl<'a> Label<'a> {
 
         Self::Tags(discard_wildcard_specializations(rebound))
     }
+
+    pub(crate) fn prune_synthetics(&self) -> Self {
+        let Self::Tags(tags) = self else {
+            return Self::Bottom;
+        };
+
+        let tags: BTreeSet<_> = tags
+            .iter()
+            .filter(|tag| !matches!(tag, LabelTag::Synthetic { .. }))
+            .cloned()
+            .collect();
+
+        if tags.is_empty() {
+            Self::Bottom
+        } else {
+            Self::Tags(tags)
+        }
+    }
 }
 
 impl PartialOrd for Label<'_> {
