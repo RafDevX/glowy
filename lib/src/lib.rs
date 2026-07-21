@@ -38,7 +38,7 @@
     clippy::create_dir,
     clippy::dbg_macro,
     clippy::decimal_literal_representation,
-    clippy::default_numeric_fallback, // probably not?
+    clippy::default_numeric_fallback,
     clippy::deref_by_slicing,
     clippy::doc_include_without_cfg,
     clippy::doc_paragraphs_missing_punctuation,
