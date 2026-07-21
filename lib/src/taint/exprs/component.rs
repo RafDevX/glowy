@@ -146,10 +146,12 @@ pub fn visit_selection_with_base<'a>(
     // unknown to us (no declared type, or an external placeholder), and also
     // when we do know it's a struct; otherwise upgrading would be known wrong
 
-    // if there are sinks configured, this is probably not a field access
+    // directives that depend on call semantics demonstrate that this is not a
+    // field access. unconditional sources/revocations are deliberately omitted
+    // because they can legitimately target fields (e.g., Request.Body)
     // (we short-circuit if we already know the shape is not plausible)
-    let has_type_member_sink = !struct_shape_plausible
-        && type_member_directives
+    let requires_call_resolution = !struct_shape_plausible
+        || type_member_directives
             .iter()
             .copied()
             .flatten()
@@ -157,11 +159,11 @@ pub fn visit_selection_with_base<'a>(
                 matches!(
                     directive.kind(),
                     BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink
-                )
+                ) || directive.should_resolve_at_call_time()
             });
 
     if struct_shape_plausible
-        && !has_type_member_sink
+        && !requires_call_resolution
         && let Some(r#struct) = base.as_struct()
     {
         let value = r#struct.get_const(&selector.to_owned(), location.clone());
