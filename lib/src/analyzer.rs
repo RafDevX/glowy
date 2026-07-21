@@ -284,6 +284,10 @@ impl Analyzer {
     /// real files and directories are considered: symlinks, for example, are
     /// ignored, since they could lead to cycles.
     ///
+    /// If a subdirectory of the provided module directory is found to contain a
+    /// nested `go.mod`, then that subdirectory is considered a separate
+    /// submodule and thus skipped from traversal.
+    ///
     /// Internally, this method uses [`Analyzer::from_go_mod`] and
     /// [`SourceFile::read_from_disk`], so their respective conditions apply.
     ///
@@ -459,6 +463,14 @@ impl Analyzer {
                 reason = "Symlinks currently unsupported (could lead to cycles)"
             )]
             if file_type.is_dir() {
+                if fs::exists(entry.path().join("go.mod"))? {
+                    // this is a submodule, ignore it
+                    // (technically we should allow directories called `go.mod`
+                    // but it is very unlikely that one exists, and in any case
+                    // this is just a convenience method; alternatives exist)
+                    return Ok(());
+                }
+
                 self.add_directory_recurs(
                     virtual_path.as_ref().join(entry.file_name()),
                     entry.path(),
