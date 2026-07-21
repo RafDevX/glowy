@@ -68,7 +68,7 @@ impl BlanketDirective {
         result_selector: BTreeSet<usize>,
         arg_index: Option<usize>,
         arg_predicate: Option<BlanketSourceArgPredicate>,
-        label: Label<'static>,
+        mut label: Label<'static>,
     ) -> Self {
         let (arg_index, arg_predicate, result_selector) = match kind {
             // non-sinks don't have a meaningful notion of "this arg only"
@@ -81,6 +81,10 @@ impl BlanketDirective {
                 (arg_index, None, BTreeSet::new())
             }
         };
+
+        if kind.accepts_wildcards() {
+            label.accept_wildcards();
+        }
 
         Self {
             kind,
@@ -122,4 +126,13 @@ pub enum BlanketDirectiveKind {
     Revocation,
     AllowSink,
     DenySink,
+}
+
+impl BlanketDirectiveKind {
+    pub fn accepts_wildcards(self) -> bool {
+        match self {
+            Self::Source => false,
+            Self::Revocation | Self::AllowSink | Self::DenySink => true,
+        }
+    }
 }

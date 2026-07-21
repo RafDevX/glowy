@@ -459,8 +459,8 @@ fn build_blanket_source_backtrace<'a>(
     )
 }
 
-fn build_blanket_revocation_label<'a>(directives: &'a [BlanketDirective]) -> Label<'a> {
-    let mut label: Label<'a> = directives
+fn build_blanket_revocation_label(directives: &[BlanketDirective]) -> Label<'_> {
+    directives
         .iter()
         .filter(|directive| {
             // only unconditional blanket revocations matter here
@@ -468,11 +468,7 @@ fn build_blanket_revocation_label<'a>(directives: &'a [BlanketDirective]) -> Lab
                 && !directive.should_resolve_at_call_time()
         })
         .map(BlanketDirective::label)
-        .sum();
-
-    label.accept_wildcards();
-
-    label
+        .sum()
 }
 
 fn visit_make_with_revocations<'a>(

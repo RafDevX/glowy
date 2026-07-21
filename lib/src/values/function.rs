@@ -279,24 +279,18 @@ impl<'a> FunctionValue<'a> {
                     }
                 }
                 BlanketDirectiveKind::Revocation => {
-                    let mut label = directive.label().clone();
-                    label.accept_wildcards();
-
                     self.add_revocation(InherentSourceOrRevocation {
-                        label,
+                        label: directive.label().clone(),
                         predicate: directive.arg_predicate().cloned(),
                         result_selector: directive.result_selector().clone(),
                     });
                 }
                 BlanketDirectiveKind::AllowSink | BlanketDirectiveKind::DenySink => {
-                    let mut label = directive.label().clone();
-                    label.accept_wildcards();
-
                     // we don't use InherentSink::new because we already have a
                     // Label, there is no need to convert tags back and forth
                     self.add_sink(InherentSink {
                         allow: directive.kind() == BlanketDirectiveKind::AllowSink,
-                        label,
+                        label: directive.label().clone(),
                         arg_index: directive.arg_index(),
                     });
                 }
