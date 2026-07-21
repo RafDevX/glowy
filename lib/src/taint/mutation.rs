@@ -319,6 +319,14 @@ impl<'a> LeftValue<'a> for Span<'a> {
                     )
             };
 
+            // assignment changes a variable's value, not its declared type, so
+            // we reserve explicit type information from the target while still
+            // allowing inferred declarations (whose target has no type yet)
+            // to retain the type carried by their initializer
+            if let Some(declared_type) = target.declared_type().cloned() {
+                mutated.set_declared_type(declared_type);
+            }
+
             // apply revocation
             mutated.subtract_label(subtract);
 
