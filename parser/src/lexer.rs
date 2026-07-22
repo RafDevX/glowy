@@ -1070,7 +1070,25 @@ impl<'a> Iterator for Lexer<'a> {
                 return self.next();
             }
             Some(_) => return Some(Err(LexingError::UnknownChar(self.read_span().unwrap()))),
-            None => return None,
+            None => {
+                if self
+                    .last_token_kind
+                    .as_ref()
+                    .is_some_and(TokenKind::allows_implicit_semicolon)
+                {
+                    let token = Token::new(
+                        TokenKind::SemiColon,
+                        Span::new(self.src.as_str(), self.offset, self.line),
+                    );
+
+                    self.last_token_kind = Some(TokenKind::SemiColon);
+                    self.last_annotation.take();
+
+                    return Some(Ok(token));
+                }
+
+                return None;
+            }
         };
 
         self.last_token_kind = Some(token.kind.clone());
@@ -1151,7 +1169,8 @@ mod tests {
         assert_eq!(
             vec![
                 Token::new(TokenKind::Package, Span::new("package", 2, 1)),
-                Token::new(TokenKind::Ident, Span::new("hello", 16, 3))
+                Token::new(TokenKind::Ident, Span::new("hello", 16, 3)),
+                Token::new(TokenKind::SemiColon, Span::new("", 21, 3)),
             ],
             lex("  package    \t\n\nhello").unwrap(),
         );
@@ -1168,7 +1187,8 @@ mod tests {
                 Token::new(TokenKind::Int(3909), Span::new("0xf45", 21, 1)),
                 Token::new(TokenKind::SemiColon, Span::new("\n", 26, 1)),
                 Token::new(TokenKind::Int(123), Span::new("0123", 28, 2)),
-                Token::new(TokenKind::Int(0), Span::new("0", 33, 2))
+                Token::new(TokenKind::Int(0), Span::new("0", 33, 2)),
+                Token::new(TokenKind::SemiColon, Span::new("", 34, 2)),
             ],
             lex("\t 3 50 0b11101 0o771 0xf45\n 0123 0").unwrap()
         );
@@ -1199,6 +1219,7 @@ mod tests {
                     TokenKind::Float(0.124_984_741_210_937_5),
                     Span::new("0X1FFFP-16", 108, 2)
                 ),
+                Token::new(TokenKind::SemiColon, Span::new("", 118, 2)),
             ],
             lex(concat!(
                 "\t 0. 72.40 072.40 2.71828 1.e+0\n 6.6742e-11 1E6 .25 .12345E+5 15. 0.15e+02",
@@ -1226,6 +1247,7 @@ mod tests {
                     TokenKind::Float(0.124_984_741_210_937_5),
                     Span::new("0X_1FFFP-16", 56, 2)
                 ),
+                Token::new(TokenKind::SemiColon, Span::new("", 67, 2)),
             ],
             lex(concat!(
                 "\t 4_2 0_600 0xBad_Face 170_141183_460469\n",
@@ -1258,6 +1280,7 @@ mod tests {
                     TokenKind::Rune('\u{101234}'),
                     Span::new("'\\U00101234'", 86, 2)
                 ),
+                Token::new(TokenKind::SemiColon, Span::new("", 100, 2)),
             ],
             lex(
                 "\t 'a' '\\a' '\\n'\n '\\'' 'ä' '本' '\\t' '\t' '\\000' '\\007' '\\377' '\\x07' \
@@ -1356,6 +1379,7 @@ mod tests {
                 Token::new(TokenKind::String(s!("a\nb")), Span::new("`a\n\rb`", 94, 3)),
                 Token::new(TokenKind::String(s!("")), Span::new("\"\"", 101, 4)),
                 Token::new(TokenKind::String(s!("")), Span::new("``", 104, 4)),
+                Token::new(TokenKind::SemiColon, Span::new("", 108, 4)),
             ],
             lex(
                 "  \t `abc` `\\n\n\\n` \"\\n\" \"\\\"\"\n \"Hello, world!\\n\" \"日本語\" \
