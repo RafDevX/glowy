@@ -636,12 +636,11 @@ mod tests {
 
     #[test]
     fn parses_qualified_method_path() {
-        let target: BlanketDirectiveTarget =
-            "github.com/gin-gonic/gin.Context.Query".parse().unwrap();
+        let target: BlanketDirectiveTarget = "example.com/dir/proj.Context.Query".parse().unwrap();
         assert_eq!(
             target,
             BlanketDirectiveTarget::new_for_sink(
-                "github.com/gin-gonic/gin",
+                "example.com/dir/proj",
                 Some("Context"),
                 "Query",
                 None,
@@ -658,7 +657,7 @@ mod tests {
             "example.com/a/b/pkg.Fn#0",
             "database/sql.DB.Query",
             "database/sql.DB.QueryContext#1",
-            "github.com/gin-gonic/gin.Context.Query",
+            "example.com/dir/proj.Context.Query",
         ] {
             let target: BlanketDirectiveTarget = input.parse().unwrap();
             assert_eq!(target.to_string(), input);
