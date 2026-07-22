@@ -266,6 +266,7 @@ pub enum ExprNode<'a> {
     Literal(LiteralNode<'a>),
     Call(CallNode<'a>),
     Make(MakeNode<'a>),
+    New(NewNode<'a>),
     Selection(SelectionNode<'a>),
     Indexing(IndexingNode<'a>),
     Slicing(SlicingNode<'a>),
@@ -316,6 +317,7 @@ impl ExprNode<'_> {
             | ExprNode::BinaryOp { location, .. } => location,
             ExprNode::Call(call) => &call.location,
             ExprNode::Make(make) => &make.location,
+            ExprNode::New(new) => &new.location,
             ExprNode::Selection(selection) => &selection.location,
             ExprNode::Indexing(indexing) => &indexing.location,
             ExprNode::Slicing(slicing) => &slicing.location,
@@ -391,6 +393,13 @@ impl<'a> From<MakeNode<'a>> for ExprNode<'a> {
     #[inline]
     fn from(node: MakeNode<'a>) -> Self {
         Self::Make(node)
+    }
+}
+
+impl<'a> From<NewNode<'a>> for ExprNode<'a> {
+    #[inline]
+    fn from(node: NewNode<'a>) -> Self {
+        Self::New(node)
     }
 }
 
@@ -560,14 +569,23 @@ pub struct CallNode<'a> {
     pub annotation: Option<Box<Annotation<'a>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 // technically this should be a CallNode per the spec, but since the first
 // argument is a type, and since this function has special implications, we just
 // treat it as another kind of expression (not a function call)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MakeNode<'a> {
     pub r#type: TypeNode<'a>,
     pub n: Option<Box<ExprNode<'a>>>,
     pub m: Option<Box<ExprNode<'a>>>,
+    pub location: Location, // for better error messages
+}
+
+// technically this should be a CallNode per the spec, but since the first
+// argument is a type, and since this function has special implications, we just
+// treat it as another kind of expression (not a function call)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewNode<'a> {
+    pub r#type: TypeNode<'a>,
     pub location: Location, // for better error messages
 }
 

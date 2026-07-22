@@ -2,19 +2,21 @@ use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        AmbiguousBracketAccessNode, CallNode, ExprNode, IndexingNode, MakeNode, SelectionNode,
-        SlicingNode, TypeAssertionNode, TypeInstantiationNode, TypeNode,
+        AmbiguousBracketAccessNode, CallNode, ExprNode, IndexingNode, MakeNode, NewNode,
+        SelectionNode, SlicingNode, TypeAssertionNode, TypeInstantiationNode, TypeNode,
     },
     parser::{BacktrackingContext, PResult, expect, of_kind, types::parse_type},
     token::TokenKind,
 };
 
 fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let ExprNode::Name(id) = func
-        && id.content() == "make"
-    {
-        // make(T, ...) is treated specially, not as a function call
-        return Ok(parse_make(s, id.location().start)?.into());
+    if let ExprNode::Name(id) = func {
+        // make(T, ...) and new(T) are treated specially, not as a function call
+        match id.content() {
+            "make" => return Ok(parse_make(s, id.location().start)?.into()),
+            "new" => return Ok(parse_new(s, id.location().start)?.into()),
+            _ => {}
+        }
     }
 
     expect(s, TokenKind::ParenL, Some("function call"))?;
@@ -82,12 +84,9 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
     let n = parse_opt_param!();
     let m = parse_opt_param!();
 
-    let end = expect(s, TokenKind::ParenR, Some("make call"))?;
+    expect(s, TokenKind::ParenR, Some("make call"))?;
 
-    // we can't use TokenStream::location_since because we don't actually have a
-    // start token, just a start location, so we need to build a location
-    // manually ourselves based on provided start and the closing paren token
-    let location = start..end.span.location().end;
+    let location = s.location_starting_at(start);
 
     Ok(MakeNode {
         r#type,
@@ -95,6 +94,18 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
         m,
         location,
     })
+}
+
+fn parse_new<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, NewNode<'a>> {
+    expect(s, TokenKind::ParenL, Some("new call"))?;
+
+    let r#type = parse_type(s)?;
+
+    expect(s, TokenKind::ParenR, Some("new call"))?;
+
+    let location = s.location_starting_at(start);
+
+    Ok(NewNode { r#type, location })
 }
 
 fn parse_selection<'a>(
