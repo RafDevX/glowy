@@ -59,10 +59,16 @@ pub fn visit_make<'a>(
         TypeNode::Map { .. } => visit_make_map(ctx, node, arg_consts, declared_type),
         TypeNode::Channel { .. } => visit_make_channel(ctx, node, arg_consts, declared_type),
         _ => {
-            // we don't know what this is, so there's nothing we can do...
-            ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
-                location: node.location.clone(),
-            });
+            // do not report an error for unresolved external types: since we
+            // assume the input program compiles and we cannot know/prove that
+            // it wouldn't (since we cannot resolve types defined in files not
+            // under analysis), then don't report an error when it's almost
+            // surely a false positive -- just compute the conservative fallback
+            if resolved.is_some() || !declared_type.as_deref().is_some_and(TypeInfo::is_external) {
+                ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
+                    location: node.location.clone(),
+                });
+            }
 
             let n = node.n.as_ref().and_then(|expr| {
                 capture_arg_const(ctx, expr, arg_consts, 1);
