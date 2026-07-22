@@ -457,12 +457,28 @@ impl Analyzer {
         for entry in fs::read_dir(real_path)? {
             let entry = entry?;
             let file_type = entry.file_type()?;
+            let file_name = entry.file_name();
+
+            if file_name
+                .to_str()
+                .is_some_and(|name| name.starts_with('.') || name.starts_with('_'))
+            {
+                // the `go` tool ignores any directory or files whose name
+                // starts with . or _, so we also ignore them here
+                continue;
+            }
 
             #[expect(
                 clippy::filetype_is_file,
                 reason = "Symlinks currently unsupported (could lead to cycles)"
             )]
             if file_type.is_dir() {
+                if file_name.to_str() == Some("testdata") {
+                    // the `go` tool ignores any directory whose name is exactly
+                    // "testdata", so we also ignore them here
+                    continue;
+                }
+
                 if fs::exists(entry.path().join("go.mod"))? {
                     // this is a submodule, ignore it
                     // (technically we should allow directories called `go.mod`
@@ -481,8 +497,6 @@ impl Analyzer {
                 if file_real_path.extension().is_none_or(|ext| ext != "go") {
                     continue;
                 }
-
-                let file_name = entry.file_name();
 
                 if !self.include_tests
                     && file_name
