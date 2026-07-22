@@ -140,8 +140,8 @@ inherit_base_policy = false
 # ==============================================================================
 
 # --- Secret disclosure: stdout and standard loggers ---------------------------
-"builtins.print" = ["secret:*"]
-"builtins.println" = ["secret:*"]
+"builtin.print" = ["secret:*"]
+"builtin.println" = ["secret:*"]
 "fmt.Print" = ["secret:*"]
 "fmt.Println" = ["secret:*"]
 "fmt.Printf" = ["secret:*"]
