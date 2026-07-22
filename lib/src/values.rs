@@ -46,6 +46,7 @@ mod slice;
 
 thread_local! {
     static BACKTRACE_TRAVERSAL_CACHE: RefCell<BacktraceTraversalCache> = RefCell::new(BacktraceTraversalCache::default());
+    static SNAPSHOT_COMPARISON_CACHE: RefCell<SnapshotComparisonCache> = RefCell::new(SnapshotComparisonCache::default());
 }
 
 type ValueCacheKey = *const ();
@@ -820,7 +821,40 @@ impl SnapshotAware for ValueRef<'_> {
             return true;
         }
 
-        self.value.borrow().snapshot_aware_eq(&other.value.borrow())
+        let pair = (self.value_cache_key(), other.value_cache_key());
+
+        // recursively calculating equality can be very expensive, so we use a
+        // cache to prevent re-doing any calculations if we already have
+        let should_compare = SNAPSHOT_COMPARISON_CACHE.with(|comparison| {
+            let mut comparison = comparison.borrow_mut();
+
+            if comparison.active.is_empty() {
+                comparison.known_equal.clear();
+            }
+
+            !comparison.known_equal.contains(&pair) && comparison.active.insert(pair)
+        });
+
+        if !should_compare {
+            // reaching the same pair through a cycle establishes no new
+            // inequality. completed equal pairs also remain equal wherever a
+            // shared subgraph is encountered again in this comparison
+            return true;
+        }
+
+        // removes `pair` from comparison.active when Drop'd, so that the cache
+        // can be automatically cleared when active is empty
+        let _guard = SnapshotComparisonCacheGuard(pair);
+
+        let equal = self.value.borrow().snapshot_aware_eq(&other.value.borrow());
+
+        if equal {
+            SNAPSHOT_COMPARISON_CACHE.with(|comparison| {
+                comparison.borrow_mut().known_equal.insert(pair);
+            });
+        }
+
+        equal
     }
 }
 
@@ -926,6 +960,24 @@ impl Drop for BacktraceTraversalCacheGuard {
     fn drop(&mut self) {
         BACKTRACE_TRAVERSAL_CACHE.with(|traversal| {
             traversal.borrow_mut().depth -= 1;
+        });
+    }
+}
+
+type ValueIdentityPair = (*const (), *const ());
+
+#[derive(Default)]
+struct SnapshotComparisonCache {
+    active: HashSet<ValueIdentityPair>,
+    known_equal: HashSet<ValueIdentityPair>,
+}
+
+struct SnapshotComparisonCacheGuard(ValueIdentityPair);
+
+impl Drop for SnapshotComparisonCacheGuard {
+    fn drop(&mut self) {
+        SNAPSHOT_COMPARISON_CACHE.with(|comparison| {
+            comparison.borrow_mut().active.remove(&self.0);
         });
     }
 }
