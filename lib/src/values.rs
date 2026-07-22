@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     cell::{Ref, RefCell, RefMut},
+    collections::HashSet,
     fmt,
     hash::Hash,
     iter,
@@ -42,6 +43,10 @@ mod package_ref;
 mod realization;
 mod shapes;
 mod slice;
+
+thread_local! {
+    static BACKTRACE_TRAVERSAL_CACHE: RefCell<BacktraceTraversalCache> = RefCell::new(BacktraceTraversalCache::default());
+}
 
 type ValueCacheKey = *const ();
 
@@ -133,6 +138,39 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn backtrace(&self) -> Option<LabelBacktrace<'a>> {
+        let cache_key = self.value_cache_key();
+
+        // recursively calculating a Value's backtrace can be very expensive, so
+        // we use a cache to prevent re-doing any calculations
+        let should_visit = BACKTRACE_TRAVERSAL_CACHE.with(|traversal| {
+            let mut traversal = traversal.borrow_mut();
+
+            if traversal.depth == 0 {
+                traversal.visited.clear();
+            }
+
+            if !traversal.visited.insert(cache_key) {
+                // already visited this value
+                return false;
+            }
+
+            traversal.depth += 1;
+
+            true
+        });
+
+        if !should_visit {
+            // every reference to the same Value allocation has the same label,
+            // and backtraces maintain the invariant that children are disjoint,
+            // so revisiting shared values cannot add information.
+            // this is also good to terminate cyclic graphs
+            return None;
+        }
+
+        // re-decrements traversal.depth when Drop'd, so that the cache can be
+        // automatically cleared when depth reaches 0 before the next recursion
+        let _guard = BacktraceTraversalCacheGuard;
+
         self.value
             .borrow()
             .backtrace_at_location(self.location.clone())
@@ -873,6 +911,22 @@ trait Upgrade<'a> {
 impl<'a, T: Upgrade<'a>> Upgrade<'a> for Box<T> {
     fn upgrade(backtrace: Option<LabelBacktrace<'a>>, location: Cow<Pinned<'a, Location>>) -> Self {
         Self::new(T::upgrade(backtrace, location))
+    }
+}
+
+#[derive(Default)]
+struct BacktraceTraversalCache {
+    depth: usize,
+    visited: HashSet<ValueCacheKey>,
+}
+
+struct BacktraceTraversalCacheGuard;
+
+impl Drop for BacktraceTraversalCacheGuard {
+    fn drop(&mut self) {
+        BACKTRACE_TRAVERSAL_CACHE.with(|traversal| {
+            traversal.borrow_mut().depth -= 1;
+        });
     }
 }
 
