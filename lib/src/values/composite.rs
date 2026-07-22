@@ -297,7 +297,7 @@ impl<'a, K: Eq + Hash> BacktraceContainer<'a> for CompositeValue<'a, K> {
 }
 
 impl<'a, K: Eq + Hash + Clone> SelfAwareBacktraceContainer<'a> for CompositeValue<'a, K> {
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         let r#const = self
             .r#const
             .iter()

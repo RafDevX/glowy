@@ -493,15 +493,12 @@ fn handle_deferred_checks<'a>(
         )
         .collect();
 
+    let mut realization = UnifiedRealization::multiple(func.r#ref(), &substitutions);
+
     let deferred_checks: Vec<_> = func
         .deferred_checks()
         .iter()
-        .filter_map(|check| {
-            check.realize_unified(UnifiedRealization::Multiple {
-                from_func: func.r#ref(),
-                substitutions: &substitutions,
-            })
-        })
+        .filter_map(|check| check.realize_unified(&mut realization))
         .collect();
 
     // we don't need to -1 because this value is before the call count has been

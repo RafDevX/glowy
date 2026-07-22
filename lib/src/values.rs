@@ -22,6 +22,7 @@ pub use self::{
     },
     mobius::MobiusValue,
     package_ref::PackageRefValue,
+    realization::UnifiedRealization,
     shapes::Value,
     slice::{SliceBound, SliceValue},
 };
@@ -38,10 +39,12 @@ mod expandable;
 mod function;
 mod mobius;
 mod package_ref;
+mod realization;
 mod shapes;
 mod slice;
 
-// wrapper struct (vs. type alias) allows impl'ing despite orphan rule
+type ValueCacheKey = *const ();
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ValueRef<'a> {
     value: Rc<RefCell<Value<'a>>>,
@@ -202,6 +205,10 @@ impl<'a> ValueRef<'a> {
 
     pub fn shares_inner_with(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.value, &other.value)
+    }
+
+    fn value_cache_key(&self) -> ValueCacheKey {
+        Rc::as_ptr(&self.value).cast()
     }
 
     pub fn try_upgrade_to_channel(&self) {
@@ -616,7 +623,7 @@ pub trait SelfAwareBacktraceContainer<'a>: Sized + BacktraceContainer<'a> {
     // the two implementations for `realize` and `realize_all` would be
     // completely identical except for whether to call `realize` / `realize_all`
     // when recursing the call downstream into the value's sub-values
-    fn realize_unified<'b>(&self, unified: UnifiedRealization<'a, 'b>) -> Self;
+    fn realize_unified<'b>(&self, unified: &mut UnifiedRealization<'a, 'b>) -> Self;
 
     fn realize(
         &self,
@@ -624,11 +631,9 @@ pub trait SelfAwareBacktraceContainer<'a>: Sized + BacktraceContainer<'a> {
         from_slot: SyntheticSlot,
         concrete: Option<&LabelBacktrace<'a>>,
     ) -> Self {
-        self.realize_unified(UnifiedRealization::Single {
-            from_func,
-            from_slot,
-            concrete,
-        })
+        let mut realization = UnifiedRealization::single(from_func, from_slot, concrete);
+
+        self.realize_unified(&mut realization)
     }
 
     fn realize_all(
@@ -636,10 +641,9 @@ pub trait SelfAwareBacktraceContainer<'a>: Sized + BacktraceContainer<'a> {
         from_func: &FunctionRef<'a>,
         substitutions: &[(SyntheticSlot, Option<&LabelBacktrace<'a>>)],
     ) -> Self {
-        self.realize_unified(UnifiedRealization::Multiple {
-            from_func,
-            substitutions,
-        })
+        let mut realization = UnifiedRealization::multiple(from_func, substitutions);
+
+        self.realize_unified(&mut realization)
     }
 
     fn realize_with_shape_preservation(
@@ -675,42 +679,13 @@ pub trait SelfAwareBacktraceContainer<'a>: Sized + BacktraceContainer<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum UnifiedRealization<'a, 'b> {
-    Single {
-        from_func: &'b FunctionRef<'a>,
-        from_slot: SyntheticSlot,
-        concrete: Option<&'b LabelBacktrace<'a>>,
-    },
-    Multiple {
-        from_func: &'b FunctionRef<'a>,
-        substitutions: &'b [(SyntheticSlot, Option<&'b LabelBacktrace<'a>>)],
-    },
-}
-
-impl<'a> UnifiedRealization<'a, '_> {
-    pub fn dispatch(&self, backtrace: &LabelBacktrace<'a>) -> Option<LabelBacktrace<'a>> {
-        match self {
-            UnifiedRealization::Single {
-                from_func,
-                from_slot,
-                concrete,
-            } => backtrace.realize(from_func, *from_slot, *concrete),
-            UnifiedRealization::Multiple {
-                from_func,
-                substitutions,
-            } => backtrace.realize_all(from_func, substitutions),
-        }
-    }
-}
-
 impl<'a> SelfAwareBacktraceContainer<'a> for ValueRef<'a> {
-    fn realize_unified<'b>(&self, unified: UnifiedRealization<'a, 'b>) -> Self {
-        Self::new(
-            self.value.borrow().realize_unified(unified),
-            self.location.clone(),
-            self.declared_type.clone(), // cheap
-        )
+    fn realize_unified<'b>(&self, unified: &mut UnifiedRealization<'a, 'b>) -> Self {
+        Self {
+            value: unified.realize_with_cache(self),
+            location: self.location.clone(),
+            declared_type: self.declared_type.clone(), // cheap
+        }
     }
 
     fn realize_with_shape_preservation(
@@ -833,7 +808,7 @@ impl<'a> BacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
 
 impl<'a> SelfAwareBacktraceContainer<'a> for Option<LabelBacktrace<'a>> {
     // undo unification only at leaf values (backtraces themselves)
-    fn realize_unified<'b>(&self, unified: UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut UnifiedRealization<'a, 'b>) -> Self {
         unified.dispatch(self.as_ref()?)
     }
 

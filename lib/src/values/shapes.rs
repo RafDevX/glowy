@@ -109,7 +109,7 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
     // would prefer using `self.sub_container().method(...)`, but this trait
     // isn't dyn-compatible, so we must use a macro instead
 
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         macro_rules! recurs {
             ($sub:expr) => {
                 $sub.realize_unified(unified)

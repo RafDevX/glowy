@@ -44,7 +44,7 @@ impl<'a> BacktraceContainer<'a> for PackageRefValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for PackageRefValue<'a> {
-    fn realize_unified<'b>(&self, _unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, _unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         self.clone()
     }
 

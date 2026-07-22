@@ -124,7 +124,7 @@ impl<'a> BacktraceContainer<'a> for ExpandableValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for ExpandableValue<'a> {
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         let primary = self.primary.realize_unified(unified);
 
         let secondary = self

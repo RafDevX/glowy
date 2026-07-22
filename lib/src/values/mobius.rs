@@ -105,7 +105,7 @@ impl<'a> BacktraceContainer<'a> for MobiusValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for MobiusValue<'a> {
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         let inner = self.inner.realize_unified(unified);
 
         let overrides = self

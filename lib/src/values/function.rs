@@ -541,7 +541,7 @@ impl<'a> BacktraceContainer<'a> for FunctionValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for FunctionValue<'a> {
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         // we need to recursively realize everything in the outcome, for example
         // to deal with the case where a function returns another function
         // (since then the inner function could depend on the outer's params)
@@ -882,7 +882,7 @@ impl<'a> CaptureBinding<'a> {
         );
     }
 
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         let mut binding = self.clone();
 
         binding.iteration_cell = binding.iteration_cell.map(|symbol| {

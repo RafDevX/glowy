@@ -797,7 +797,10 @@ pub enum DeferredEnforcementCheck<'a> {
 impl<'a> DeferredEnforcementCheck<'a> {
     // might return None if a sink enforcement check no longer makes sense
     // (`found` is now Bottom, so the check would always pass)
-    pub fn realize_unified<'b>(&self, unified: values::UnifiedRealization<'a, 'b>) -> Option<Self> {
+    pub fn realize_unified<'b>(
+        &self,
+        unified: &mut values::UnifiedRealization<'a, 'b>,
+    ) -> Option<Self> {
         let realized = match self {
             Self::Sink { sink, found, file } => Self::Sink {
                 sink: sink.clone(),

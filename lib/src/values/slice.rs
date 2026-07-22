@@ -627,7 +627,7 @@ impl<'a> BacktraceContainer<'a> for SliceValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for SliceValue<'a> {
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         Self {
             backings: self
                 .backings
@@ -861,7 +861,7 @@ impl<'a> SliceBacking<'a> {
         Self(self.0.copy_shape(backtrace))
     }
 
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         Self(self.0.realize_unified(unified))
     }
 
@@ -940,7 +940,7 @@ impl<'a> SliceBound<'a> {
         Self::new(known, backtrace)
     }
 
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         Self::new(self.known, self.backtrace.realize_unified(unified))
     }
 

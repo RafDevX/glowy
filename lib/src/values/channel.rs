@@ -199,12 +199,12 @@ impl<'a> ChannelValue<'a> {
 
     fn map_aggregates(
         &self,
-        transform: impl Fn(&ChannelAggregate<'a>) -> ChannelAggregate<'a>,
+        mut transform: impl FnMut(&ChannelAggregate<'a>) -> ChannelAggregate<'a>,
     ) -> Self {
         let allocations = self
             .allocations
             .iter()
-            .map(|allocation| allocation.map_aggregate(&transform))
+            .map(|allocation| allocation.map_aggregate(&mut transform))
             .collect();
 
         Self {
@@ -270,19 +270,13 @@ impl<'a> BacktraceContainer<'a> for ChannelValue<'a> {
 }
 
 impl<'a> SelfAwareBacktraceContainer<'a> for ChannelValue<'a> {
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         let mut realized = self.map_aggregates(|aggregate| {
             // realize all aggregates
             aggregate.realize_unified(unified)
         });
 
-        if matches!(
-            unified,
-            super::UnifiedRealization::Single {
-                from_slot: SyntheticSlot::CallSiteBranch,
-                ..
-            } | super::UnifiedRealization::Multiple { .. }
-        ) {
+        if unified.commits_channel_state() {
             // call-site branch realization is the final step in every existing
             // realization pipeline, so committing here avoids a second
             // deferred-state model while ensuring no unresolved synthetics
@@ -471,7 +465,7 @@ impl<'a> ChannelAggregate<'a> {
             .chain(self.capacity.iter())
     }
 
-    fn realize_unified<'b>(&self, unified: super::UnifiedRealization<'a, 'b>) -> Self {
+    fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         Self::new(
             self.payload.realize_unified(unified),
             self.delivery.realize_unified(unified),
@@ -567,7 +561,7 @@ struct ChannelAllocation<'a> {
 impl<'a> ChannelAllocation<'a> {
     fn map_aggregate(
         self: &Rc<Self>,
-        transform: &impl Fn(&ChannelAggregate<'a>) -> ChannelAggregate<'a>,
+        transform: &mut impl FnMut(&ChannelAggregate<'a>) -> ChannelAggregate<'a>,
     ) -> Rc<Self> {
         let aggregate = self.aggregate.borrow();
         let transformed = transform(&aggregate);
