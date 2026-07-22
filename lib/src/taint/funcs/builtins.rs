@@ -15,7 +15,7 @@ use std::{borrow::Cow, cell::Cell, collections::HashMap, rc::Rc};
 
 use parser::{
     Location,
-    ast::{CallNode, ExprNode, MakeNode, TypeNode},
+    ast::{CallNode, ExprNode, MakeNode, NewNode, TypeNode},
 };
 
 use crate::{
@@ -89,6 +89,16 @@ pub fn visit_make<'a>(
                 .into_with_declared_type(declared_type)
         }
     }
+}
+
+pub fn visit_new<'a>(ctx: &mut AnalysisContext<'a>, node: &NewNode<'a>) -> ValueRef<'a> {
+    let location = ctx.pin(node.location.clone());
+
+    let (types, symtab) = ctx.types_mut_with_symtab();
+
+    let declared_type = types.resolve(symtab, &node.r#type);
+
+    ValueRef::new_bottom(location, declared_type)
 }
 
 pub fn visit_make_slice<'a>(

@@ -8,8 +8,8 @@ use parser::{
         DeclNode, ElseNode, ExprNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode,
         ForHeaderNode, ForNode, ForRangeNode, FunctionDeclNode, FunctionParamDeclNode,
         FunctionResultNode, FunctionSignatureNode, IfNode, IndexingNode, LiteralNode, MakeNode,
-        SelectClauseNode, SelectNode, SelectionNode, SendNode, ShortVarDeclNode, SlicingNode,
-        StatementNode, StructLiteralFieldsNode, SwitchNode, TypeAssertionNode,
+        NewNode, SelectClauseNode, SelectNode, SelectionNode, SendNode, ShortVarDeclNode,
+        SlicingNode, StatementNode, StructLiteralFieldsNode, SwitchNode, TypeAssertionNode,
         TypeInstantiationNode, TypeSwitchCaseClause, TypeSwitchNode,
     },
 };
@@ -502,6 +502,7 @@ impl<'a> SymbolCaptureCollector<'a> for ExprNode<'a> {
             ExprNode::Literal(literal) => literal,
             ExprNode::Call(call) => call,
             ExprNode::Make(make) => make,
+            ExprNode::New(new) => new,
             ExprNode::Selection(selection) => selection,
             ExprNode::Indexing(indexing) => indexing,
             ExprNode::Slicing(slicing) => slicing,
@@ -650,6 +651,15 @@ impl<'a> SymbolCaptureCollector<'a> for MakeNode<'a> {
         if let Some(m) = &self.m {
             m.collect_captured_symbols(captured, declared);
         }
+    }
+}
+impl<'a> SymbolCaptureCollector<'a> for NewNode<'a> {
+    fn collect_captured_symbols(
+        &self,
+        _captured: &mut CapturedSymbols<'a>,
+        _declared: &mut HashSet<&'a str>,
+    ) {
+        // nothing to do, the only argument is a type
     }
 }
 

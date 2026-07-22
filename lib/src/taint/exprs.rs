@@ -33,6 +33,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         ExprNode::Literal(lit) => literals::visit_literal(ctx, lit),
         ExprNode::Call(call) => return funcs::visit_call(ctx, call),
         ExprNode::Make(make) => visit_make_with_revocations(ctx, make),
+        ExprNode::New(new) => funcs::builtins::visit_new(ctx, new),
         ExprNode::Selection(selection) => component::visit_selection(ctx, selection),
         ExprNode::Indexing(indexing) => component::visit_indexing(ctx, indexing),
         ExprNode::Slicing(slicing) => component::visit_slicing(ctx, slicing),

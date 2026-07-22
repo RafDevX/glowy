@@ -170,6 +170,7 @@ fn as_mutation_target<'a, 'b>(
         ExprNode::Literal(_)
         | ExprNode::Call(_)
         | ExprNode::Make(_)
+        | ExprNode::New(_)
         | ExprNode::Conversion(_)
         | ExprNode::TypeAssertion(_)
         | ExprNode::TypeInstantiation(_)
