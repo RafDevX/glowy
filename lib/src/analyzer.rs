@@ -468,7 +468,7 @@ impl Analyzer {
                     // (technically we should allow directories called `go.mod`
                     // but it is very unlikely that one exists, and in any case
                     // this is just a convenience method; alternatives exist)
-                    return Ok(());
+                    continue;
                 }
 
                 self.add_directory_recurs(
