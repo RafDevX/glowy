@@ -111,6 +111,11 @@ fn visit_binding_decl_spec<'a>(
     };
 
     for &id in &node.ids {
+        if id.content() == "_" {
+            // blank identifier
+            continue;
+        }
+
         let name = ctx.pin(id);
         let value = ValueRef::new_bottom(
             name.pinned_location(),

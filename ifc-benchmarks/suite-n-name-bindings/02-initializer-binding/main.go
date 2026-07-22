@@ -5,6 +5,9 @@ import "fmt"
 // glowy::label::{red}
 var message = "internal"
 
+var _ = message
+var _ = len(message)
+
 func main() {
 	var message = message
 
