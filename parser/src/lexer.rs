@@ -234,6 +234,10 @@ impl<'a> Lexer<'a> {
                         .last_token_kind
                         .as_ref()
                         .is_some_and(TokenKind::allows_implicit_semicolon)
+                    && self
+                        .queue
+                        .back()
+                        .is_none_or(|token| token.kind != TokenKind::SemiColon)
                 {
                     // newline is guaranteed single-byte, no panic
                     let span = Span::new(&view[..1], original_offset, original_line);
