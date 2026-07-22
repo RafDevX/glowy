@@ -39,6 +39,7 @@ pub enum LexingError<'a> {
     LineBreakInString(Span<'a>),
     InvalidStringEscapeSequence(Span<'a>),
     UnclosedString,
+    UnclosedComment,
 }
 
 // manual implementation of PartialEq/Eq/Hash is necessary to ignore
@@ -80,7 +81,7 @@ impl hash::Hash for LexingError<'_> {
             | LexingError::EmptyRune(span)
             | LexingError::LineBreakInString(span)
             | LexingError::InvalidStringEscapeSequence(span) => span,
-            LexingError::UnclosedString => return,
+            LexingError::UnclosedString | LexingError::UnclosedComment => return,
         };
 
         span.hash(state);
@@ -155,6 +156,12 @@ impl<'a> Diagnostics<'a> for LexingError<'a> {
                 code: s!("L010"),
                 overview: s!("unclosed string"),
                 details: s!("reached EOF before finding a closing string delimiter"),
+                context: None,
+            },
+            Self::UnclosedComment => ErrorDiagnosticInfo {
+                code: s!("L011"),
+                overview: s!("unclosed comment"),
+                details: s!("reached EOF before finding a closing block comment delimiter"),
                 context: None,
             },
         }
@@ -295,7 +302,7 @@ impl<'a> Lexer<'a> {
         span
     }
 
-    fn skip_comments(&mut self) {
+    fn skip_comments(&mut self) -> Result<(), LexingError<'a>> {
         // cloned so we can peek freely
         let mut it = self.src.clone();
 
@@ -337,16 +344,21 @@ impl<'a> Lexer<'a> {
 
                     self.read_n(2); // step over /*
                     loop {
-                        self.read_while(|ch| ch != '*');
-                        self.read_char(); // step over *
-                        if self.read_char() == Some('/') {
-                            break;
+                        match self.read_char() {
+                            Some('*') if self.peek_char() == Some('/') => {
+                                self.read_char(); // step over /
+                                break;
+                            }
+                            Some(_) => {}
+                            None => return Err(LexingError::UnclosedComment),
                         }
                     }
                 }
                 _ => {} // not a comment
             }
         }
+
+        Ok(())
     }
 
     fn try_extract_build_constraint(&mut self) {
@@ -950,7 +962,9 @@ impl<'a> Iterator for Lexer<'a> {
 
         self.try_extract_build_constraint();
 
-        self.skip_comments();
+        if let Err(err) = self.skip_comments() {
+            return Some(Err(err));
+        }
 
         let token = match self.peek_char() {
             Some(';') => single_char_token!(TokenKind::SemiColon),
