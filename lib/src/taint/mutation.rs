@@ -427,23 +427,18 @@ pub fn record_active_function_capture_mutation<'a>(
     mutated: &ValueRef<'a>,
     location: &Pinned<'a, Location>,
 ) {
-    let Some(mutation_backtrace) = mutated.backtrace() else {
-        // we don't need to record anything if the new backtrace is Bottom,
-        // since the pre-mutation value is already necessarily more conservative
-        return;
-    };
-
     // the mutated symbol may be a fake capture-local owned by any enclosing
     // function, not just the innermost function currently being visited, so we
     // have to find the right one by traversing all active functions from
     // innermost to outermost until one of them has a registered capture
-    // matching this symbol (if any), so we can record the mutation there
+    // matching this symbol (if any). derive the potentially expensive
+    // backtrace lazily, only after finding that match
     for mut active_function in ctx.active_functions() {
         let Some(mut func) = active_function.as_function_mut() else {
             return;
         };
 
-        if func.record_capture_mutation(symbol, &mutation_backtrace, Cow::Borrowed(location)) {
+        if func.record_capture_mutation(symbol, || mutated.backtrace(), Cow::Borrowed(location)) {
             // this function matched, so we can stop here
             break;
         }

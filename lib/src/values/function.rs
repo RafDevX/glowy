@@ -395,7 +395,7 @@ impl<'a> FunctionValue<'a> {
     pub fn record_capture_mutation(
         &mut self,
         local_symbol: &SymbolRef<'a>,
-        mutation_backtrace: &LabelBacktrace<'a>,
+        mutation_backtrace: impl FnOnce() -> Option<LabelBacktrace<'a>>,
         location: Cow<Pinned<'a, Location>>,
     ) -> bool {
         let Some(binding) = self
@@ -404,6 +404,12 @@ impl<'a> FunctionValue<'a> {
             .find(|binding| Rc::ptr_eq(&binding.local_symbol, local_symbol))
         else {
             return false;
+        };
+
+        // calculating the mutation backtrace can be very expensive sometimes,
+        // so we only do it here where we know we actually need it
+        let Some(mutation_backtrace) = mutation_backtrace() else {
+            return true;
         };
 
         // the entry snapshot already accounts for the capture's value before
