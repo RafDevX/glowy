@@ -1,7 +1,9 @@
 # Glowy
 
-Glowy is a tool written in Rust to analyze Go code in order to enforce
-information flow control and detect potentially insecure interference.
+Glowy is a Rust static analyzer for finding potentially insecure information
+flows in Go modules. It tracks explicit and control-flow-dependent propagation
+across files and packages, then checks the resulting labels against the defined
+security policy.
 
 This repository contains the latest version of Glowy, heavily enhanced and
 adjusted for real-world analysis, as developed by
@@ -15,52 +17,117 @@ KTH course DD2525 Language-Based Security. Most of the code has been completely
 rewritten for robustness, soundness fixes, and feature support; see the
 [diff](https://github.com/RafDevX/glowy/compare/langsec-project-submission...master).
 
-## Usage Instructions
+## Quick Start
 
 In order to analyze a Go source file using the Glowy binary, one need only:
 
-- Obtain the tool's source code from the present repository:
+```console
+git clone git@github.com:RafDevX/glowy.git
+cd glowy
+cargo run --release -- path/to/go/module
+```
 
-  `$ git clone git@github.com:RafDevX/glowy.git`
+Add `--strict` to upgrade warnings to errors.
 
-- Compile Glowy:
+Glowy automatically enables its
+[base security policy](lib/base-security-policy.toml), which recognizes common
+secret sources, untrusted input, and disclosure sinks. It is deliberately based
+on heuristics and just a starting point, not a security guarantee.
 
-  `$ cargo build --release`
+## Labels and Annotations
 
-- Optionally create a convenience link to the binary in the root directory or
-  somewhere on the `$PATH`:
+Annotations are line comments applying to the following declaration, assignment,
+send, call, or expression as appropriate:
 
-  `$ ln -s target/release/glowy-cli ./glowy-cli`
+- `glowy::label::{x, y}` adds tags.
+- `glowy::revoke::{x, y}` removes tags.
+- `glowy::allow::{x, y}` permits only the listed values on the mentioned axes.
+- `glowy::deny::{x, y}` rejects any matching tag.
+- `glowy::assert::{x, y}` checks the inferred label, which is useful in tests.
 
-- Annotate the target `.go` files with line comments specifying what source and
-  sink label constraints should be enforced, e.g.:
+Tags may be plain (`secret`), axis-bound (`integrity:untrusted`), or axis
+wildcards (`integrity:*`). For example, these checks report confidentiality and
+integrity violations, respectively:
 
-  ```go
-  // (...)
+```go
+// glowy::label::{secret}
+password := readPassword()
+// glowy::deny::{secret}
+fmt.Println(password)
+```
 
-  // glowy::label::{high}
-  const secret = "hunter12"
+```go
+// glowy::label::{integrity:untrusted}
+name := request.FormValue("name")
+// glowy::allow::{integrity:trusted}
+store(name)
+```
 
-  // (...)
+An allow-sink first restricts appraisal to its named axes (while retaining
+axis-free tags), then performs a whitelist check. A deny-sink is a blacklist
+check against the complete label.
 
-  // glowy::allow::{}
-  fmt.Println(result)
-  ```
+Note that the shorthands `$tag` and `?tag` can be used to mean `secret:tag` and
+`untrusted:tag`, respectively. This makes it simpler to bind tags to these two
+axes.
 
-- Analyze the annotated source files:
+Directives may be provided via source-code annotations (as shown above), via
+blanket directives (defined in a `glowy.toml` file), or via explicit labeling
+of struct type fields through `glowy:"x, y"`-formatted field tags.
 
-  `$ ./glowy-cli path/to/go/module/directory`
+## Project-Specific Policy
 
-Alternatively, Glowy can be compiled and run directly using `$ cargo run --release path/to/file.go`.
+Place `glowy.toml` beside `go.mod`. This compact example shows the full schema:
 
----
+```toml
+verbose = false
+inherit_base_policy = true
+excluded_base_blanket_directives = ["fmt.Println"]
+include_tests = false
+max_build_tag_dimensions = 8
 
-_Note: Glowy's behavior is undefined for invalid Go programs, but a best-effort
-attempt is made to report useful information for simple mistakes such as tokens
-failing parsing expectations._
+[sources]
+"os.Getenv#0~=TOKEN" = ["secret:env"]
+
+[revocations]
+"example.com/app.sanitize" = ["integrity:untrusted"]
+
+[allow_sinks]
+"example.com/app.publish#0" = ["integrity:trusted"]
+
+[deny_sinks]
+"fmt.Println" = ["secret:*"]
+```
+
+Targets use full Go import paths; predeclared functions use `builtin`, such as
+`builtin.println`. `#N` selects a zero-indexed argument position. On sources and
+revocations, `->N,M` selects zero-indexed result positions and `#N=value` (or
+`~=` for a fuzzy match) makes the rule conditional.
+
+Eject the complete base policy as an editable template with:
+
+```console
+cargo run --release -- base-security-policy --eject
+```
+
+## Correctness Benchmarks
 
 This repository includes a directory [`ifc-benchmarks/`](/ifc-benchmarks) which
 contains several Go modules illustrating how to provide annotations and what
 kinds of features are supported by the analyzer. These examples may be fed
 directly as input to the tool, and in fact double as tests to the analyzer which
 may be run by means of the command `cargo make ifc-benchmarks`.
+
+## Scope and Status
+
+By default, tests are excluded and at most eight independent build-tag
+dimensions are enumerated; both are configurable above. Glowy reports
+unsupported or potentially unsound Go constructs instead of silently treating
+them as safe. The currently known primary analyzer gaps are captured by the
+modules in [`ifc-benchmarks/suite-x-failures`](ifc-benchmarks/suite-x-failures),
+covering difficult assignment-order, aliasing/mutation, dynamic-dispatch, and
+concurrency cases.
+
+_Note: Glowy's behavior is undefined for invalid Go programs, but a best-effort
+attempt is made to report useful information for simple mistakes, such as tokens
+failing parsing expectations._
