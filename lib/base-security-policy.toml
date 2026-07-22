@@ -334,7 +334,6 @@ inherit_base_policy = false
 "net/http.PostForm#0" = ["untrusted:*"]
 "net/http.NewRequest#1" = ["untrusted:*"]
 "net/http.NewRequestWithContext#2" = ["untrusted:*"]
-"net/http.Request.URL" = ["untrusted:*"]
 "net/http.Client.Get#0" = ["untrusted:*"]
 "net/http.Client.Head#0" = ["untrusted:*"]
 "net/http.Client.Post#0" = ["untrusted:*"]
