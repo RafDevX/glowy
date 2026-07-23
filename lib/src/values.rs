@@ -112,11 +112,16 @@ impl<'a> ValueRef<'a> {
         self
     }
 
-    /// Copy by value or by reference according to Go aliasing rules.
-    pub fn copy(&self) -> Self {
+    /// Copy this value according to Go's value-copying semantics.
+    ///
+    /// Every Go value is copied by value. Some values nevertheless retain
+    /// shared state after the copy (for example, maps and channels). Most
+    /// variants represent that shared state internally; a few currently use
+    /// the outer cell itself as the shared identity.
+    pub fn copy_by_value_semantics(&self) -> Self {
         let borrowed = self.value.borrow();
 
-        if borrowed.is_copy_by_reference() {
+        if borrowed.copy_shares_outer_cell() {
             self.clone()
         } else {
             Self {
@@ -127,7 +132,9 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    /// Force cloning inner value (copy by value).
+    /// Clone the representation into a fresh outer cell.
+    ///
+    /// Shared identities held inside the representation remain shared.
     pub fn clone_inner(&self) -> Self {
         let borrowed = self.value.borrow();
 
@@ -187,10 +194,6 @@ impl<'a> ValueRef<'a> {
 
     pub fn set_declared_type(&mut self, declared_type: Rc<TypeInfo<'a>>) {
         self.declared_type = Some(declared_type);
-    }
-
-    pub fn is_copy_by_reference(&self) -> bool {
-        self.value.borrow().is_copy_by_reference()
     }
 
     pub fn is_simple(&self) -> bool {

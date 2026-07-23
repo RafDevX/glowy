@@ -30,10 +30,14 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
-    pub(super) fn is_copy_by_reference(&self) -> bool {
-        // https://go.dev/ref/spec#Representation_of_values
+    /// Whether a Go copy must share this representation's outer value cell.
+    ///
+    /// This is an implementation detail, not Go semantics. Ideally every shared
+    /// identity would live inside its value representation, as slice backing
+    /// arrays already do.
+    pub(super) fn copy_shares_outer_cell(&self) -> bool {
         // SliceValue is intentionally absent: copying a slice copies its
-        // descriptor while SliceValue::clone keeps the backing ValueRefs shared.
+        // descriptor while SliceValue::clone keeps the backing ValueRefs shared
         matches!(self, Self::Channel(..) | Self::Map(..) | Self::Function(..))
     }
 

@@ -207,7 +207,7 @@ fn copy_symbol<'a>(symbol: &SymbolRef<'a>) -> SymbolRef<'a> {
     Symbol::new_ref(
         symbol.declared_name(),
         symbol.mutable(),
-        symbol.value().get().copy(),
+        symbol.value().get().copy_by_value_semantics(),
         symbol.known_const().cloned(),
     )
 }
@@ -216,7 +216,10 @@ fn overwrite_symbol<'a>(source: &SymbolRef<'a>, target: &SymbolRef<'a>) {
     let (value, known_const) = {
         let source = source.borrow();
 
-        (source.value().get().copy(), source.known_const().cloned())
+        (
+            source.value().get().copy_by_value_semantics(),
+            source.known_const().cloned(),
+        )
     };
 
     target.borrow_mut().set_value(value, known_const);

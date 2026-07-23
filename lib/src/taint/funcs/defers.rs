@@ -53,7 +53,7 @@ impl<'a> DeferredCallReferents<'a> {
                         .map(|(_, _, r#type)| *r#type)
                 });
 
-                if argument_may_reference_mutable_state(value, expr, parameter_type) {
+                if argument_may_share_mutable_state(value, expr, parameter_type) {
                     DeferredReferent::new(ctx, expr)
                 } else {
                     None
@@ -81,7 +81,7 @@ impl<'a> DeferredCallReferents<'a> {
     }
 }
 
-fn argument_may_reference_mutable_state(
+fn argument_may_share_mutable_state(
     value: &ValueRef<'_>,
     expr: &ExprNode<'_>,
     parameter_type: Option<&TypeNode<'_>>,
@@ -94,9 +94,9 @@ fn argument_may_reference_mutable_state(
         }
     );
 
-    let value_has_reference_semantics = || value.is_copy_by_reference() && !value.is_function();
+    let value_may_share_mutable_state = || value.is_map() || value.is_slice() || value.is_channel();
 
-    let declared_type_has_reference_semantics = || {
+    let declared_type_may_share_mutable_state = || {
         value
             .declared_type()
             .and_then(|r#type| r#type.underlying())
@@ -108,7 +108,7 @@ fn argument_may_reference_mutable_state(
             })
     };
 
-    let parameter_type_has_reference_semantics = || {
+    let parameter_type_may_share_mutable_state = || {
         parameter_type.is_some_and(|r#type| {
             matches!(
                 r#type,
@@ -121,9 +121,9 @@ fn argument_may_reference_mutable_state(
     };
 
     takes_address
-        || value_has_reference_semantics()
-        || declared_type_has_reference_semantics()
-        || parameter_type_has_reference_semantics()
+        || value_may_share_mutable_state()
+        || declared_type_may_share_mutable_state()
+        || parameter_type_may_share_mutable_state()
 }
 
 /// A root symbol retained without retaining or replaying its operand

@@ -231,7 +231,7 @@ impl<'a> CompositeValue<'a, u64> {
         let r#const = self
             .r#const
             .iter()
-            .filter_map(|(index, value)| Some((reindex(index)?, value.copy())))
+            .filter_map(|(index, value)| Some((reindex(index)?, value.copy_by_value_semantics())))
             .collect();
 
         let dyn_overrides = self.dyn_overrides.iter().filter_map(reindex).collect();
