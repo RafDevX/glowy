@@ -6,6 +6,7 @@ use parser::{
 };
 
 pub use self::{
+    call_application::apply_range_function_call_effects,
     captures::{call_site::derive_stable_capture_concretes, resolve_accessed_capture},
     defers::DeferredCallReferents,
     returns::visit_return,

@@ -517,7 +517,7 @@ fn visit_for_range_operand<'a>(
                 .is_none_or(|sym| sym.borrow().mutable())
         });
 
-    let value = if should_fold {
+    let mut value = if should_fold {
         // we can only visit range_expr once, so we need to hijack the existing
         // `mutate_target` visit and extract the value it calculated so that we
         // can use it later during the main part of this function
@@ -555,6 +555,14 @@ fn visit_for_range_operand<'a>(
         // just visit the expression normally, no special handling required
         exprs::visit_single_expr(ctx, range_expr)
     };
+
+    let is_range_function = value
+        .as_function()
+        .is_some_and(|func| extract_iter_yield_signature(&func).is_some());
+
+    if is_range_function {
+        funcs::apply_range_function_call_effects(ctx, &mut value, location);
+    }
 
     let direct_map_symbol = if value.is_map()
         && let ExprNode::Name(name) = range_expr

@@ -515,6 +515,58 @@ fn handle_deferred_checks<'a>(
     }
 }
 
+pub fn apply_range_function_call_effects<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    value: &mut ValueRef<'a>,
+    location: &Pinned<'a, Location>,
+) {
+    let func = value
+        .as_function()
+        .expect("caller ensures the range operand is a function");
+
+    let Some(signature) = func.signature() else {
+        return;
+    };
+
+    let ids = super::collect_parameter_slots(signature);
+
+    // per the Go spec, ranging over an iterator function invokes it with a
+    // compiler-synthesized yield callback. the callback value itself carries
+    // no source-level taint; dependencies of its bool result are modeled
+    // separately from the argument passed to the iterator
+    let args: Vec<_> = ids
+        .iter()
+        .map(|_| ValueRef::new_bottom(location.clone(), None))
+        .collect();
+
+    let args_with_backtraces: Vec<_> = args.iter().cloned().map(|arg| (arg, None)).collect();
+
+    let capture_concretes = captures::call_site::apply_capture_mutations_and_derive_concretes(
+        ctx,
+        &func,
+        &args_with_backtraces,
+        location,
+    );
+
+    let call_realization = CallRealization {
+        receiver: None,
+        ids: &ids,
+        args: &args_with_backtraces,
+        capture_concretes: &capture_concretes,
+        location,
+    };
+
+    handle_deferred_checks(ctx, &func, &call_realization);
+
+    let has_known_implementation = func.outcome().is_some();
+
+    drop(func);
+
+    if has_known_implementation && let Some(mut func_mut) = value.as_function_mut() {
+        func_mut.record_call();
+    }
+}
+
 fn calculate_call_result<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
