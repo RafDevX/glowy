@@ -537,9 +537,6 @@ pub fn visit_delete<'a>(
     capture_arg_const(ctx, map, arg_consts, 0);
     capture_arg_const(ctx, key, arg_consts, 1);
 
-    // evaluate before map to trigger side-effects in the correct order
-    let (key_backtrace, key_const) = exprs::get_expr_backtrace_and_untainted_const(ctx, key);
-
     #[expect(
         clippy::shadow_unrelated,
         reason = "Same context, just threaded through the transformer"
@@ -549,6 +546,10 @@ pub fn visit_delete<'a>(
         LabelBacktraceKind::MapElementDelete,
         &node.location,
         &|ctx, mut value| {
+            // key is visited after the map because it comes after it lexically
+            let (key_backtrace, key_const) =
+                exprs::get_expr_backtrace_and_untainted_const(ctx, key);
+
             let Some(mut composite) = value.as_map_mut() else {
                 ctx.report_error(AnalysisErrorKind::UnexpectedBuiltInArgShape {
                     location: node.location.clone(),
@@ -559,20 +560,10 @@ pub fn visit_delete<'a>(
 
             let location = ctx.pin(node.location.clone());
 
-            // cloning key and key_backtrace is necessary because this closure
-            // is an Fn, meaning it could technically execute multiple times
-            // (even if it actually does not) -- it cannot be changed to an
-            // FnOnce because then it would have to be invoked with ownership,
-            // meaning passing a reference to the closure would not be enough,
-            // and so instead of the signature being `&dyn Fn` it would have to
-            // be `impl FnOnce`, but that would make the LeftValue trait not
-            // dyn-compatible, which is not what we want; we also can't just use
-            // a `Box<dyn FnOnce>`, since then that would require the 'a in
-            // `LeftValue<'a>` to live for 'static, which is not possible
             composite.set_at_key(
-                key_const.clone(),
+                key_const,
                 ValueRef::new_bottom(location.clone(), None),
-                key_backtrace.clone(),
+                key_backtrace,
                 location,
             );
 

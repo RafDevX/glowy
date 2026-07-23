@@ -506,19 +506,18 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
         assignment_location: &Location,
         mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
     ) {
-        // evaluate index before base to trigger side-effects in order
-        #[rustfmt::skip]
-        let (index_backtrace, index_const) = exprs::get_expr_backtrace_and_untainted_const(
-            ctx,
-            &self.index
-        );
-
         #[expect(
             clippy::shadow_unrelated,
             reason = "Same context, just threaded through closures"
         )]
         self.base
             .mutate_target(ctx, assignment_location, &|ctx, mut target| {
+                // index visited after base is "more correct semantics" than
+                // base visited after index; see visit_indexing
+
+                let (index_backtrace, index_const) =
+                    exprs::get_expr_backtrace_and_untainted_const(ctx, &self.index);
+
                 let target_is_map = target.is_map();
 
                 let Some(mut composite) = target.as_composite_mut() else {

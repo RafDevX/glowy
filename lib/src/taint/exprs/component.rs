@@ -301,35 +301,27 @@ fn nest_field_backtraces<'a>(
 }
 
 pub fn visit_indexing<'a>(ctx: &mut AnalysisContext<'a>, node: &IndexingNode<'a>) -> ValueRef<'a> {
-    // index needs to be visited before base, in case it has side-effects
-    #[rustfmt::skip]
-    let (index_backtrace, index_const) = super::get_expr_backtrace_and_untainted_const(
-        ctx,
-        &node.index
-    );
+    // Go spec does not prescribe evaluation order for base/index, but in some
+    // specific cases like `f()[g()]`, it does say that the base is evaluated
+    // first, so visiting the base first is the best approximation we can do
 
     let base = super::visit_single_expr(ctx, &node.base);
 
-    let last_pos = is_last_position_indexing(ctx, &node.base, &node.index);
-
-    visit_indexing_with(
-        ctx,
-        &base,
-        index_backtrace.as_ref(),
-        index_const.as_ref(),
-        last_pos,
-        &node.location,
-    )
+    visit_indexing_with_base(ctx, &base, &node.base, &node.index, &node.location)
 }
 
-pub(super) fn visit_indexing_with<'a>(
+pub(super) fn visit_indexing_with_base<'a>(
     ctx: &mut AnalysisContext<'a>,
     base: &ValueRef<'a>,
-    index_backtrace: Option<&LabelBacktrace<'a>>,
-    index_const: Option<&SimpleConstValue>,
-    last_pos: bool,
+    base_node: &ExprNode<'a>,
+    index_node: &ExprNode<'a>,
     location: &Location,
 ) -> ValueRef<'a> {
+    let (index_backtrace, index_const) =
+        super::get_expr_backtrace_and_untainted_const(ctx, index_node);
+
+    let last_pos = is_last_position_indexing(ctx, base_node, index_node);
+
     let pinned = ctx.pin(location.clone());
 
     if last_pos
@@ -348,9 +340,9 @@ pub(super) fn visit_indexing_with<'a>(
         return ValueRef::new_bottom(pinned, None);
     };
 
-    let result = composite.get_at_key(index_const, pinned.clone());
+    let result = composite.get_at_key(index_const.as_ref(), pinned.clone());
 
-    let nest_index_backtrace = |value: ValueRef<'a>| match index_backtrace {
+    let nest_index_backtrace = |value: ValueRef<'a>| match index_backtrace.as_ref() {
         Some(index_backtrace) => value.nest_backtrace(
             LabelBacktraceKind::Expression,
             None,
@@ -382,7 +374,7 @@ pub(super) fn visit_indexing_with<'a>(
     }
 }
 
-pub(super) fn is_last_position_indexing(
+fn is_last_position_indexing(
     ctx: &AnalysisContext<'_>,
     base: &ExprNode<'_>,
     index: &ExprNode<'_>,
