@@ -348,7 +348,8 @@ pub enum AnalysisErrorKind<'a> {
     /// Illegal `fallthrough` statement in unexpected location.
     ///
     /// Fallthrough statements are only permitted as the last statement of an
-    /// expression switch clause. Using a fallthrough statement anywhere else
+    /// expression switch clause, and only when that clause is not the last one
+    /// defined in the switch block. Using a fallthrough statement anywhere else
     /// is invalid.
     UnexpectedFallthrough {
         /// Where the statement was found.

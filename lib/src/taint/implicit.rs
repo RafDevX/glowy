@@ -852,7 +852,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
 
     // Branch backtraces for each clause cannot be popped at the end of each
     // case block because their negation is implicitly asserted for all other
-    // clauses. For example,
+    // clauses, and also because they might `fallthrough`. For example,
     // ```go
     // switch {
     //     case secret % 2 == 0: // do nothing
@@ -878,7 +878,7 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         n_pushes += 1;
     }
 
-    for clause in &node.clauses {
+    for (index, clause) in node.clauses.iter().enumerate() {
         let children: Vec<_> = clause
             .exprs
             .iter()
@@ -911,7 +911,12 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
             n_pushes += 1;
         }
 
-        let body = if let Some(StatementNode::Fallthrough { .. }) = clause.body.last() {
+        let falls_through = matches!(clause.body.last(), Some(StatementNode::Fallthrough { .. }));
+
+        // fallthrough is not allowed in the last clause
+        let has_next_clause = index + 1 < node.clauses.len();
+
+        let body = if falls_through && has_next_clause {
             // statement visitor will reject any fallthrough statement as
             // out of place, so we omit it here before passing on the block
             &clause.body[..clause.body.len() - 1]
