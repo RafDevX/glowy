@@ -878,7 +878,19 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
         n_pushes += 1;
     }
 
+    let mut default_clause = None;
+
     for (index, clause) in node.clauses.iter().enumerate() {
+        if clause.exprs.is_empty() {
+            // we visit the default clause at the end because it can show up
+            // out of order in the source code, but still is only executed if
+            // all the other cases did not match, meaning we need to first
+            // collect all other branch backtraces before visiting it
+            default_clause = Some((index, clause));
+
+            continue;
+        }
+
         let children: Vec<_> = clause
             .exprs
             .iter()
@@ -911,27 +923,37 @@ fn visit_expr_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprSwitchNode<'a
             n_pushes += 1;
         }
 
-        let falls_through = matches!(clause.body.last(), Some(StatementNode::Fallthrough { .. }));
+        visit_expr_switch_clause_body(ctx, &clause.body, index + 1 < node.clauses.len());
+    }
 
+    if let Some((index, clause)) = default_clause {
         // fallthrough is not allowed in the last clause
         let has_next_clause = index + 1 < node.clauses.len();
 
-        let body = if falls_through && has_next_clause {
-            // statement visitor will reject any fallthrough statement as
-            // out of place, so we omit it here before passing on the block
-            &clause.body[..clause.body.len() - 1]
-        } else {
-            &clause.body
-        };
-
-        // vvv this will create another scope for the clause body,
-        // which is (probably?) intended? spec unclear at first glance
-        super::visit_scoped_statements(ctx, body);
+        visit_expr_switch_clause_body(ctx, &clause.body, has_next_clause);
     }
 
     for _ in 0..n_pushes {
         ctx.pop_branch_backtrace();
     }
+}
+
+fn visit_expr_switch_clause_body<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    body: &[StatementNode<'a>],
+    has_next_clause: bool,
+) {
+    let falls_through = matches!(body.last(), Some(StatementNode::Fallthrough { .. }));
+
+    let body = if falls_through && has_next_clause {
+        // statement visitor will reject any fallthrough statement as out of
+        // place, so omit a valid fallthrough before visiting the clause body
+        &body[..body.len() - 1]
+    } else {
+        body
+    };
+
+    super::visit_scoped_statements(ctx, body);
 }
 
 fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a>) {
@@ -959,12 +981,28 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
         false
     };
 
+    let mut default_clause = None;
+
     for clause in &node.clauses {
+        if clause.types.is_empty() {
+            // we visit the default clause at the end because it can show up
+            // out of order in the source code, but still is only executed if
+            // all the other cases did not match, meaning we need to first
+            // collect all other branch backtraces before visiting it
+            default_clause = Some(clause);
+
+            continue;
+        }
+
         // we don't actually care about clause.types because raw types aren't
         // values and so don't have labels
 
         // vvv this will create another scope for the clause body,
         // which is (probably?) intended? spec unclear at first glance
+        super::visit_scoped_statements(ctx, &clause.body);
+    }
+
+    if let Some(clause) = default_clause {
         super::visit_scoped_statements(ctx, &clause.body);
     }
 

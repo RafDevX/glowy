@@ -21,7 +21,7 @@ func main() {
 	// glowy::label::{private}
 	z := 0
 
-	var m, n int
+	var m, n, o, p int
 
 	switch x + "..." {
 	case "hello":
@@ -34,12 +34,17 @@ func main() {
 	case charlie:
 	default:
 		n += 3
+	case david:
+		o = 2
+		fallthrough
+	case "goodbye":
+		p = m + 1
 	}
 
 	// glowy::assert::{high, alice, bob}
 	fmt.Println(m)
-	// glowy::assert::{high, alice, bob, charlie}
-	fmt.Println(n)
+	// glowy::assert::{high, alice, bob, charlie, david}
+	fmt.Println(n, o, p)
 	// glowy::assert::{private, high, alice, david, bob}
 	fmt.Println(z)
 }
