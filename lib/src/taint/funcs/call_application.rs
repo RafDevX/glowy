@@ -9,7 +9,7 @@ use crate::{
     Pinned,
     context::AnalysisContext,
     errors::AnalysisErrorKind,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
+    labels::{Label, LabelBacktrace, LabelBacktraceKind, LabelTag, SyntheticSlot},
     policy::{SinkDescriptor, SinkKind},
     taint::{
         annotations, enforcement,
@@ -19,7 +19,7 @@ use crate::{
         },
     },
     values::{
-        BacktraceContainer, FunctionValue, InherentSourceOrRevocation, MobiusValue,
+        BacktraceContainer, FunctionRef, FunctionValue, InherentSourceOrRevocation, MobiusValue,
         SelfAwareBacktraceContainer, SimpleConstValue, UnifiedRealization, Value, ValueRef,
     },
 };
@@ -74,23 +74,10 @@ pub fn apply_call<'a>(
     // range-over-func: an iterator function `func(yield func(...) bool)`
     // produces values by invoking yield, and we propagate those values'
     // labels back to `for x := range <fn>` via the outer FunctionValue)
-    let yield_target = if let ExprNode::Name(id) = &*node.func {
-        ctx.current_function()
-            .as_ref()
-            .and_then(ValueRef::as_function)
-            .as_deref()
-            .and_then(FunctionValue::yield_param)
-            .copied()
-            .filter(|decl| {
-                ctx.symtab()
-                    .get_symbol(id.content())
-                    .is_some_and(|sym| sym.borrow().declared_name() == *decl)
-            })
-    } else {
-        None
-    };
+    let yield_owner = resolve_current_yield_owner(ctx, node);
+    // ^^^ "owner" as in the iterator func which receives yield as parameter
 
-    if yield_target.is_some()
+    if yield_owner.is_some()
         && let Some(mut current) = ctx.current_function()
         && let Some(mut current_mut) = current.as_function_mut()
     {
@@ -169,6 +156,7 @@ pub fn apply_call<'a>(
             func.signature(),
         );
 
+        add_yield_feedback(yield_owner.as_ref(), &call_location, &mut result);
         apply_call_blanket_sources(func, &arg_consts, &call_location, &mut result);
         apply_call_blanket_revocations(func, &arg_consts, &mut result);
 
@@ -216,7 +204,14 @@ pub fn apply_call<'a>(
         location: &call_location,
     };
 
-    handle_deferred_checks(ctx, func, &call_realization);
+    #[rustfmt::skip]
+    let call_branch = super::calc_effective_call_site_branch_backtrace_for(
+        ctx,
+        func,
+        &call_location
+    );
+
+    handle_deferred_checks(ctx, func, &call_realization, call_branch.as_ref(), None);
 
     let mut result = calculate_call_result(ctx, func, outcome, &call_realization);
 
@@ -310,6 +305,55 @@ fn visit_blackbox_call<'a>(
     tag_results_with_declared_types(func, &mut result);
 
     result
+}
+
+fn resolve_current_yield_owner<'a>(
+    ctx: &AnalysisContext<'a>,
+    node: &CallNode<'a>,
+) -> Option<FunctionRef<'a>> {
+    let ExprNode::Name(id) = &*node.func else {
+        return None;
+    };
+
+    let current = ctx.current_function()?;
+    let func = current.as_function()?;
+    let yield_param = func.yield_param()?;
+    let symbol = ctx.symtab().get_symbol(id.content())?;
+
+    (symbol.borrow().declared_name() == *yield_param).then(|| func.r#ref().clone())
+}
+
+fn add_yield_feedback<'a>(
+    owner: Option<&FunctionRef<'a>>,
+    location: &Pinned<'a, Location>,
+    result: &mut [ValueRef<'a>],
+) {
+    let Some(owner) = owner else {
+        return;
+    };
+
+    let synthetic = LabelTag::Synthetic {
+        func: owner.clone(),
+        slot: SyntheticSlot::YieldFeedback,
+        identifier: None,
+    };
+
+    let feedback = LabelBacktrace::new_root(
+        LabelBacktraceKind::FunctionParameter,
+        Label::from_single(synthetic),
+        None,
+        location.clone(),
+    )
+    .unwrap();
+
+    for value in result {
+        *value = value.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            location.clone(),
+            [feedback.clone()],
+        );
+    }
 }
 
 fn apply_call_blanket_sources<'a>(
@@ -442,6 +486,8 @@ fn handle_deferred_checks<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     call: &CallRealization<'_, 'a>,
+    call_branch: Option<&LabelBacktrace<'a>>,
+    yield_feedback: Option<&LabelBacktrace<'a>>,
 ) {
     let parameter_concretes: Vec<_> = call
         .ids
@@ -461,13 +507,6 @@ fn handle_deferred_checks<'a>(
         })
         .collect();
 
-    #[rustfmt::skip]
-    let call_branch = super::calc_effective_call_site_branch_backtrace_for(
-        ctx,
-        func,
-        call.location
-    );
-
     let substitutions: Vec<_> = parameter_concretes
         .iter()
         .enumerate()
@@ -476,10 +515,8 @@ fn handle_deferred_checks<'a>(
             call.receiver
                 .map(|concrete| (SyntheticSlot::Receiver, concrete)),
         )
-        .chain(iter::once((
-            SyntheticSlot::CallSiteBranch,
-            call_branch.as_ref(),
-        )))
+        .chain(iter::once((SyntheticSlot::CallSiteBranch, call_branch)))
+        .chain(iter::once((SyntheticSlot::YieldFeedback, yield_feedback)))
         // a deferred check's backtrace already represents mutations that
         // happened before that check in the function body. realizing it against
         // the entry snapshot preserves that ordering; a mutation-enriched
@@ -515,55 +552,122 @@ fn handle_deferred_checks<'a>(
     }
 }
 
-pub fn apply_range_function_call_effects<'a>(
-    ctx: &mut AnalysisContext<'a>,
-    value: &mut ValueRef<'a>,
-    location: &Pinned<'a, Location>,
-) {
-    let func = value
-        .as_function()
-        .expect("caller ensures the range operand is a function");
+pub struct IterableFunctionCall<'a> {
+    args: Vec<ValueRef<'a>>,
+    capture_concretes: CallCaptureConcretes<'a>,
+    call_branch: Option<LabelBacktrace<'a>>,
+}
 
-    let Some(signature) = func.signature() else {
-        return;
-    };
+impl<'a> IterableFunctionCall<'a> {
+    pub fn new(
+        ctx: &mut AnalysisContext<'a>,
+        value: &ValueRef<'a>,
+        location: &Pinned<'a, Location>,
+    ) -> Self {
+        let func = value
+            .as_function()
+            .expect("range-function operand must be a function");
 
-    let ids = super::collect_parameter_slots(signature);
+        let signature = func
+            .signature()
+            .expect("range-function operand must have a signature");
 
-    // per the Go spec, ranging over an iterator function invokes it with a
-    // compiler-synthesized yield callback. the callback value itself carries
-    // no source-level taint; dependencies of its bool result are modeled
-    // separately from the argument passed to the iterator
-    let args: Vec<_> = ids
-        .iter()
-        .map(|_| ValueRef::new_bottom(location.clone(), None))
-        .collect();
+        let ids = super::collect_parameter_slots(signature);
 
-    let args_with_backtraces: Vec<_> = args.iter().cloned().map(|arg| (arg, None)).collect();
+        // per the Go spec, ranging over an iterator function invokes it with a
+        // compiler-synthesized yield callback. the callback value itself
+        // carries no source-level taint; dependencies of its bool result are
+        // modeled separately from the argument passed to the iterator
+        let args: Vec<_> = ids
+            .iter()
+            .map(|_| ValueRef::new_bottom(location.clone(), None))
+            .collect();
 
-    let capture_concretes = captures::call_site::apply_capture_mutations_and_derive_concretes(
-        ctx,
-        &func,
-        &args_with_backtraces,
-        location,
-    );
+        let args_with_backtraces: Vec<_> = args.iter().cloned().map(|arg| (arg, None)).collect();
 
-    let call_realization = CallRealization {
-        receiver: None,
-        ids: &ids,
-        args: &args_with_backtraces,
-        capture_concretes: &capture_concretes,
-        location,
-    };
+        let capture_concretes = CallCaptureConcretes::from_stable_environment(ctx, &func);
 
-    handle_deferred_checks(ctx, &func, &call_realization);
+        let capture_realized = capture_concretes.realize_at_entry(&func);
 
-    let has_known_implementation = func.outcome().is_some();
+        captures::call_site::apply_capture_mutations_and_derive_concretes(
+            ctx,
+            &capture_realized,
+            &args_with_backtraces,
+            location,
+        );
 
-    drop(func);
+        let call_branch =
+            super::calc_effective_call_site_branch_backtrace_for(ctx, &func, location);
 
-    if has_known_implementation && let Some(mut func_mut) = value.as_function_mut() {
-        func_mut.record_call();
+        Self {
+            args,
+            capture_concretes,
+            call_branch,
+        }
+    }
+
+    pub fn apply(
+        self,
+        ctx: &mut AnalysisContext<'a>,
+        value: &mut ValueRef<'a>,
+        location: &Pinned<'a, Location>,
+        yield_feedback: Option<&LabelBacktrace<'a>>,
+    ) {
+        let func = value
+            .as_function()
+            .expect("range operand must remain a function during its loop");
+
+        let signature = func
+            .signature()
+            .expect("range-function operand must retain its signature");
+
+        let ids = super::collect_parameter_slots(signature);
+
+        let args_with_backtraces: Vec<_> =
+            self.args.iter().cloned().map(|arg| (arg, None)).collect();
+
+        // the first application at range-expr evaluation handles effects that
+        // that precede a yield. re-applying monotonically here adds
+        // dependencies from code guarded by yield(false) now that caller
+        // feedback is known, after we've seen the loop body
+        let capture_realized = super::realize_stable_captures(ctx, &func);
+
+        let feedback_realized = capture_realized.realize(
+            capture_realized.r#ref(),
+            SyntheticSlot::YieldFeedback,
+            yield_feedback,
+        );
+
+        captures::call_site::apply_capture_mutations_and_derive_concretes(
+            ctx,
+            &feedback_realized,
+            &args_with_backtraces,
+            location,
+        );
+
+        let realization = CallRealization {
+            receiver: None,
+            ids: &ids,
+            args: &args_with_backtraces,
+            capture_concretes: &self.capture_concretes,
+            location,
+        };
+
+        handle_deferred_checks(
+            ctx,
+            &func,
+            &realization,
+            self.call_branch.as_ref(),
+            yield_feedback,
+        );
+
+        let has_known_implementation = func.outcome().is_some();
+
+        drop(func);
+
+        if has_known_implementation && let Some(mut func_mut) = value.as_function_mut() {
+            func_mut.record_call();
+        }
     }
 }
 
@@ -603,6 +707,10 @@ fn calculate_call_result<'a>(
             SyntheticSlot::CallSiteBranch,
             ctx.branch_backtrace(),
         )))
+        // yield feedback can never taint a normal call's result, since it is
+        // only present when a function is used as an iterable in a for-range
+        // loop, but in that case its return value is never seen
+        .chain(iter::once((SyntheticSlot::YieldFeedback, None)))
         .chain(
             call.capture_concretes
                 .for_outcome

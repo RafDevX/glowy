@@ -18,6 +18,8 @@ pub fn visit_return<'a>(
     exprs: &[ExprNode<'a>],
     location: &Location,
 ) {
+    ctx.record_range_exit_feedback(location);
+
     let Some(mut value) = ctx.current_function() else {
         ctx.report_error(AnalysisErrorKind::UnexpectedReturn {
             location: location.clone(),

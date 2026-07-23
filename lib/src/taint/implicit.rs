@@ -22,6 +22,7 @@ use crate::{
 struct EvaluatedRangeOperand<'a> {
     value: ValueRef<'a>,
     direct_map_symbol: Option<SymbolRef<'a>>,
+    function_call: Option<funcs::IterableFunctionCall<'a>>,
 }
 
 pub fn visit_if<'a>(ctx: &mut AnalysisContext<'a>, node: &IfNode<'a>) {
@@ -92,7 +93,7 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>, label: O
         super::visit_statement(ctx, init);
     }
 
-    let range_operand = if let ForHeaderNode::Range(range) = &node.header {
+    let mut range_operand = if let ForHeaderNode::Range(range) = &node.header {
         let range_expr = match range {
             ForRangeNode::Decl { range_expr, .. }
             | ForRangeNode::Assignment { range_expr, .. }
@@ -120,7 +121,7 @@ pub fn visit_for<'a>(ctx: &mut AnalysisContext<'a>, node: &ForNode<'a>, label: O
             visit_for_range(
                 ctx,
                 range,
-                range_operand.as_ref().unwrap(),
+                range_operand.as_mut().unwrap(),
                 &node.body,
                 &node.header_location,
             );
@@ -279,7 +280,7 @@ fn visit_for_clause<'a>(
 fn visit_for_range<'a>(
     ctx: &mut AnalysisContext<'a>,
     range: &ForRangeNode<'a>,
-    range_operand: &EvaluatedRangeOperand<'a>,
+    range_operand: &mut EvaluatedRangeOperand<'a>,
     body: &BlockNode<'a>,
     header_location: &Location,
 ) {
@@ -315,11 +316,13 @@ fn visit_for_range<'a>(
     // elsewhere in the analysis
 
     let mut prev_rhs_backtrace: Option<Option<LabelBacktrace<'a>>> = None;
+    let mut prev_yield_feedback: Option<Option<LabelBacktrace<'a>>> = None;
 
     // we need to remember deferred state before visiting the body, as all
     // deferral effects of speculative body visits (such as from break/continue)
     // must be rolled back before the next visit to prevent leakage
     let pre_body_deferred = ctx.checkpoint_deferred_state();
+    let mut yield_feedback = None;
 
     loop {
         let current_operand = derive_current_for_range_operand(
@@ -335,6 +338,7 @@ fn visit_for_range<'a>(
             range_expr,
             &current_operand, // already calc'd (visited exactly once)
             rhs_location.clone(),
+            yield_feedback.as_ref(),
         );
 
         // every range shape uses its first abstract value to carry the
@@ -355,7 +359,10 @@ fn visit_for_range<'a>(
         let stable = ctx.loop_iteration_has_converged()
             && prev_rhs_backtrace
                 .as_ref()
-                .is_some_and(|prev| prev.snapshot_aware_eq(&rhs_backtrace));
+                .is_some_and(|prev| prev.snapshot_aware_eq(&rhs_backtrace))
+            && prev_yield_feedback
+                .as_ref()
+                .is_some_and(|prev| prev.snapshot_aware_eq(&yield_feedback));
 
         // unlike a three-clause loop condition, the range expression is not
         // evaluated again on each iteration, so install the continue back-edge
@@ -431,8 +438,25 @@ fn visit_for_range<'a>(
             ctx.push_error_suppression();
         }
 
-        // vv this will create another scope for the for body, which is intended
-        super::visit_block(ctx, body);
+        let iteration_feedback = if range_operand.function_call.is_some() {
+            ctx.push_range_feedback_context();
+
+            // vv this will create another scope for the for body, which is intended
+            super::visit_block(ctx, body);
+
+            ctx.pop_range_feedback_context()
+        } else {
+            super::visit_block(ctx, body);
+
+            None
+        };
+
+        yield_feedback = LabelBacktrace::combine_options(
+            yield_feedback,
+            iteration_feedback,
+            LabelBacktraceKind::Branch,
+            Cow::Borrowed(&rhs_location),
+        );
 
         if !stable {
             ctx.pop_error_suppression();
@@ -457,6 +481,16 @@ fn visit_for_range<'a>(
         ctx.restore_deferred_state(pre_body_deferred.clone());
         ctx.advance_loop_convergence_iteration();
         prev_rhs_backtrace = Some(rhs_backtrace);
+        prev_yield_feedback = Some(yield_feedback.clone());
+    }
+
+    if let Some(call) = range_operand.function_call.take() {
+        call.apply(
+            ctx,
+            &mut range_operand.value,
+            &rhs_location,
+            yield_feedback.as_ref(),
+        );
     }
 }
 
@@ -517,7 +551,7 @@ fn visit_for_range_operand<'a>(
                 .is_none_or(|sym| sym.borrow().mutable())
         });
 
-    let mut value = if should_fold {
+    let value = if should_fold {
         // we can only visit range_expr once, so we need to hijack the existing
         // `mutate_target` visit and extract the value it calculated so that we
         // can use it later during the main part of this function
@@ -560,9 +594,8 @@ fn visit_for_range_operand<'a>(
         .as_function()
         .is_some_and(|func| extract_iter_yield_signature(&func).is_some());
 
-    if is_range_function {
-        funcs::apply_range_function_call_effects(ctx, &mut value, location);
-    }
+    let function_call =
+        is_range_function.then(|| funcs::IterableFunctionCall::new(ctx, &value, location));
 
     let direct_map_symbol = if value.is_map()
         && let ExprNode::Name(name) = range_expr
@@ -575,6 +608,7 @@ fn visit_for_range_operand<'a>(
     EvaluatedRangeOperand {
         value,
         direct_map_symbol,
+        function_call,
     }
 }
 
@@ -583,6 +617,7 @@ fn get_for_range_values<'a>(
     range_expr: &ExprNode<'a>,
     value: &ValueRef<'a>,
     location: Pinned<'a, Location>,
+    yield_feedback: Option<&LabelBacktrace<'a>>,
 ) -> Vec<ValueRef<'a>> {
     // see https://go.dev/ref/spec#For_range for the per-type cardinality table;
     // the order below matches that table, with the trailing string/unknown
@@ -638,7 +673,13 @@ fn get_for_range_values<'a>(
     if let Some(func) = value.as_function()
         && let Some(yield_signature) = extract_iter_yield_signature(&func)
     {
-        return get_iter_function_range_values(ctx, &func, yield_signature, &location);
+        return get_iter_function_range_values(
+            ctx,
+            &func,
+            yield_signature,
+            &location,
+            yield_feedback,
+        );
     }
 
     let downgraded = value.downgrade(|| location.clone());
@@ -689,16 +730,11 @@ fn get_iter_function_range_values<'a>(
     func: &FunctionValue<'a>,
     yield_signature: &FunctionSignatureNode<'a>,
     location: &Pinned<'a, Location>,
+    yield_feedback: Option<&LabelBacktrace<'a>>,
 ) -> Vec<ValueRef<'a>> {
-    let mut func = Cow::Borrowed(func);
+    let mut func = funcs::realize_stable_captures(ctx, func);
 
-    for (index, concrete) in funcs::derive_stable_capture_concretes(ctx, &func) {
-        func = Cow::Owned(func.realize(
-            func.r#ref(),
-            SyntheticSlot::Capture(index),
-            concrete.as_ref(),
-        ));
-    }
+    func = func.realize(func.r#ref(), SyntheticSlot::YieldFeedback, yield_feedback);
 
     let downgraded = func.downgrade_as_call(ctx, location.clone());
 
@@ -797,6 +833,10 @@ pub fn visit_continue<'a>(
     label: Option<Span<'a>>,
     location: &Location,
 ) {
+    if label.is_some() {
+        ctx.record_range_exit_feedback(location);
+    }
+
     // record before deferring: the back-edge contribution is the branch context
     // at the continue itself, not the composite created for statements that
     // lexically follow it in this iteration
@@ -816,6 +856,8 @@ pub fn visit_break<'a>(
     label: Option<Span<'a>>,
     location: &Location,
 ) {
+    ctx.record_range_exit_feedback(location);
+
     let target = if let Some(label) = label {
         DeferTarget::LabeledBreakable(label.content())
     } else {

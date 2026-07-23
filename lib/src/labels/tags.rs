@@ -197,6 +197,21 @@ pub enum SyntheticSlot {
     /// functions that do not take arguments and so cannot propagate this
     /// information any other way.
     CallSiteBranch,
+    /// Conceptual placeholder for a range-over-function feedback via `yield`.
+    ///
+    /// Functions used as iterators in range loops accept a `yield` callback to
+    /// which they can pass values passed on to the loop body, but these `yield`
+    /// calls also themselves yield a boolean return value indicating whether
+    /// the loop requires more values be passed (`true`) or whether the loop has
+    /// finished (`false`), which can happen, for example, via `break`.
+    ///
+    /// This means that besides the iterator function influencing the loop body,
+    /// the loop body can also propagate feedback to the iterator function based
+    /// on when/if the loop is exited, hence the need for this synthetic slot.
+    ///
+    /// The concrete label is determined by control transfers in the caller's
+    /// loop body which make the compiler-synthesized `yield` return `false`.
+    YieldFeedback,
 }
 
 impl SyntheticSlot {
@@ -205,12 +220,11 @@ impl SyntheticSlot {
             Self::Param(_) => LabelBacktraceKind::FunctionArgument,
             Self::Receiver => LabelBacktraceKind::MethodReceiver,
             Self::Capture(_) => LabelBacktraceKind::ClosureCaptureBinding,
-            // CallSiteBranch is realized via [`LabelBacktrace::realize`]'s
-            // dedicated Branch arm, which substitutes the concrete branch
-            // backtrace wholesale (preserving its kind), so this method is
-            // not actually invoked for it -- we still return Branch for
-            // robustness against future refactors that route through here
-            Self::CallSiteBranch => LabelBacktraceKind::Branch,
+            // branch-adjacent synthetics are realized via
+            // [`LabelBacktrace::realize`]'s dedicated Branch arm, which
+            // substitutes the concrete branch backtrace wholesale (preserving
+            // its kind), so this method is not normally invoked for them
+            Self::CallSiteBranch | Self::YieldFeedback => LabelBacktraceKind::Branch,
         }
     }
 }
@@ -223,6 +237,7 @@ impl fmt::Display for SyntheticSlot {
             Self::Receiver => write!(f, "$RECEIVER"),
             Self::Capture(index) => write!(f, "$CAPTURE#{index}"),
             Self::CallSiteBranch => write!(f, "$BRANCH"),
+            Self::YieldFeedback => write!(f, "$YIELD_FEEDBACK"),
         }
     }
 }

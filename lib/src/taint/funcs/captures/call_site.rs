@@ -11,7 +11,7 @@ use crate::{
         funcs::{self, call_application, captures::realization::CaptureEnvSnapshot},
         mutation,
     },
-    values::{FunctionValue, Mergeable, SelfAwareBacktraceContainer, ValueRef},
+    values::{FunctionValue, Mergeable, SelfAwareBacktraceContainer, UnifiedRealization, ValueRef},
 };
 
 type CaptureConcretes<'a> = BTreeMap<usize, Option<LabelBacktrace<'a>>>;
@@ -21,6 +21,29 @@ pub struct CallCaptureConcretes<'a> {
     pub at_entry: CaptureConcretes<'a>,
     // values suitable for realizing the function's summarized outcome
     pub for_outcome: CaptureConcretes<'a>,
+}
+
+impl<'a> CallCaptureConcretes<'a> {
+    pub fn from_stable_environment(ctx: &AnalysisContext<'a>, func: &FunctionValue<'a>) -> Self {
+        let captures = derive_stable_capture_concretes(ctx, func);
+
+        Self {
+            at_entry: captures.clone(),
+            for_outcome: captures,
+        }
+    }
+
+    pub fn realize_at_entry(&self, func: &FunctionValue<'a>) -> FunctionValue<'a> {
+        let substitutions: Vec<_> = self
+            .at_entry
+            .iter()
+            .map(|(index, concrete)| (SyntheticSlot::Capture(*index), concrete.as_ref()))
+            .collect();
+
+        let mut realization = UnifiedRealization::multiple(func.r#ref(), &substitutions);
+
+        func.realize_unified(&mut realization)
+    }
 }
 
 struct CallSiteConcretes<'a> {
@@ -81,6 +104,7 @@ impl<'a> CallSiteConcretes<'a> {
                 SyntheticSlot::CallSiteBranch,
                 self.branch.as_ref(),
             )))
+            .chain(iter::once((SyntheticSlot::YieldFeedback, None)))
             .collect();
 
         initial?.realize_all(func, &substitutions)
@@ -245,6 +269,7 @@ fn apply_capture_write_backs_with<'a>(
             .iter()
             .enumerate()
             .map(|(index, concrete)| (SyntheticSlot::Param(index), concrete.as_ref()))
+            .chain(iter::once((SyntheticSlot::YieldFeedback, None)))
             .chain(
                 capture_backtraces
                     .range(..binding.index())
@@ -380,7 +405,14 @@ fn realize_capture_backtraces_for_call_site<'a>(
     concretes
 }
 
-pub fn derive_stable_capture_concretes<'a>(
+pub fn realize_stable_captures<'a>(
+    ctx: &AnalysisContext<'a>,
+    func: &FunctionValue<'a>,
+) -> FunctionValue<'a> {
+    CallCaptureConcretes::from_stable_environment(ctx, func).realize_at_entry(func)
+}
+
+fn derive_stable_capture_concretes<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
 ) -> CaptureConcretes<'a> {

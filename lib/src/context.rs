@@ -92,6 +92,8 @@ pub struct AnalysisContext<'a> {
     goto_states: Vec<GotoConvergenceState<'a>>,
     /// Stack of convergence state for control-flow back-edges from `continue`.
     loop_states: Vec<LoopConvergenceState<'a>>,
+    /// Feedback accumulated from exits in active range-function loop bodies.
+    range_feedback_states: Vec<RangeFeedbackState<'a>>,
     /// Currently active split control-flow regions.
     split_control_flow_regions: Vec<SplitControlFlowRegion<'a>>,
     /// Path-sensitive cells for range variables declared using `:=`.
@@ -128,6 +130,7 @@ impl<'a> AnalysisContext<'a> {
             per_iteration_bindings: PerIterationBindings::default(),
             goto_states: Vec::new(),
             loop_states: Vec::new(),
+            range_feedback_states: Vec::new(),
             saw_enforcement_checks: false,
             blanket_directives,
             reverse_imports: HashMap::new(),
@@ -474,6 +477,37 @@ impl<'a> AnalysisContext<'a> {
         );
     }
 
+    pub fn push_range_feedback_context(&mut self) {
+        self.range_feedback_states
+            .push(RangeFeedbackState::new_at_depth(self.funcs.len()));
+    }
+
+    pub fn pop_range_feedback_context(&mut self) -> Option<LabelBacktrace<'a>> {
+        self.range_feedback_states
+            .pop()
+            .expect("range feedback context stack must be balanced")
+            .feedback
+    }
+
+    pub fn record_range_exit_feedback(&mut self, location: &Location) {
+        let contribution = self.branch_backtrace().cloned();
+        let function_depth = self.funcs.len();
+        let location = self.pin(location.clone());
+
+        for state in self
+            .range_feedback_states
+            .iter_mut()
+            .filter(|state| state.function_depth == function_depth)
+        {
+            state.feedback = LabelBacktrace::combine_options(
+                state.feedback.take(),
+                contribution.clone(),
+                LabelBacktraceKind::Branch,
+                Cow::Borrowed(&location),
+            );
+        }
+    }
+
     pub fn push_split_control_flow(&mut self, location: Location) {
         let region = SplitControlFlowRegion {
             location: self.pin(location),
@@ -752,6 +786,20 @@ impl<'a> LoopConvergenceState<'a> {
             incoming: None,
             outgoing: None,
             converged: false,
+        }
+    }
+}
+
+struct RangeFeedbackState<'a> {
+    function_depth: usize,
+    feedback: Option<LabelBacktrace<'a>>,
+}
+
+impl RangeFeedbackState<'_> {
+    pub fn new_at_depth(function_depth: usize) -> Self {
+        Self {
+            function_depth,
+            feedback: None,
         }
     }
 }

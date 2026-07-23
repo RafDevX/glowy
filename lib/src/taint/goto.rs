@@ -125,6 +125,8 @@ pub fn pop_goto_convergence_context(ctx: &mut AnalysisContext<'_>) {
 }
 
 pub fn visit_goto<'a>(ctx: &mut AnalysisContext<'a>, label: Span<'a>, location: &Location) {
+    ctx.record_range_exit_feedback(location); // be conservative
+
     let contribution = ctx.branch_backtrace().cloned();
     let location = ctx.pin(location.clone());
 

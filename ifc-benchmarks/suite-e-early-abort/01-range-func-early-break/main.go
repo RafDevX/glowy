@@ -25,6 +25,9 @@ func main() {
 
 	// glowy::assert::{alice, bob, secret}
 	fmt.Println(x)
+
+	// glowy::assert::{alice, bob, secret, private, high}
+	fmt.Println(stopped)
 }
 
 // glowy::label::{alice}
@@ -35,11 +38,15 @@ const bob = 3
 
 var arr = [...]int{1, alice, bob, 4}
 
+var stopped = false
+
 func selectedValues(yield func(int) bool) {
 	for _, value := range arr {
 		if should(value) {
 			if !yield(value) {
-				// glowy::assert::{private, high}
+				stopped = true
+
+				// glowy::assert::{alice, bob, secret, private, high}
 				fmt.Println(0)
 
 				return

@@ -389,6 +389,7 @@ fn realize_function_parameter_synthetics<'a>(
         .map(|index| (SyntheticSlot::Param(index), None))
         .chain(iter::once((SyntheticSlot::Receiver, None)))
         .chain(iter::once((SyntheticSlot::CallSiteBranch, None)))
+        .chain(iter::once((SyntheticSlot::YieldFeedback, None)))
         .collect();
 
     concrete.realize_all(func.r#ref(), &substitutions)
