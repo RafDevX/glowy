@@ -113,31 +113,95 @@ impl<'a> LabelBacktrace<'a> {
             })
             .collect();
 
-        // if there is only one child
-        if let [child] = &*children
-            && *child.label == label
-            && child.location == location
-            && child.symbol == symbol
+        Some(Self::from_normalized_parts(
+            kind,
+            Arc::from(label),
+            symbol,
+            location,
+            children,
+        ))
+    }
+
+    // normalized = label is not Bottom and children are disjoint + sum to label
+    // (this constructor should always be used to ensure invariants are upheld!)
+    fn from_normalized_parts(
+        kind: LabelBacktraceKind,
+        label: Arc<Label<'a>>,
+        symbol: Option<&'a str>,
+        location: Pinned<'a, Location>,
+        children: Arc<[Self]>,
+    ) -> Self {
+        if let [single_child] = &*children
+            && single_child.contains_frame_on_full_label_spine(
+                kind,
+                symbol,
+                &location,
+                label.as_ref(),
+            )
         {
-            // avoid unnecessary repeated backtraces that just make everything more complex;
-            // for example, in the example below:
-            // ```go
-            // // glowy::label::{high}
-            // var a = 3
-            // ```
-            // we just want ExplicitAnnotation and not also Assignment another level up
-            return Some(child.clone());
+            // avoid unnecessary repeated backtraces that just make everything
+            // more complex, as otherwise backtrace trees could grow almost
+            // indefinitely into huge nested structures that make the entire
+            // analysis process incredibly inefficient. this is especially true
+            // for places reliant on convergence loops, such as mutually
+            // recursive functions, since for each iteration all backtraces
+            // would grow substantially while adding no new information (just
+            // duplicates of what is already known), so we instead just keep
+            // the existing subtree and preserve one complete representation
+            return single_child.clone();
         }
 
-        let label = Arc::from(label);
-
-        Some(Self {
+        Self {
             kind,
             label,
             symbol,
             location,
             children,
-        })
+        }
+    }
+
+    fn contains_frame_on_full_label_spine(
+        &self,
+        kind: LabelBacktraceKind,
+        symbol: Option<&str>,
+        location: &Pinned<'_, Location>,
+        label: &Label<'a>,
+    ) -> bool {
+        if self.label() != label {
+            // since children represent their parent's label, if the current
+            // label does not exactly match what we are looking for, then we do
+            // not want to deduplicate:
+            //
+            // (a) if self.label() is orthogonal to `label`, then `self` is
+            //     irrelevant for `label`'s deduplication
+            // (b) if self.label() is a subset of `label`, then its children
+            //     will never exhibit a greater label than self.label(), thus
+            //     they will never match the expected `label` exactly
+            // (c) if self.label() is a superset of `label`, then this tree
+            //     represents that there has been a revocation of some sort that
+            //     caused the label to decrease, meaning we want to keep that
+            //     info (not accidentally discard it in name of deduplication)
+            return false;
+        }
+
+        if self.kind == kind && self.symbol == symbol && self.location == *location {
+            // if the label matched above and now everything else does too
+            // (except deep children comparison, which we ignore), then we know
+            // that we necessarily should deduplicate
+            return true;
+        }
+
+        // otherwise, if the label matched but the rest of this backtrace did
+        // not, then we can recurse down the tree and try to see if our children
+        // do match -- however, since children are disjoint, a child will only
+        // match `label` if we only have a single child, otherwise it would
+        // (by definition) only have a subset of `label` (= self.label())
+        if let [single_child] = &*self.children {
+            single_child.contains_frame_on_full_label_spine(kind, symbol, location, label)
+        } else {
+            // nope, we tried our best
+            false
+        }
     }
 
     /// Constructs a new instance equal to the union of all its children.
@@ -182,23 +246,26 @@ impl<'a> LabelBacktrace<'a> {
         .unwrap() // safe because if self exists, label is not Bottom
     }
 
-    /// Constructs a new instance with self as its only child, avoiding cloning.
+    /// Constructs a new instance with self as its only child.
     pub(crate) fn into_single_child(
         self,
         parent_kind: LabelBacktraceKind,
         parent_symbol: Option<&'a str>,
         parent_location: Pinned<'a, Location>,
     ) -> Self {
-        // note that we're not using Self::new to avoid cloning self and to skip
-        // unnecessary checks / label optimizations -- we already know this
-        // label isn't Bottom + cannot be compacted further because self exists
-        Self {
-            kind: parent_kind,
-            label: Arc::clone(&self.label),
-            symbol: parent_symbol,
-            location: parent_location,
-            children: Arc::from([self]),
-        }
+        // we don't use Self::new here to avoid clones where possible and to
+        // skip unnecessary checks / optimizations -- we already know this label
+        // isn't Bottom and our children cannot be compacted further
+
+        let label = Arc::clone(&self.label);
+
+        Self::from_normalized_parts(
+            parent_kind,
+            label,
+            parent_symbol,
+            parent_location,
+            Arc::from([self]),
+        )
     }
 
     /// Returns a new instance (with symbol = None) representing a step above
@@ -398,17 +465,19 @@ impl<'a> LabelBacktrace<'a> {
             return None;
         }
 
-        Some(Self {
-            kind: self.kind,
-            label: Arc::from(new_label),
-            symbol: self.symbol,
-            location: self.location.clone(),
-            children: self
-                .children
-                .iter()
-                .filter_map(|child| child.restrict_to_label(constraint))
-                .collect(),
-        })
+        let children = self
+            .children
+            .iter()
+            .filter_map(|child| child.restrict_to_label(constraint))
+            .collect();
+
+        Some(Self::from_normalized_parts(
+            self.kind,
+            Arc::from(new_label),
+            self.symbol,
+            self.location.clone(),
+            children,
+        ))
     }
 
     /// Tries to mutate the present instance so that its label has certain tags
