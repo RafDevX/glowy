@@ -719,9 +719,14 @@ fn calculate_call_result<'a>(
         )
         .collect();
 
+    // sharing this across components means that a joint cache is used, which
+    // allows aliases between results to be preserved. for example, this allows
+    // for `ch, alias := pair(); ch <- secret; use(<-alias)`
+    let mut realization = UnifiedRealization::multiple(func.r#ref(), &substitutions);
+
     outcome
         .iter()
-        .map(|component| component.realize_all(func.r#ref(), &substitutions))
+        .map(|component| component.realize_unified(&mut realization))
         .collect()
 }
 
