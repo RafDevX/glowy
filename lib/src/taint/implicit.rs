@@ -1,11 +1,12 @@
-use std::{borrow::Cow, cell::Cell, iter};
+use std::{borrow::Cow, cell::Cell, iter, rc::Rc};
 
 use parser::{
     Location, Span,
     ast::{
         AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,
         ForHeaderNode, ForNode, ForRangeNode, FunctionResultNode, FunctionSignatureNode, IfNode,
-        LiteralNode, StatementNode, SwitchNode, TypeNameNode, TypeNode, TypeSwitchNode,
+        LiteralNode, StatementNode, SwitchNode, TypeNameNode, TypeNode, TypeSwitchCaseClause,
+        TypeSwitchNode,
     },
 };
 
@@ -1014,10 +1015,6 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
 
     let value = exprs::visit_single_expr(ctx, &node.expr);
 
-    if let Some(id) = node.decl {
-        ctx.declare_new_symbol(Symbol::new_ref(ctx.pin(id), true, value.clone(), None));
-    }
-
     let expr_location = ctx.pin(node.expr.location().into_owned());
     let pushed = if let Some(bt) = value.backtrace() {
         ctx.push_branch_backtrace(bt.into_single_child(
@@ -1044,19 +1041,53 @@ fn visit_type_switch<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeSwitchNode<'a
             continue;
         }
 
-        // we don't actually care about clause.types because raw types aren't
-        // values and so don't have labels
-
-        // vvv this will create another scope for the clause body,
-        // which is (probably?) intended? spec unclear at first glance
-        super::visit_scoped_statements(ctx, &clause.body);
+        visit_type_switch_clause(ctx, clause, node.decl, &value);
     }
 
     if let Some(clause) = default_clause {
-        super::visit_scoped_statements(ctx, &clause.body);
+        visit_type_switch_clause(ctx, clause, node.decl, &value);
     }
 
     if pushed {
         ctx.pop_branch_backtrace();
     }
+}
+
+fn visit_type_switch_clause<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    clause: &TypeSwitchCaseClause<'a>,
+    guard_decl: Option<Span<'a>>,
+    guard_value: &ValueRef<'a>,
+) {
+    // declare a distinct guard variable in each clause's implicit block
+    ctx.symtab_mut().select_next_child_scope(); // push
+
+    if let Some(id) = guard_decl.filter(|id| id.content() != "_") {
+        let declared_type = if let [Some(single_type)] = clause.types.as_slice() {
+            // the clause lists exactly one type (and it is not nil), so the
+            // guard variable has that type (we know it statically)
+
+            let (types, symtab) = ctx.types_mut_with_symtab();
+
+            types.resolve(symtab, single_type)
+        } else {
+            // multiple types are listed, so we cannot know which one matched,
+            // thus we just re-use the guard value's type if one is known
+            guard_value.declared_type().cloned()
+        };
+
+        let value = guard_value
+            .copy_by_value_semantics()
+            .into_with_declared_type(declared_type);
+
+        let symbol = Symbol::new_ref(ctx.pin(id), true, value, None);
+
+        ctx.declare_new_symbol(Rc::clone(&symbol));
+
+        ctx.register_per_iteration_binding(&symbol);
+    }
+
+    super::visit_statements(ctx, &clause.body);
+
+    ctx.symtab_mut().select_parent_scope(); // pop
 }
