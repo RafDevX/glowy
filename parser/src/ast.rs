@@ -581,12 +581,27 @@ pub struct MakeNode<'a> {
 }
 
 // technically this should be a CallNode per the spec, but since the first
-// argument is a type, and since this function has special implications, we just
-// treat it as another kind of expression (not a function call)
+// argument can be a type, and since this function has special implications, we
+// just treat it as another kind of expression (not a function call)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewNode<'a> {
-    pub r#type: TypeNode<'a>,
+    pub arg: NewArgNode<'a>,
     pub location: Location, // for better error messages
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewArgNode<'a> {
+    Type(TypeNode<'a>),
+    Expr(Box<ExprNode<'a>>),
+    // both `new(T)` and `new(expr)` are valid Go, and sometimes they are not
+    // distinguishable at parse-time, so in the ambiguous case both a parsed
+    // type and a parsed expression are provided: it is up to the consumer to
+    // resolve the ambiguity and make the most appropriate decision available
+    // according to contextual information (such as what types are defined)
+    Ambiguous {
+        if_type: TypeNode<'a>,
+        if_expr: Box<ExprNode<'a>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

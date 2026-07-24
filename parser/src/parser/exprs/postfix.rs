@@ -2,8 +2,8 @@ use super::{parse_expression, parse_expressions_list_while};
 use crate::{
     ParsingError, TokenStream,
     ast::{
-        AmbiguousBracketAccessNode, CallNode, ExprNode, IndexingNode, MakeNode, NewNode,
-        SelectionNode, SlicingNode, TypeAssertionNode, TypeInstantiationNode, TypeNode,
+        AmbiguousBracketAccessNode, CallNode, ExprNode, IndexingNode, MakeNode, NewArgNode,
+        NewNode, SelectionNode, SlicingNode, TypeAssertionNode, TypeInstantiationNode, TypeNode,
     },
     parser::{BacktrackingContext, PResult, expect, of_kind, types::parse_type},
     token::TokenKind,
@@ -99,13 +99,41 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
 fn parse_new<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, NewNode<'a>> {
     expect(s, TokenKind::ParenL, Some("new call"))?;
 
-    let r#type = parse_type(s)?;
+    let mut type_probe = s.clone();
 
-    expect(s, TokenKind::ParenR, Some("new call"))?;
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
+
+    let expr = parse_expression(b, true)
+        .ok()
+        .filter(|_| matches!(b.peek(), Some(Ok(of_kind!(TokenKind::ParenR)))));
+
+    let arg = if let Some(expr) = expr {
+        context.commit()?;
+
+        let closing = expect(s, TokenKind::ParenR, Some("new call"))?;
+
+        match parse_type(&mut type_probe)
+            .ok()
+            .filter(|_| type_probe.peek() == Some(&Ok(closing)))
+        {
+            Some(r#type) => NewArgNode::Ambiguous {
+                if_type: r#type,
+                if_expr: Box::new(expr),
+            },
+            None => NewArgNode::Expr(Box::new(expr)),
+        }
+    } else {
+        let r#type = parse_type(s)?;
+
+        expect(s, TokenKind::ParenR, Some("new call"))?;
+
+        NewArgNode::Type(r#type)
+    };
 
     let location = s.location_starting_at(start);
 
-    Ok(NewNode { r#type, location })
+    Ok(NewNode { arg, location })
 }
 
 fn parse_selection<'a>(
@@ -370,7 +398,7 @@ mod tests {
     use super::*;
     use crate::{
         Span,
-        ast::{BinaryOpKind, LiteralNode, UnaryOpKind},
+        ast::{BinaryOpKind, LiteralNode, TypeNameNode, UnaryOpKind},
         lexer::Lexer,
         parser::exprs::parse_expression,
     };
@@ -477,6 +505,60 @@ mod tests {
                 annotation: None
             }),
             parse("(abc.def + 14)[k + 2,]()").unwrap()
+        );
+    }
+
+    #[test]
+    fn new_with_type_arg() {
+        assert_eq!(
+            ExprNode::New(NewNode {
+                arg: NewArgNode::Type(TypeNode::Slice {
+                    element: Box::new(TypeNode::Name(TypeNameNode {
+                        package: None,
+                        id: Span::new("int", 6, 1),
+                        args: vec![],
+                    })),
+                }),
+                location: 0..10,
+            }),
+            parse("new([]int)").unwrap()
+        );
+    }
+
+    #[test]
+    fn new_with_expr_arg() {
+        assert_eq!(
+            ExprNode::New(NewNode {
+                arg: NewArgNode::Expr(Box::new(ExprNode::BinaryOp {
+                    kind: BinaryOpKind::Sum,
+                    left: Box::new(ExprNode::Name(Span::new("x", 4, 1))),
+                    right: Box::new(ExprNode::Literal(LiteralNode::Int {
+                        value: 1,
+                        location: 8..9,
+                    })),
+                    location: 4..9,
+                })),
+                location: 0..10,
+            }),
+            parse("new(x + 1)").unwrap()
+        );
+    }
+
+    #[test]
+    fn new_with_ambiguous_arg() {
+        assert_eq!(
+            ExprNode::New(NewNode {
+                arg: NewArgNode::Ambiguous {
+                    if_type: TypeNode::Name(TypeNameNode {
+                        package: None,
+                        id: Span::new("T", 4, 1),
+                        args: vec![],
+                    }),
+                    if_expr: Box::new(ExprNode::Name(Span::new("T", 4, 1))),
+                },
+                location: 0..6,
+            }),
+            parse("new(T)").unwrap()
         );
     }
 }
