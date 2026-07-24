@@ -303,6 +303,16 @@ impl<'a> FunctionValue<'a> {
     }
 
     pub fn defer_check(&mut self, check: DeferredEnforcementCheck<'a>) {
+        if self
+            .deferred_checks
+            .iter_mut()
+            .any(|existing| existing.merge_if_same_site(&check))
+        {
+            // the new check was merged into an existing deferred check, so
+            // there is no need to add it
+            return;
+        }
+
         self.deferred_checks.push(check);
     }
 
@@ -343,12 +353,13 @@ impl<'a> FunctionValue<'a> {
         let from_func = other.r#ref();
         let to_func = self.r#ref().clone();
 
-        self.deferred_checks.extend(
-            other
-                .deferred_checks()
-                .iter()
-                .map(|check| check.rebind_synthetic_func(from_func, &to_func)),
-        );
+        for check in other
+            .deferred_checks()
+            .iter()
+            .map(|check| check.rebind_synthetic_func(from_func, &to_func))
+        {
+            self.defer_check(check);
+        }
 
         true
     }
@@ -647,9 +658,16 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.sources == other.sources
             && self.revocations == other.revocations
             && self.sinks == other.sinks
-            && self
-                .deferred_checks
-                .snapshot_aware_eq(&other.deferred_checks)
+            // propagation order is irrelevant, so we do not use Vec's impl of
+            // SnapshotAwareEr: `defer_check` guarantees that each source-level
+            // check is registered at most once
+            && self.deferred_checks.len() == other.deferred_checks.len()
+            && self.deferred_checks.iter().all(|check| {
+                other
+                    .deferred_checks
+                    .iter()
+                    .any(|candidate| check.snapshot_aware_eq(candidate))
+            })
             && self.captures.snapshot_aware_eq(&other.captures)
             && self.yield_param == other.yield_param
             && self.yield_acc.snapshot_aware_eq(&other.yield_acc)

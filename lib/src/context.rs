@@ -843,6 +843,73 @@ pub enum DeferredEnforcementCheck<'a> {
 }
 
 impl<'a> DeferredEnforcementCheck<'a> {
+    /// Merges another observation of the same source-level enforcement check.
+    ///
+    /// Recursive call graphs can propagate the same deferred check through
+    /// several paths and convergence iterations. Keeping one entry per check
+    /// identity prevents combinatorial growth, while union'ing its backtraces
+    /// preserves every observed label. Alternative provenance which adds no
+    /// label is intentionally discarded because it cannot affect enforcement.
+    pub fn merge_if_same_site(&mut self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Sink { sink, found, file },
+                Self::Sink {
+                    sink: other_sink,
+                    found: other_found,
+                    file: other_file,
+                },
+            ) if sink == other_sink && file == other_file => {
+                if other_found.label().is_subset_of(found.label()) {
+                    // no need to union, since found >= other_found:
+                    // (a) for allow sinks, a whitelist that allows found would
+                    //     also necessarily allow a smaller other_found
+                    // (b) for deny sinks, a blacklist that does not disallow
+                    //     found would also necessarily not disallow a smaller
+                    //     other_found
+                    // thus, in either case, we can discard other_found in favor
+                    // of just keeping found
+                } else {
+                    *found = found.union(
+                        other_found,
+                        LabelBacktraceKind::EnforcementAggregation,
+                        Pinned::new(*file, sink.location.clone()),
+                    );
+                }
+
+                true
+            }
+            (
+                Self::Assertion {
+                    expected_sequence,
+                    found,
+                    file,
+                    location,
+                },
+                Self::Assertion {
+                    expected_sequence: other_expected,
+                    found: other_found,
+                    file: other_file,
+                    location: other_location,
+                },
+            ) if expected_sequence == other_expected
+                && file == other_file
+                && location == other_location
+                && found.as_ref().map(LabelBacktrace::label)
+                    == other_found.as_ref().map(LabelBacktrace::label) =>
+            {
+                // assertions are equality based and thus only be merged if
+                // their labels match exactly, but should still be merged
+                // regardless of provenance information (= backtrace children)
+                // to prevent uncontrolled growth that results in extreme
+                // inefficiencies for e.g. mutually recursive functions
+
+                true
+            }
+            _ => false,
+        }
+    }
+
     // might return None if a sink enforcement check no longer makes sense
     // (`found` is now Bottom, so the check would always pass)
     pub fn realize_unified<'b>(
