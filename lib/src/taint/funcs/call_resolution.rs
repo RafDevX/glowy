@@ -126,7 +126,11 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
             // if the last parameter is variadic, then it does not count for our
             // expected cardinality, so we subtract one. we then use >= because
             // 0 or more arguments can be folded into the variadic parameter
-            let expected = count.saturating_sub(1);
+            let expected = if variadic {
+                count.saturating_sub(1)
+            } else {
+                count
+            };
 
             if !(variadic && node.args.len() >= expected) {
                 ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
