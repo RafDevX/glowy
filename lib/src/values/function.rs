@@ -117,7 +117,7 @@ impl<'a> FunctionValue<'a> {
     ) -> Self {
         let r#ref = FunctionRef::BuiltIn(name);
 
-        let param_ids = params.iter().map(|id| Span::new(id, 0, 1)).collect();
+        let param_ids: Vec<_> = params.iter().map(|id| Span::new(id, 0, 1)).collect();
 
         let dummy_type = TypeNode::Name(TypeNameNode {
             package: None,
@@ -138,12 +138,18 @@ impl<'a> FunctionValue<'a> {
             ]),
         };
 
-        let signature = FunctionSignatureNode {
-            params: vec![FunctionParamDeclNode {
+        let signature_params = if param_ids.is_empty() {
+            Vec::new()
+        } else {
+            vec![FunctionParamDeclNode {
                 ids: param_ids,
                 variadic,
                 r#type: dummy_type,
-            }],
+            }]
+        };
+
+        let signature = FunctionSignatureNode {
+            params: signature_params,
             result,
         };
 
