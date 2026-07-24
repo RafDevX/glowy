@@ -8,9 +8,9 @@ use parser::{
         DeclNode, ElseNode, ExprNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode,
         ForHeaderNode, ForNode, ForRangeNode, FunctionDeclNode, FunctionParamDeclNode,
         FunctionResultNode, FunctionSignatureNode, IfNode, IndexingNode, LiteralNode, MakeNode,
-        NewNode, SelectClauseNode, SelectNode, SelectionNode, SendNode, ShortVarDeclNode,
-        SlicingNode, StatementNode, StructLiteralFieldsNode, SwitchNode, TypeAssertionNode,
-        TypeInstantiationNode, TypeSwitchCaseClause, TypeSwitchNode,
+        NewArgNode, NewNode, SelectClauseNode, SelectNode, SelectionNode, SendNode,
+        ShortVarDeclNode, SlicingNode, StatementNode, StructLiteralFieldsNode, SwitchNode,
+        TypeAssertionNode, TypeInstantiationNode, TypeSwitchCaseClause, TypeSwitchNode,
     },
 };
 
@@ -656,10 +656,17 @@ impl<'a> SymbolCaptureCollector<'a> for MakeNode<'a> {
 impl<'a> SymbolCaptureCollector<'a> for NewNode<'a> {
     fn collect_captured_symbols(
         &self,
-        _captured: &mut CapturedSymbols<'a>,
-        _declared: &mut HashSet<&'a str>,
+        captured: &mut CapturedSymbols<'a>,
+        declared: &mut HashSet<&'a str>,
     ) {
-        // nothing to do, the only argument is a type
+        match &self.arg {
+            NewArgNode::Type(_) => {}
+            // if Ambiguous, we don't know which interpretation will be chosen,
+            // so we have to be conservative and consider both possible cases
+            NewArgNode::Expr(expr) | NewArgNode::Ambiguous { if_expr: expr, .. } => {
+                expr.collect_captured_symbols(captured, declared);
+            }
+        }
     }
 }
 
