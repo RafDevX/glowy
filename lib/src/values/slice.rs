@@ -457,7 +457,13 @@ impl<'a> SliceValue<'a> {
             // position, and a branch-dependent copy might not execute, so it
             // must retain the old destination. in both cases, weakly add the
             // source aggregate rather than overwriting any existing element
-            let copied = source_value.nest_backtrace(
+
+            let source_element = source.map_or_else(
+                || source_value.clone_inner(),
+                |source| source.range_element(location.clone()),
+            );
+
+            let copied = source_element.nest_backtrace(
                 LabelBacktraceKind::SliceCopy,
                 None,
                 location.clone(),
