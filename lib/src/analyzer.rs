@@ -6,7 +6,14 @@ use std::{
     path,
 };
 #[cfg(feature = "parallelism")]
-use std::{num, sync, thread};
+use std::{
+    num,
+    sync::{
+        self,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+};
 
 use indexmap::IndexSet;
 use parser::ast::SourceFileNode;
@@ -919,11 +926,27 @@ impl Analyzer {
 
                 #[cfg(feature = "parallelism")]
                 {
+                    // using `.enumerate()` to get indexes would lead to
+                    // (largely) useless verbose status messages, since reported
+                    // permutation N conveys no information about how many are
+                    // done and how many are left unless N is taken in order of
+                    // processing (which rayon would not, since it would take
+                    // indexes almost at random, via recursive division).
+                    // thus, we build our own indexes from inside rayon to keep
+                    // them sequential (even if some of them will be executing
+                    // in parallel, new tasks will always have a greater index).
+                    // the trade off is that we can no longer rely on index to
+                    // deterministically identify a permutation, but that should
+                    // not be a major concern since there is always an initial
+                    // verbose line mapping index to a specific build constraint
+                    let counter = AtomicUsize::new(0);
+
                     ANALYSIS_POOL.install(|| {
                         build_permutations
                             .par_iter()
-                            .enumerate()
-                            .flat_map_iter(|(index, permutation)| {
+                            .flat_map_iter(|permutation| {
+                                let index = counter.fetch_add(1, Ordering::SeqCst);
+
                                 self.process_permutation(
                                     permutation,
                                     index,
