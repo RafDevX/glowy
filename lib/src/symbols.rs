@@ -492,11 +492,18 @@ impl<'a> SymbolTable<'a> {
             // package's import path
             // see docs: https://pkg.go.dev/cmd/go#hdr-Remote_import_paths
 
-            if components.clone().count() == 4 {
-                // the last component is the rev ("sub"), so we need to skip
-                // that and use the penultimate component instead
-                // (e.g., `github.com/user/pkg/v3` should have its native name
-                // inferred as `pkg` and not as `v3`)
+            let last_component = components.clone().next().unwrap();
+            let looks_like_revision = last_component == "latest"
+                || last_component
+                    .strip_prefix('v')
+                    .is_some_and(|suffix| suffix.starts_with(|c: char| c.is_ascii_digit()));
+            // ^ we need this gating because otherwise we would strip legitimate
+            // submodules (e.g., `github.com/user/pkg/sub`)
+
+            if looks_like_revision && components.clone().count() == 4 {
+                // the last component looks like a revision, so skip it and use
+                // the penultimate component instead, so that for example
+                // `github.com/user/pkg/v3` is inferred as `pkg` (vs. `v3`)
                 components.next();
             }
         }
