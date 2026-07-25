@@ -1,11 +1,11 @@
 //! Used exclusively for Stage 1: `RecordDeclarations`
 //! (visit top-level declarations).
 
-use std::rc::Rc;
+use std::{iter, rc::Rc};
 
 use parser::ast::{
-    BindingDeclSpecNode, DeclNode, FunctionDeclNode, ImportNode, ImportSpecNode, SourceFileNode,
-    TypeDeclSpecNode, TypeNameNode, TypeNode,
+    BindingDeclSpecNode, DeclNode, FunctionDeclNode, FunctionResultNode, ImportNode,
+    ImportSpecNode, InterfaceElementNode, SourceFileNode, TypeDeclSpecNode, TypeNameNode, TypeNode,
 };
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
     errors::AnalysisErrorKind,
     symbols::Symbol,
     types::TypeInfo,
-    values::{FunctionRef, FunctionValue, Value, ValueRef},
+    values::{FunctionRef, FunctionValue, ReceiverKind, Value, ValueRef},
 };
 
 pub fn visit_source_file<'a>(
@@ -148,6 +148,15 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
 
     let target_type = register_type_in_registry(ctx, node);
 
+    if let Some(target_type) = target_type.as_ref() {
+        // we register methods to the interface type to help with discovery, as
+        // otherwise I.f() would lead to an invalid selection error being
+        // reported. however, this is really just a convenience because we do
+        // not actually model interfaces, and it is not sound: any real
+        // interface implementations might have insecure side-effects!
+        register_direct_interface_methods(ctx, node, target_type);
+    }
+
     let decl_context = {
         let (types, symtab) = ctx.types_mut_with_symtab();
 
@@ -200,6 +209,71 @@ fn register_type_in_registry<'a>(
         types.queue_pending_field_resolutions_for(symtab, &info);
 
         Some(info)
+    }
+}
+
+fn register_direct_interface_methods<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &TypeDeclSpecNode<'a>,
+    target_type: &Rc<TypeInfo<'a>>,
+) {
+    let TypeNode::Interface { elements } = &node.r#type else {
+        return;
+    };
+
+    for element in elements {
+        let InterfaceElementNode::Method { name, signature } = element else {
+            continue;
+        };
+
+        let declared_result_types = resolve_result_types(ctx, &signature.result);
+
+        let pinned_name = ctx.pin(*name);
+        let location = pinned_name.pinned_location();
+
+        let mut func = FunctionValue::new(
+            FunctionRef::Named(pinned_name),
+            Some(signature.clone()),
+            // the interface's dynamic value may hold a pointer receiver, so
+            // retain the more conservative receiver semantics
+            Some(ReceiverKind::Pointer),
+            declared_result_types,
+            None,
+        );
+
+        let directives = ctx.blanket_directives_for(
+            target_type.package(),
+            Some(target_type.name()),
+            name.content(),
+        );
+
+        func.absorb_blanket_directives(directives.iter());
+
+        let value = ValueRef::new(Value::Function(Box::new(func)), location, None);
+        let symbol = Symbol::new_ref(pinned_name, false, value, None);
+
+        target_type.register_method(name.content(), symbol);
+        ctx.types_mut().record_method_name(name.content());
+    }
+}
+
+fn resolve_result_types<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    result: &FunctionResultNode<'a>,
+) -> Vec<Option<Rc<TypeInfo<'a>>>> {
+    let mut resolve = |r#type| {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, r#type)
+    };
+
+    match result {
+        FunctionResultNode::None => Vec::new(),
+        FunctionResultNode::Single(r#type) => vec![resolve(r#type)],
+        FunctionResultNode::Params(params) => params
+            .iter()
+            .flat_map(|param| iter::repeat_n(resolve(&param.r#type), param.ids.len().max(1)))
+            .collect(),
     }
 }
 

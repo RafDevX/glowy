@@ -112,7 +112,8 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
         } => {
             explicit::visit_binding_decl(ctx, specs, true, location, annotation.as_deref());
         }
-        DeclNode::Type { .. } => {} // we just ignore these
+        // we just ignore these; already registered during Stage 1
+        DeclNode::Type { .. } => {}
         DeclNode::Function(func_node) => funcs::visit_function_decl(ctx, func_node),
     }
 }
