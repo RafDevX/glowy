@@ -482,39 +482,36 @@ impl<'a> SymbolTable<'a> {
     fn infer_qualifier_from_import_path(path: &FullPackagePath) -> String {
         let mut components = path.rsplit('/'); // rev. ordered
 
-        if ["github.com", "bitbucket.com"]
-            .iter()
-            .any(|prefix| path.starts_with(prefix))
-        {
-            // special case: for Go-recognized remote git repositories, we can
-            // mitigate the biggest pitfall of the general case's heuristic by
-            // ignoring tag/branch/rev name if that's the last component of the
-            // package's import path
-            // see docs: https://pkg.go.dev/cmd/go#hdr-Remote_import_paths
+        // special case: for remote git repositories, we can mitigate the
+        // biggest pitfall of the general case's heuristic by ignoring
+        // tag/branch/rev name if that's the last component of the package's
+        // import path (we don't do this just for the hosts specifically named
+        // at https://pkg.go.dev/cmd/go#hdr-Remote_import_paths since real-world
+        // examples exists for packages from other hosts, and we already gate
+        // below on what should almost always only be a version number/name
 
-            let last_component = components.clone().next().unwrap();
-            let looks_like_revision = last_component == "latest"
-                || last_component
-                    .strip_prefix('v')
-                    .is_some_and(|suffix| suffix.starts_with(|c: char| c.is_ascii_digit()));
-            // ^ we need this gating because otherwise we would strip legitimate
-            // submodules (e.g., `github.com/user/pkg/sub`)
+        let last_component = components.clone().next().unwrap();
+        let looks_like_revision = last_component == "latest"
+            || last_component
+                .strip_prefix('v')
+                .is_some_and(|suffix| suffix.starts_with(|c: char| c.is_ascii_digit()));
+        // ^ we need this gating because otherwise we would strip legitimate
+        // submodules (e.g., `example.com/user/pkg/sub`)
 
-            if looks_like_revision && components.clone().count() == 4 {
-                // the last component looks like a revision, so skip it and use
-                // the penultimate component instead, so that for example
-                // `github.com/user/pkg/v3` is inferred as `pkg` (vs. `v3`)
-                components.next();
-            }
+        if looks_like_revision && components.clone().count() == 4 {
+            // the last component looks like a revision, so skip it and use the
+            // penultimate component instead, so that for example
+            // `example.com/user/pkg/v3` is inferred as `pkg` (vs. `v3`)
+            components.next();
         }
 
         // general case: infer that the package's native name corresponds to the
         // last component of the path (e.g., `net/http` -> `http`)
-        // [evidently, this is not a foolproof heuristic, but it should
-        // work for the overwhelming majority of cases, including stdlib]
+        // [evidently, this is not a foolproof heuristic, but it should work for
+        // the overwhelming majority of cases, including stdlib]
         let native_name = components.next().unwrap();
 
-        // final consideration: many packages have their github.com/etc.
+        // final consideration: many packages have their hosting platform
         // repository name with a `go-`/`-go` tag around what is actually their
         // native package name, so strip that from our native name candidate
         native_name
