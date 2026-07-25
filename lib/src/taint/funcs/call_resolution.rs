@@ -1,4 +1,4 @@
-use parser::ast::{CallNode, ExprNode, SelectionNode};
+use parser::ast::{CallNode, ExprNode, FunctionSignatureNode, SelectionNode};
 
 use crate::{
     context::AnalysisContext,
@@ -9,7 +9,7 @@ use crate::{
         funcs::{CallResolution, ResolvedCall, builtins},
     },
     types::TypeKind,
-    values::{FunctionValue, SelfAwareBacktraceContainer, ValueRef},
+    values::{FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
 };
 
 pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> CallResolution<'a> {
@@ -88,6 +88,26 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
         )]);
     }
 
+    drop(value_func);
+
+    // evaluate arguments after the function value, in Go's specified order.
+    // a sole, unexpanded argument expression may be a multi-valued function
+    // call whose results supply the parameters one-for-one. however: an
+    // argument with `...` is different: it is one slice value supplied to a
+    // variadic parameter, so it must be evaluated in a single-value context
+    let mut args_with_consts = visit_call_args(ctx, node);
+
+    let has_unknown_cardinality = !node.variadic
+        && matches!(
+            (node.args.as_slice(), args_with_consts.as_slice()),
+            ([ExprNode::Call(_)], [(result, _)]) if result.is_mobius()
+        );
+
+    // re-borrow the function after evaluating the arguments, which may have
+    // mutated analyzer state
+    #[expect(clippy::shadow_unrelated, reason = "Same value as before")]
+    let value_func = value.as_function().unwrap();
+
     // when this was detected as a method-form call but the callee could not be
     // extracted from type information, fallback to a weaker name-only heuristic
     // to determine whether the inferred method we decided to assume (from
@@ -101,8 +121,14 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     // sound: blackbox folds all input taint, Möbius accepts any cardinality
     let blackbox_replacement = if !extracted_from_type
         && let Some((selection, _)) = method_receiver.as_ref()
-        && is_incompatible_cardinality_method(ctx, selection, &value_func, node.args.len())
-    {
+        && !has_unknown_cardinality
+        && is_incompatible_cardinality_method(
+            ctx,
+            selection,
+            &value_func,
+            args_with_consts.len(),
+            node.variadic,
+        ) {
         Some(Box::new(FunctionValue::new_unknown(
             // we keep only the overall access backtrace
             value_func.backtrace().cloned(),
@@ -115,33 +141,14 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
 
     let func: &FunctionValue<'a> = blackbox_replacement.as_deref().unwrap_or(&value_func);
 
-    // can only check for correct cardinality if we have a signature, otherwise
-    // we just assume everything is fine (would be wrong to error)
-    if let Some(signature) = func.signature() {
-        let count = signature.count_inputs();
-
-        if node.args.len() != count {
-            let variadic = signature.params.last().is_some_and(|param| param.variadic);
-
-            // if the last parameter is variadic, then it does not count for our
-            // expected cardinality, so we subtract one. we then use >= because
-            // 0 or more arguments can be folded into the variadic parameter
-            let expected = if variadic {
-                count.saturating_sub(1)
-            } else {
-                count
-            };
-
-            if !(variadic && node.args.len() >= expected) {
-                ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-                    expected,
-                    found: node.args.len(),
-                    location: node.location.clone(),
-                });
-
-                return CallResolution::Final(vec![]);
-            }
-        }
+    if !validate_call_cardinality(
+        ctx,
+        node,
+        func,
+        &mut args_with_consts,
+        has_unknown_cardinality,
+    ) {
+        return CallResolution::Final(vec![]);
     }
 
     // drop the immutable borrow of `value` (held via `value_func`/`func`)
@@ -153,16 +160,7 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     // value matters (its taint flows in via SyntheticSlot::Receiver)
     let method_receiver_value = method_receiver.map(|(_, base)| base);
 
-    let (arg_values, arg_consts) = node
-        .args
-        .iter()
-        .map(|arg| {
-            let known_const = exprs::try_resolve_simple_const(ctx, arg);
-            let arg_value = exprs::visit_single_expr(ctx, arg);
-
-            (arg_value, known_const)
-        })
-        .unzip();
+    let (arg_values, arg_consts) = args_with_consts.into_iter().unzip();
 
     CallResolution::PendingApply(ResolvedCall {
         callee: value,
@@ -220,6 +218,80 @@ fn try_resolve_special_builtin_call<'a>(
     super::apply_predeclared_blanket_revocations(ctx, name, &arg_consts, &mut result);
 
     Some(CallResolution::Final(result))
+}
+
+fn visit_call_args<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+) -> Vec<(ValueRef<'a>, Option<SimpleConstValue>)> {
+    if !node.variadic && matches!(node.args.as_slice(), [ExprNode::Call(_)]) {
+        return exprs::visit_multi_exprs_with_consts(ctx, &node.args);
+    }
+
+    node.args
+        .iter()
+        .map(|arg| {
+            let known_const = exprs::try_resolve_simple_const(ctx, arg);
+            let arg_value = exprs::visit_single_expr(ctx, arg);
+
+            (arg_value, known_const)
+        })
+        .collect()
+}
+
+fn validate_call_cardinality<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &CallNode<'a>,
+    func: &FunctionValue<'a>,
+    args: &mut Vec<(ValueRef<'a>, Option<SimpleConstValue>)>,
+    has_unknown_cardinality: bool,
+) -> bool {
+    let Some(signature) = func.signature() else {
+        // without a known signature, there is no possible check to perform
+        // (we just assume everything is fine; it would be unsound to error)
+        return true;
+    };
+
+    let count = signature.count_inputs();
+
+    if has_unknown_cardinality
+        && let [(single, _)] = args.as_slice()
+        && let Some(expanded) = single.try_expand_to(count)
+    {
+        *args = expanded
+            .into_iter()
+            .map(|expanded_value| (expanded_value, None))
+            .collect();
+    }
+
+    let (expected, accepts_extra) = expected_call_cardinality(signature, node.variadic);
+    let valid = args.len() == expected || (accepts_extra && args.len() > expected);
+
+    if !valid {
+        ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
+            expected,
+            found: args.len(),
+            location: node.location.clone(),
+        });
+    }
+
+    valid
+}
+
+// `x...` occupies the variadic parameter slot itself. without `...`, that
+// parameter instead accepts zero or more trailing argument values
+fn expected_call_cardinality(
+    signature: &FunctionSignatureNode<'_>,
+    has_ellipsis: bool,
+) -> (usize, bool) {
+    let count = signature.count_inputs();
+
+    let accepts_extra =
+        !has_ellipsis && signature.params.last().is_some_and(|param| param.variadic);
+
+    let expected = count - usize::from(accepts_extra);
+
+    (expected, accepts_extra)
 }
 
 fn try_extract_typed_selection_callee<'a>(
@@ -283,6 +355,7 @@ fn is_incompatible_cardinality_method<'a>(
     selection: &SelectionNode<'a>,
     candidate: &FunctionValue<'a>,
     args_len: usize,
+    variadic_call: bool,
 ) -> bool {
     let Some(method) = ctx
         .symtab()
@@ -312,10 +385,7 @@ fn is_incompatible_cardinality_method<'a>(
         "Assumption invariant failed on method pickup strategy"
     );
 
-    let cardinality = signature.count_inputs();
-    let variadic = signature.params.last().is_some_and(|param| param.variadic);
+    let (expected, accepts_extra) = expected_call_cardinality(signature, variadic_call);
 
-    // exact match is plausible; an excess of args is fine iff the last param is
-    // variadic (it soaks up the rest); any other shape is conclusively wrong
-    args_len != cardinality && !(variadic && args_len >= cardinality.saturating_sub(1))
+    args_len != expected && !(accepts_extra && args_len > expected)
 }
