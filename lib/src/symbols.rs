@@ -310,6 +310,44 @@ impl<'a> SymbolTable<'a> {
         self.decl_index.get(&declaration).cloned() // cloning Rc is cheap
     }
 
+    pub fn get_symbol_in_file_context(
+        &self,
+        package: &FullPackagePath,
+        imports: &FileImportsRecord,
+        qualifier: Option<&str>,
+        name: &str,
+    ) -> Option<SymbolRef<'a>> {
+        let lookup_package_symbol = |path: &FullPackagePath| {
+            let envelope = self.package_scopes.get(path)?;
+
+            envelope.scope.borrow().get_local_symbol(name)
+        };
+
+        if let Some(qualifier) = qualifier {
+            let path = imports.named().get(qualifier)?;
+
+            if !name.chars().next().is_some_and(char::is_uppercase) {
+                return None;
+            }
+
+            return lookup_package_symbol(path);
+        }
+
+        if let Some(symbol) = lookup_package_symbol(package) {
+            return Some(symbol);
+        }
+
+        if name.chars().next().is_some_and(char::is_uppercase) {
+            for path in imports.wildcard() {
+                if let Some(symbol) = lookup_package_symbol(path) {
+                    return Some(symbol);
+                }
+            }
+        }
+
+        self.universe_scope.get_local_symbol(name)
+    }
+
     pub fn resolves_to_predeclared(&self, name: &str) -> bool {
         let resolved = self.get_symbol(name);
 
@@ -572,7 +610,7 @@ pub enum QualifiedSymbolResolutionResult<'a> {
 // concrete, specific moment (e.g., when some type resolution was deferred)
 //
 // not to be confused with the overall analysis convergence snapshot mechanism!
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct FileImportsRecord {
     named: HashMap<String, FullPackagePath>,
     wildcard: Vec<FullPackagePath>,

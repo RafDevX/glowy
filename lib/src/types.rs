@@ -779,6 +779,16 @@ impl<'a> TypeRegistry<'a> {
         snapshot
     }
 
+    pub fn current_declaration_context(
+        &mut self,
+        symtab: &SymbolTable<'a>,
+    ) -> Option<TypeDeclarationContext> {
+        Some(TypeDeclarationContext {
+            package: symtab.current_package_path()?.clone(),
+            imports: self.current_file_imports(symtab),
+        })
+    }
+
     pub fn invalidate_imports_snapshot(&mut self) {
         self.current_file_imports_snapshot = None;
     }
@@ -787,6 +797,22 @@ impl<'a> TypeRegistry<'a> {
 impl Default for TypeRegistry<'_> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeDeclarationContext {
+    package: FullPackagePath,
+    imports: Rc<FileImportsRecord>,
+}
+
+impl TypeDeclarationContext {
+    pub fn package(&self) -> &FullPackagePath {
+        &self.package
+    }
+
+    pub fn imports(&self) -> &FileImportsRecord {
+        &self.imports
     }
 }
 

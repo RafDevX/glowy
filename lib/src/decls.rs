@@ -148,9 +148,16 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
 
     let target_type = register_type_in_registry(ctx, node);
 
+    let decl_context = {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.current_declaration_context(symtab).unwrap()
+    };
+
     let func_value = FunctionValue::new_type_constructor(
         FunctionRef::Named(name),
-        Some(node.r#type.clone()), // used for composite literals
+        // used for composite literals and resolved in its declaration context
+        Some((node.r#type.clone(), decl_context)),
         target_type,
     );
 
