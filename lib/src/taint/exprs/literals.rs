@@ -125,20 +125,28 @@ fn visit_unknown_composite_literal<'a>(
         Some(TypeNode::Map { .. }) => {
             Value::Map(visit_map_composite_literal(ctx, values, location.clone()))
         }
-        resolved => {
-            // either we know it's a struct (and have its actual definition with
-            // field names), or we couldn't resolve it and treat as struct since
-            // that is the most general composite shape with explicit keys
-
-            let dispatch_type = resolved.as_ref().unwrap_or(r#type);
+        Some(resolved) => {
             let fields = raw_list_as_struct_fields(values);
 
             Value::Struct(visit_struct_composite_literal(
                 ctx,
                 &fields,
-                dispatch_type,
+                resolved,
                 location.clone(),
             ))
+        }
+        None => {
+            // don't commit to a shape so that later operations can upgrade this
+            // to an Array/Slice/Map/Struct. note that even if the literal is
+            // not empty, `T{x, y}` without field names is still a valid struct
+            // literal, so we cannot rule out anything at this point
+            let fields = raw_list_as_struct_fields(values);
+            let composite = visit_struct_composite_literal(ctx, &fields, r#type, location.clone());
+            // ^^ unsound: high keys are ignored, since any attempt at resolving
+            // them would in turn also be wrong for struct field names (and we
+            // assume most unknown composites are structs)
+
+            Value::Simple(composite.backtrace_at_location(location.clone()))
         }
     };
 
