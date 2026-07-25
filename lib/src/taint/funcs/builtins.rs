@@ -454,6 +454,14 @@ pub fn visit_clear<'a>(
         LabelBacktraceKind::CollectionClear,
         &node.location,
         &|ctx, mut current| {
+            if current.is_unknown_composite() {
+                if should_clear_map {
+                    current.clear_unknown_composite();
+                }
+
+                return Some(current);
+            }
+
             if current.is_map() {
                 if should_clear_map {
                     let mut map = current.as_map_mut().unwrap();

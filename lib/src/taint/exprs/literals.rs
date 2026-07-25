@@ -135,19 +135,19 @@ fn visit_unknown_composite_literal<'a>(
                 location.clone(),
             ))
         }
-        None => {
-            // don't commit to a shape so that later operations can upgrade this
-            // to an Array/Slice/Map/Struct. note that even if the literal is
-            // not empty, `T{x, y}` without field names is still a valid struct
-            // literal, so we cannot rule out anything at this point
-            let fields = raw_list_as_struct_fields(values);
-            let composite = visit_struct_composite_literal(ctx, &fields, r#type, location.clone());
-            // ^^ unsound: high keys are ignored, since any attempt at resolving
-            // them would in turn also be wrong for struct field names (and we
-            // assume most unknown composites are structs)
-
-            Value::Simple(composite.backtrace_at_location(location.clone()))
-        }
+        // don't commit to a shape so that later operations can upgrade this
+        // to an Array/Slice/Map/Struct. note that even if the literal is
+        // not empty, `T{x, y}` without field names is still a valid struct
+        // literal, so we cannot rule out anything at this point.
+        //  UNSOUND: high keys are ignored, since any attempt at resolving
+        // them would in turn also be wrong for struct field names (and we
+        // assume most unknown composites are structs). we only retain key
+        // information if they are constants resolvable without name resolution
+        None => Value::UnknownComposite(visit_unresolved_composite_literal(
+            ctx,
+            values,
+            location.clone(),
+        )),
     };
 
     let declared_type = {
@@ -414,6 +414,95 @@ fn visit_struct_composite_literal<'a>(
     }
 
     CompositeValue::new(map, others, None, None, location)
+}
+
+fn visit_unresolved_composite_literal<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    values: &CompositeLiteralElementListNode<'a>,
+    location: Pinned<'a, Location>,
+) -> CompositeValue<'a, SimpleConstValue> {
+    let mut map = HashMap::new();
+    let mut others = Vec::new();
+    let mut key_backtraces = Vec::new();
+    let mut next_default_key = Some(0);
+    let mut greatest_key = None;
+    let mut has_known_length = true;
+
+    for (opt_key, element) in values {
+        let (key_backtrace, key) = match opt_key {
+            Some(key) => {
+                let constant = SimpleConstValue::try_resolve_from_expr(key);
+
+                if constant.is_some() {
+                    (None, constant)
+                } else if matches!(key, ExprNode::Name(_)) {
+                    // this may be a struct field designator, which is not an
+                    // evaluated expression and need not resolve as a symbol
+                    (None, None)
+                } else {
+                    (super::get_expr_backtrace(ctx, key), None)
+                }
+            }
+            None => (None, next_default_key.map(SimpleConstValue::Integer)),
+        };
+
+        next_default_key = match &key {
+            Some(SimpleConstValue::Integer(index)) => {
+                greatest_key =
+                    Some(greatest_key.map_or(*index, |greatest: u64| greatest.max(*index)));
+
+                let next = index.checked_add(1);
+
+                has_known_length &= next.is_some();
+
+                next
+            }
+            Some(
+                SimpleConstValue::Boolean(_) | SimpleConstValue::String(_) | SimpleConstValue::Nil,
+            )
+            | None => {
+                has_known_length = false;
+
+                None
+            }
+        };
+
+        let mut value = visit_array_literal_element(ctx, element, &location);
+
+        if key.is_none()
+            && let Some(key_backtrace) = &key_backtrace
+        {
+            value = value.nest_backtrace(
+                LabelBacktraceKind::Expression,
+                None,
+                key_backtrace.location().clone(),
+                [key_backtrace.clone()],
+            );
+        }
+
+        key_backtraces.extend(key_backtrace);
+
+        if is_prunable(&value) {
+            continue;
+        }
+
+        if let Some(key) = key {
+            map.insert(key, value);
+        } else {
+            others.push(value);
+        }
+    }
+
+    let known_len = has_known_length.then(|| greatest_key.map_or(0, |key| key + 1));
+
+    let keys = LabelBacktrace::fold(
+        &key_backtraces,
+        LabelBacktraceKind::Expression,
+        None,
+        location.clone(),
+    );
+
+    CompositeValue::new(map, others, keys, known_len, location)
 }
 
 fn visit_array_literal_element<'a>(

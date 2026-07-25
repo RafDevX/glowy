@@ -27,8 +27,9 @@ pub struct CompositeValue<'a, K: Eq + Hash> {
     dyn_overrides: HashSet<K>,
     // aggregate key backtrace
     keys: Option<LabelBacktrace<'a>>,
-    // exact length, when statically known. only meaningful for slice-shaped
-    // (u64-keyed) composites; conservatively collapsed to None when unknown
+    // exact length, when statically known. only meaningful for integer-keyed
+    // composites (including unresolved ones that may become arrays/slices);
+    // conservatively collapsed to None when unknown
     known_len: Option<u64>,
 }
 
@@ -184,6 +185,73 @@ impl<'a, K: Eq + Hash + Clone> CompositeValue<'a, K> {
             dyn_overrides: HashSet::new(),
             keys,
             known_len: self.known_len,
+        }
+    }
+}
+
+impl<'a> CompositeValue<'a, SimpleConstValue> {
+    pub fn into_integer_keyed(
+        self,
+        location: Cow<Pinned<'a, Location>>,
+    ) -> CompositeValue<'a, u64> {
+        let Self {
+            r#const,
+            r#dyn,
+            dyn_overrides,
+            keys,
+            known_len,
+        } = self;
+
+        let mut integer_const = HashMap::new();
+        let mut incompatible = Vec::new();
+
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "Each entry is processed independently; final order is irrelevant"
+        )]
+        for (key, value) in r#const {
+            if let SimpleConstValue::Integer(index) = key {
+                integer_const.insert(index, value);
+            } else {
+                incompatible.extend(value.backtrace());
+            }
+        }
+
+        let incompatible = if incompatible.is_empty() {
+            // avoid cloning below if we already know it's unnecessary
+            None
+        } else {
+            LabelBacktrace::fold(
+                &incompatible,
+                LabelBacktraceKind::Expression,
+                None,
+                location.clone().into_owned(),
+            )
+        };
+
+        let r#dyn = LabelBacktrace::combine_options(
+            r#dyn,
+            incompatible,
+            LabelBacktraceKind::Expression,
+            location,
+        );
+
+        let dyn_overrides = dyn_overrides
+            .into_iter()
+            .filter_map(|key| match key {
+                SimpleConstValue::Integer(index) => Some(index),
+                SimpleConstValue::Boolean(_)
+                | SimpleConstValue::String(_)
+                | SimpleConstValue::Nil => None,
+            })
+            .collect();
+
+        CompositeValue {
+            r#const: integer_const,
+            r#dyn,
+            dyn_overrides,
+            keys,
+            known_len,
         }
     }
 }

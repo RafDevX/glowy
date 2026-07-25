@@ -455,7 +455,7 @@ pub fn visit_slicing_with_base<'a>(
 
     // per the Go spec, string slicing is only allowed if max is None
     // (full slicing expressions only support arrays/slices)
-    if node.max.is_none() && base.is_simple() {
+    if node.max.is_none() && (base.is_simple() || base.is_unknown_composite()) {
         // either we're slicing a simple string (creating a substring), or base
         // actually has a more complex shape but just hasn't been coerced yet
         // (in which case the aggregate label is the only sound fallback).

@@ -94,7 +94,8 @@ fn argument_may_share_mutable_state(
         }
     );
 
-    let value_may_share_mutable_state = || value.is_map() || value.is_slice() || value.is_channel();
+    let value_may_share_mutable_state =
+        || value.is_unknown_composite() || value.is_map() || value.is_slice() || value.is_channel();
 
     let declared_type_may_share_mutable_state = || {
         value

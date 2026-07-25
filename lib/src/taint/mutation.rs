@@ -518,7 +518,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                 let (index_backtrace, index_const) =
                     exprs::get_expr_backtrace_and_untainted_const(ctx, &self.index);
 
-                let target_is_map = target.is_map();
+                let target_may_be_map = target.is_map() || target.is_unknown_composite();
 
                 let Some(mut composite) = target.as_composite_mut() else {
                     ctx.report_error(AnalysisErrorKind::InvalidIndexingBase {
@@ -542,7 +542,7 @@ impl<'a> LeftValue<'a> for IndexingNode<'a> {
                     ctx.pin(assignment_location.clone()),
                 );
 
-                if target_is_map {
+                if target_may_be_map {
                     composite.record_key_backtrace(
                         ctx.branch_backtrace().cloned(),
                         ctx.pin(assignment_location.clone()),

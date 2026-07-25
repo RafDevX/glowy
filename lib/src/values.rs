@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     fmt,
     hash::Hash,
-    iter,
+    iter, mem,
     rc::Rc,
 };
 
@@ -220,10 +220,18 @@ impl<'a> ValueRef<'a> {
         matches!(*self.value.borrow(), Value::Map(_))
     }
 
+    pub fn is_unknown_composite(&self) -> bool {
+        matches!(*self.value.borrow(), Value::UnknownComposite(_))
+    }
+
     pub fn is_composite(&self) -> bool {
         matches!(
             *self.value.borrow(),
-            Value::Array(_) | Value::Slice(_) | Value::Map(_) | Value::Struct(_)
+            Value::Array(_)
+                | Value::Slice(_)
+                | Value::Struct(_)
+                | Value::Map(_)
+                | Value::UnknownComposite(_)
         )
     }
 
@@ -259,14 +267,22 @@ impl<'a> ValueRef<'a> {
 
     pub fn try_upgrade_to_array(&self) {
         self.try_upgrade_to(Value::Array);
+        self.try_resolve_unknown_composite_as_array();
     }
 
     pub fn try_upgrade_to_slice(&self) {
         self.try_upgrade_to(Value::Slice);
+        self.try_resolve_unknown_composite_as_slice();
     }
 
     pub fn try_upgrade_to_struct(&self) {
         self.try_upgrade_to(Value::Struct);
+        self.try_resolve_unknown_composite_as_struct();
+    }
+
+    pub fn try_upgrade_to_map(&self) {
+        self.try_upgrade_to(Value::Map);
+        self.try_resolve_unknown_composite_as_map();
     }
 
     /// Coerce a [`Value::Simple`] to take a complex shape when first used.
@@ -284,6 +300,60 @@ impl<'a> ValueRef<'a> {
             drop(borrowed); // release the immutable borrow
 
             *self.value.borrow_mut() = f(inner);
+        }
+    }
+
+    fn try_resolve_unknown_composite(
+        &self,
+        resolve: impl FnOnce(CompositeValue<'a, SimpleConstValue>) -> Value<'a>,
+    ) {
+        let mut borrowed = self.value.borrow_mut();
+
+        let Value::UnknownComposite(composite) = &mut *borrowed else {
+            // not an unknown composite, so there is nothing to be resolved
+            return;
+        };
+
+        // we need to take ownership since `resolve` would need to allocate
+        // unnecessarily if we only gave it the &mut we currently hold, so we
+        // temporarily put in an empty, Bottom value
+        let composite = mem::replace(composite, CompositeValue::empty(None));
+
+        *borrowed = resolve(composite);
+    }
+
+    fn try_resolve_unknown_composite_as_array(&self) {
+        self.try_resolve_unknown_composite(|composite| {
+            Value::Array(composite.into_integer_keyed(Cow::Borrowed(&self.location)))
+        });
+    }
+
+    fn try_resolve_unknown_composite_as_slice(&self) {
+        self.try_resolve_unknown_composite(|composite| {
+            let composite = composite.into_integer_keyed(Cow::Borrowed(&self.location));
+
+            Value::Slice(SliceValue::new_from_composite(
+                composite,
+                self.location.clone(),
+            ))
+        });
+    }
+
+    fn try_resolve_unknown_composite_as_map(&self) {
+        self.try_resolve_unknown_composite(Value::Map);
+    }
+
+    fn try_resolve_unknown_composite_as_struct(&self) {
+        self.try_resolve_unknown_composite(|composite| {
+            let backtrace = composite.backtrace_at_location(self.location.clone());
+
+            Value::Struct(CompositeValue::empty(backtrace))
+        });
+    }
+
+    pub fn clear_unknown_composite(&self) {
+        if let Value::UnknownComposite(composite) = &mut *self.value.borrow_mut() {
+            *composite = CompositeValue::empty(None);
         }
     }
 
@@ -367,8 +437,9 @@ impl<'a> ValueRef<'a> {
             | Value::Channel(_)
             | Value::Array(_)
             | Value::Slice(_)
-            | Value::Map(_)
             | Value::Struct(_)
+            | Value::UnknownComposite(_)
+            | Value::Map(_)
             | Value::Function(_) => return None,
         };
 
@@ -398,8 +469,9 @@ impl<'a> ValueRef<'a> {
             | Value::Channel(_)
             | Value::Array(_)
             | Value::Slice(_)
-            | Value::Map(_)
             | Value::Struct(_)
+            | Value::Map(_)
+            | Value::UnknownComposite(_)
             | Value::Function(_) => return None,
         };
 
@@ -452,11 +524,12 @@ impl<'a> ValueRef<'a> {
             // exhaustive to force re-visiting impl if a new type is ever added
             Value::Simple(_)
             | Value::PackageRef(_)
-            | Value::Channel(_)
+            | Value::UnknownComposite(_)
             | Value::Array(_)
             | Value::Slice(_)
-            | Value::Map(_)
             | Value::Struct(_)
+            | Value::Map(_)
+            | Value::Channel(_)
             | Value::Function(_) => self.clone(),
         }
     }
@@ -535,13 +608,13 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_slice(&self) -> Option<Ref<'_, SliceValue<'a>>> {
-        self.try_upgrade_to(Value::Slice);
+        self.try_upgrade_to_slice();
 
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::Slice)).ok()
     }
 
     pub fn as_slice_mut(&mut self) -> Option<RefMut<'_, SliceValue<'a>>> {
-        self.try_upgrade_to(Value::Slice);
+        self.try_upgrade_to_slice();
 
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Slice)).ok()
     }
@@ -551,43 +624,43 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_map_mut(&mut self) -> Option<RefMut<'_, CompositeValue<'a, SimpleConstValue>>> {
-        self.try_upgrade_to(Value::Map);
+        self.try_upgrade_to_map();
 
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Map)).ok()
     }
 
     pub fn as_composite(&self) -> Option<Ref<'_, dyn CompositeValueAdapter<'a>>> {
-        self.try_upgrade_to(Value::Array);
+        self.try_upgrade_to(Value::UnknownComposite);
 
         Ref::filter_map(self.value.borrow(), |value| match value {
             Value::Array(composite) => Some(composite as &dyn CompositeValueAdapter<'a>),
             Value::Slice(slice) => Some(slice),
-            Value::Map(composite) => Some(composite),
+            Value::Map(composite) | Value::UnknownComposite(composite) => Some(composite),
             _ => None,
         })
         .ok()
     }
 
     pub fn as_composite_mut(&mut self) -> Option<RefMut<'_, dyn CompositeValueAdapter<'a>>> {
-        self.try_upgrade_to(Value::Array);
+        self.try_upgrade_to(Value::UnknownComposite);
 
         RefMut::filter_map(self.value.borrow_mut(), |value| match value {
             Value::Array(composite) => Some(composite as &mut dyn CompositeValueAdapter<'a>),
             Value::Slice(slice) => Some(slice),
-            Value::Map(composite) => Some(composite),
+            Value::Map(composite) | Value::UnknownComposite(composite) => Some(composite),
             _ => None,
         })
         .ok()
     }
 
     pub fn as_struct(&self) -> Option<Ref<'_, CompositeValue<'a, String>>> {
-        self.try_upgrade_to(Value::Struct);
+        self.try_upgrade_to_struct();
 
         Ref::filter_map(self.value.borrow(), extract_inner!(Value::Struct)).ok()
     }
 
     pub fn as_struct_mut(&self) -> Option<RefMut<'_, CompositeValue<'a, String>>> {
-        self.try_upgrade_to(Value::Struct);
+        self.try_upgrade_to_struct();
 
         RefMut::filter_map(self.value.borrow_mut(), extract_inner!(Value::Struct)).ok()
     }

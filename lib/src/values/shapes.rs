@@ -24,8 +24,10 @@ pub enum Value<'a> {
     Channel(ChannelValue<'a>),
     Array(CompositeValue<'a, u64>),
     Slice(SliceValue<'a>),
-    Map(CompositeValue<'a, SimpleConstValue>),
     Struct(CompositeValue<'a, String>),
+    Map(CompositeValue<'a, SimpleConstValue>),
+    // a named composite literal whose underlying type has not resolved yet
+    UnknownComposite(CompositeValue<'a, SimpleConstValue>),
     Function(Box<FunctionValue<'a>>),
 }
 
@@ -38,7 +40,10 @@ impl<'a> Value<'a> {
     pub(super) fn copy_shares_outer_cell(&self) -> bool {
         // SliceValue is intentionally absent: copying a slice copies its
         // descriptor while SliceValue::clone keeps the backing ValueRefs shared
-        matches!(self, Self::Channel(..) | Self::Map(..) | Self::Function(..))
+        matches!(
+            self,
+            Self::Channel(..) | Self::Map(..) | Self::UnknownComposite(..) | Self::Function(..)
+        )
     }
 
     pub(super) fn copy_shape(&self, backtrace: LabelBacktrace<'a>) -> Self {
@@ -47,10 +52,13 @@ impl<'a> Value<'a> {
             // composites recurse into their known entries so shape-sensitive
             // operations targeting nested fields still find the correct shape
             // (e.g., `s.ch <- v` on a captured struct with a channel field)
-            Self::Map(composite) => Self::Map(composite.copy_shape(backtrace)),
             Self::Slice(composite) => Self::Slice(composite.copy_shape(backtrace)),
             Self::Array(composite) => Self::Array(composite.copy_shape(backtrace)),
             Self::Struct(composite) => Self::Struct(composite.copy_shape(backtrace)),
+            Self::Map(composite) => Self::Map(composite.copy_shape(backtrace)),
+            Self::UnknownComposite(composite) => {
+                Self::UnknownComposite(composite.copy_shape(backtrace))
+            }
             Self::Simple(_)
             | Self::Function(_)
             | Self::PackageRef(_)
@@ -69,8 +77,8 @@ impl<'a> Value<'a> {
             Self::Channel(channel) => channel,
             Self::Array(composite) => composite,
             Self::Slice(slice) => slice,
-            Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
+            Self::Map(composite) | Self::UnknownComposite(composite) => composite,
             Self::Function(func) => &**func,
         }
     }
@@ -84,8 +92,8 @@ impl<'a> Value<'a> {
             Self::Channel(channel) => channel,
             Self::Array(composite) => composite,
             Self::Slice(slice) => slice,
-            Self::Map(composite) => composite,
             Self::Struct(composite) => composite,
+            Self::Map(composite) | Self::UnknownComposite(composite) => composite,
             Self::Function(func) => &mut **func,
         }
     }
@@ -128,8 +136,9 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Channel(channel) => Self::Channel(recurs!(channel)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
-            Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Struct(composite) => Self::Struct(recurs!(composite)),
+            Self::Map(composite) => Self::Map(recurs!(composite)),
+            Self::UnknownComposite(composite) => Self::UnknownComposite(recurs!(composite)),
             Self::Function(func) => Self::Function(Box::new(recurs!(&**func))),
         }
     }
@@ -174,9 +183,12 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             (Self::Slice(template), Self::Slice(concrete)) => {
                 Value::Slice(recurs!(template, concrete))
             }
-            (Self::Map(template), Self::Map(concrete)) => Value::Map(recurs!(template, concrete)),
             (Self::Struct(template), Self::Struct(concrete)) => {
                 Value::Struct(recurs!(template, concrete))
+            }
+            (Self::Map(template), Self::Map(concrete)) => Value::Map(recurs!(template, concrete)),
+            (Self::UnknownComposite(template), Self::UnknownComposite(concrete)) => {
+                Value::UnknownComposite(recurs!(template, concrete))
             }
             (Self::Function(template), Self::Function(concrete)) => {
                 Value::Function(Box::new(recurs!(template, concrete)))
@@ -210,8 +222,9 @@ impl<'a> SelfAwareBacktraceContainer<'a> for Value<'a> {
             Self::Channel(channel) => Self::Channel(recurs!(channel)),
             Self::Array(composite) => Self::Array(recurs!(composite)),
             Self::Slice(composite) => Self::Slice(recurs!(composite)),
-            Self::Map(composite) => Self::Map(recurs!(composite)),
             Self::Struct(composite) => Self::Struct(recurs!(composite)),
+            Self::Map(composite) => Self::Map(recurs!(composite)),
+            Self::UnknownComposite(composite) => Self::UnknownComposite(recurs!(composite)),
             Self::Function(func) => Self::Function(Box::new(recurs!(&**func))),
         }
     }
@@ -238,8 +251,11 @@ impl<'a> Mergeable<'a> for Value<'a> {
             (Self::Channel(a), Self::Channel(b)) => Self::Channel(recurs!(a, b)),
             (Self::Array(a), Self::Array(b)) => Self::Array(recurs!(a, b)),
             (Self::Slice(a), Self::Slice(b)) => Self::Slice(recurs!(a, b)),
-            (Self::Map(a), Self::Map(b)) => Self::Map(recurs!(a, b)),
             (Self::Struct(a), Self::Struct(b)) => Self::Struct(recurs!(a, b)),
+            (Self::Map(a), Self::Map(b)) => Self::Map(recurs!(a, b)),
+            (Self::UnknownComposite(a), Self::UnknownComposite(b)) => {
+                Self::UnknownComposite(recurs!(a, b))
+            }
             // intentionally not handling (Fn, Fn)
             // ---
             // any ChannelValue must remain a ChannelValue after merging with
@@ -273,8 +289,9 @@ impl<'a> Mergeable<'a> for Value<'a> {
                 | Self::PackageRef(_)
                 | Self::Array(_)
                 | Self::Slice(_)
-                | Self::Map(_)
                 | Self::Struct(_)
+                | Self::Map(_)
+                | Self::UnknownComposite(_)
                 | Self::Function(_),
                 _,
             ) => {
@@ -298,8 +315,9 @@ impl SnapshotAware for Value<'_> {
             (Self::Channel(a), Self::Channel(b)) => a.snapshot_aware_eq(b),
             (Self::Array(a), Self::Array(b)) => a.snapshot_aware_eq(b),
             (Self::Slice(a), Self::Slice(b)) => a.snapshot_aware_eq(b),
-            (Self::Map(a), Self::Map(b)) => a.snapshot_aware_eq(b),
             (Self::Struct(a), Self::Struct(b)) => a.snapshot_aware_eq(b),
+            (Self::Map(a), Self::Map(b))
+            | (Self::UnknownComposite(a), Self::UnknownComposite(b)) => a.snapshot_aware_eq(b),
             (Self::Function(a), Self::Function(b)) => a.snapshot_aware_eq(b),
 
             // no wildcard _ so we rely on exhaustiveness for maintainability
@@ -313,8 +331,9 @@ impl SnapshotAware for Value<'_> {
                 | Self::Channel(_)
                 | Self::Array(_)
                 | Self::Slice(_)
-                | Self::Map(_)
                 | Self::Struct(_)
+                | Self::Map(_)
+                | Self::UnknownComposite(_)
                 | Self::Function(_),
                 _,
             ) => false,
