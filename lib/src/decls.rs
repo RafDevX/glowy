@@ -204,7 +204,7 @@ fn register_type_in_registry<'a>(
 }
 
 fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
-    if node.name.content() == "init" {
+    if node.name.content() == "init" && node.receiver.is_none() {
         // init functions are not actually declared (and there may be multiple
         // defined, even in the same file). note that this only applies for
         // top-level declarations (i.e., package scope), not anywhere else
