@@ -1,9 +1,4 @@
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet, VecDeque},
-    fmt, mem,
-    path::Path,
-};
+use std::{borrow::Cow, fmt, mem, path::Path};
 
 use parser::{
     Location, Span,
@@ -105,12 +100,6 @@ pub struct AnalysisContext<'a> {
     saw_enforcement_checks: bool,
     /// Universally-applicable directives registered for specific functions.
     blanket_directives: &'a BlanketDirectives,
-
-    /// Package-level reverse dependencies.
-    ///
-    /// For each package (map key), the set of packages that (directly)
-    /// depend on it (i.e., which packages import it).
-    reverse_imports: HashMap<FullPackagePath, HashSet<FullPackagePath>>,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -135,7 +124,6 @@ impl<'a> AnalysisContext<'a> {
             range_feedback_states: Vec::new(),
             saw_enforcement_checks: false,
             blanket_directives,
-            reverse_imports: HashMap::new(),
         }
     }
 
@@ -178,49 +166,8 @@ impl<'a> AnalysisContext<'a> {
     ) -> Option<bool> {
         self.type_registry.invalidate_imports_snapshot();
 
-        self.record_import_edge(&path);
-
         self.symbol_table
             .register_import_spec(qualifier, path, infer_from_path)
-    }
-
-    fn record_import_edge(&mut self, target: &FullPackagePath) {
-        if !self.stage.is_first() {
-            // the first stage already visits every file, so there's no need to
-            // do this for any of the others
-            return;
-        }
-
-        let Some(importer) = self.symbol_table.current_package_path().cloned() else {
-            return;
-        };
-
-        self.reverse_imports
-            .entry(target.clone())
-            .or_default()
-            .insert(importer);
-    }
-
-    pub fn reverse_transitive_dependencies(
-        &self,
-        roots: &HashSet<FullPackagePath>,
-    ) -> HashSet<FullPackagePath> {
-        let mut dependencies = HashSet::with_capacity(roots.len());
-        let mut queue: VecDeque<&FullPackagePath> = roots.iter().collect();
-
-        while let Some(pkg) = queue.pop_front() {
-            if !dependencies.insert(pkg.clone()) {
-                // we already collected the dependencies of this package, so we
-                // can just skip ahead and avoid doing the same work again
-                continue;
-            }
-
-            if let Some(importers) = self.reverse_imports.get(pkg) {
-                queue.extend(importers);
-            }
-        }
-
-        dependencies
     }
 
     pub fn stage(&self) -> &AnalysisStage {

@@ -20,7 +20,7 @@ use crate::{
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SourceFileNode<'a>,
-    package_path: FullPackagePath,
+    package_path: &FullPackagePath,
 ) {
     // note that Go doesn't require the package name to match the directory
     // name, it's just a convention, so we must extract the package name from
@@ -29,7 +29,7 @@ pub fn visit_source_file<'a>(
 
     let package_name = ctx.pin(node.package_clause.id);
 
-    let original_name = ctx.enter_package(package_name, package_path);
+    let original_name = ctx.enter_package(package_name, package_path.clone());
 
     if original_name.content() != node.package_clause.id.content() {
         // the scope already had a different native identifier, meaning that

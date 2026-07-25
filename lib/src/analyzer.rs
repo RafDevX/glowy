@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     env, fs,
     io::{self, BufRead},
     path,
@@ -1126,21 +1126,28 @@ impl Analyzer {
     ) -> Vec<AnalysisError<'a>> {
         let mut context = AnalysisContext::new(&self.blanket_directives);
 
-        macro_rules! pass {
-            ($visitor:path, $worklist:expr) => {{
-                let worklist: Option<&HashSet<FullPackagePath>> = $worklist;
+        let mut files: Vec<_> = admitted_asts
+            .iter()
+            .map(|&(path, ast)| (path, ast, compute_package_path(&self.module_base, path)))
+            .collect();
 
+        // we minimize the number of convergence iterations by sorting all files
+        // by dependency order, such that if A imports B, then B is visited
+        // before A, which is also necessary to ensure soundness under Go
+        // semantics, according to the defined file initialization order.
+        // note that we cannot use a worklist to avoid visiting packages which
+        // have already stabilized during the subsequent iterations, since that
+        // would be unsound: if A has `B.Var = 2`, then just visiting B (because
+        // it changed during the last iteration) and not A (because it did not)
+        // would lead to inconsistent results, as B would re-initialize Var and
+        // thus overwrite the mutation for which A actually has priority
+        sort_files_by_dependency_order(&mut files);
+
+        macro_rules! pass {
+            ($visitor:path) => {{
                 context.symtab_mut().clear_all_package_progress();
 
-                for (path, ast) in admitted_asts {
-                    let package_path = compute_package_path(&self.module_base, path);
-
-                    if worklist.is_some_and(|pkgs| !pkgs.contains(&package_path)) {
-                        // if `worklist` is Some, only visit files whose package
-                        // is included; skipping at the package level is safe
-                        continue;
-                    }
-
+                for (path, ast, package_path) in &files {
                     context.set_current_file(path);
 
                     $visitor(&mut context, ast, package_path);
@@ -1155,7 +1162,7 @@ impl Analyzer {
         //     This is also used to scaffold sub-module hierarchies and package
         //     scopes, as well as register top-level named types.
 
-        pass!(decls::visit_source_file, None);
+        pass!(decls::visit_source_file);
 
         // retry resolving type registry entries that were enqueued during the
         // per-file decl walk above because their target was not yet known
@@ -1174,13 +1181,6 @@ impl Analyzer {
 
         let mut prev_snapshot: Option<HashMap<_, _>> = None;
 
-        // we use a package-level worklist to avoid visiting every package every
-        // iteration, which can be a helpful optimization in large projects.
-        // once a package has converged and there is no remaining way for it to
-        // change, it can just be omitted from all subsequent worklists.
-        // if this is set to None, it means that we have to visit everything
-        let mut worklist: Option<HashSet<FullPackagePath>> = None;
-
         // u8 is fine because this number should never be very high (<10), but
         // even if we do somehow reach overflow (>255), it's not the end of the
         // world to "restart" the iteration index from 0 since this is only used
@@ -1188,11 +1188,11 @@ impl Analyzer {
         let mut iteration_index = 0_u8;
 
         loop {
-            pass!(taint::visit_source_file, worklist.as_ref());
+            pass!(taint::visit_source_file);
 
             let snapshot = context.symtab().snapshot_per_package();
 
-            let unstable: HashSet<FullPackagePath> = snapshot
+            let changed_package_count = snapshot
                 .iter()
                 .filter(|&(pkg, current)| {
                     let Some(prev) = &prev_snapshot else {
@@ -1200,28 +1200,16 @@ impl Analyzer {
                         return true;
                     };
 
-                    // keep only packages that changed since the last iteration.
-                    // note that we never care about packages not present in the
-                    // current snapshot, since they presumably have already been
-                    // filtered out in previous iterations, and so they will
-                    // never be revisited (worklist only narrows, never widens)
-
+                    // keep only packages that changed since the last iteration
                     prev.get(pkg) != Some(current)
                 })
-                .map(|(pkg, _)| pkg.clone())
-                .collect();
+                .count();
 
-            if unstable.is_empty() {
+            if changed_package_count == 0 {
                 // nothing relevant has changed since the last iteration, so we
                 // have reached label convergence and can thus stop the loop
                 break;
             }
-
-            // we only keep packages that changed since the last iteration
-            // (i.e., unstable) and their reverse transitive dependencies (i.e.,
-            // all packages that import directly or indirectly an unstable
-            // package), since no others could ever be affected anymore
-            let next_worklist = context.reverse_transitive_dependencies(&unstable);
 
             prev_snapshot = Some(snapshot);
             iteration_index += 1;
@@ -1229,13 +1217,9 @@ impl Analyzer {
             if self.verbose {
                 println!(
                     "{verbose_prefix}Finished convergence iteration #{iteration_index} (Stage 2) \
-                     - {} package(s) changed; next pass visits {}",
-                    unstable.len(),
-                    next_worklist.len(),
+                     - {changed_package_count} package(s) changed",
                 );
             }
-
-            worklist = Some(next_worklist);
         }
 
         if self.verbose {
@@ -1251,7 +1235,7 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
-        pass!(taint::visit_source_file, None);
+        pass!(taint::visit_source_file);
 
         if !self.has_blanket_enforcement_checks() && !context.saw_enforcement_checks() {
             context.report_error_at(
@@ -1369,4 +1353,96 @@ fn list_build_permutations(permutations: &[BuildPermutation<'_>], width: usize) 
             perm.admitted.len(),
         );
     }
+}
+
+fn sort_files_by_dependency_order(
+    files: &mut [(&path::Path, &SourceFileNode<'_>, FullPackagePath)],
+) {
+    let packages: BTreeSet<_> = files
+        .iter()
+        .map(|(_, _, package)| package.clone())
+        .collect();
+
+    // we use Kahn's Algorithm to determine a topological sorted order
+
+    // tracks how many other packages each package is waiting for
+    let mut dependency_counts: BTreeMap<_, usize> = packages
+        .iter()
+        .map(|package| (package.clone(), 0))
+        .collect();
+
+    let mut reverse_imports: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+
+    for (_, ast, importer) in files.iter() {
+        for dependency in ast
+            .imports
+            .iter()
+            .flat_map(|import| &import.specs)
+            .map(|spec| &spec.path)
+        {
+            if !packages.contains(dependency) {
+                // this is an external dependency not under analysis, so skip it
+                continue;
+            }
+
+            if reverse_imports
+                .entry(dependency.clone())
+                .or_default()
+                .insert(importer.clone())
+            {
+                *dependency_counts.get_mut(importer).unwrap() += 1;
+            }
+        }
+    }
+
+    // packages which are ready to be visited, since they import no other
+    // packages under analysis
+    let mut ready: BTreeSet<_> = dependency_counts
+        .iter()
+        .filter(|&(_, &count)| count == 0)
+        .map(|(package, _)| package.clone())
+        .collect();
+
+    let mut ordered_packages = Vec::with_capacity(packages.len());
+
+    while let Some(package) = ready.pop_first() {
+        if let Some(importers) = reverse_imports.get(&package) {
+            for importer in importers {
+                let count = dependency_counts.get_mut(importer).unwrap();
+
+                // since `package` is ready, we can consider that `importer` is
+                // now waiting on one less dependency
+                *count -= 1;
+
+                if *count == 0 {
+                    // `importer` is not waiting for any other package, so now
+                    // it is ready to be analyzed
+                    ready.insert(importer.clone());
+                }
+            }
+        }
+
+        ordered_packages.push(package);
+    }
+
+    if ordered_packages.len() != packages.len() {
+        // Go rejects import cycles, so this should be unreachable, but we still
+        // ensure every package is visited in deterministic order if some
+        // malformed input still contains a cycle
+        ordered_packages.extend(
+            dependency_counts
+                .into_iter()
+                .filter_map(|(package, count)| (count != 0).then_some(package)),
+        );
+    }
+
+    let package_ranks: BTreeMap<_, _> = ordered_packages
+        .into_iter()
+        .enumerate()
+        .map(|(rank, package)| (package, rank))
+        .collect();
+
+    // we avoid `sort_unstable_by_key` since using stable sorting preserves the
+    // analyzer's deterministic file order within each package
+    files.sort_by_key(|(_, _, package)| package_ranks[package]);
 }
