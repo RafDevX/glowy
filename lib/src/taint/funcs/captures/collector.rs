@@ -4,14 +4,13 @@ use parser::{
     Span,
     ast::{
         AmbiguousBracketAccessNode, AssignmentKind, AssignmentNode, BindingDeclSpecNode, BlockNode,
-        CallNode, CompositeLiteralElementListNode, CompositeLiteralElementNode,
-        CompositeLiteralKeyNode, ConversionNode, DeclNode, ElseNode, ExprNode,
-        ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode, ForHeaderNode, ForNode, ForRangeNode,
-        FunctionDeclNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, IfNode,
-        IndexingNode, LiteralNode, MakeNode, NewArgNode, NewNode, SelectClauseNode, SelectNode,
-        SelectionNode, SendNode, ShortVarDeclNode, SlicingNode, StatementNode,
-        StructLiteralFieldsNode, SwitchNode, TypeAssertionNode, TypeInstantiationNode,
-        TypeSwitchCaseClause, TypeSwitchNode,
+        CallNode, CompositeLiteralElementListNode, CompositeLiteralElementNode, ConversionNode,
+        DeclNode, ElseNode, ExprNode, ExprSwitchCaseClause, ExprSwitchNode, ForClauseNode,
+        ForHeaderNode, ForNode, ForRangeNode, FunctionDeclNode, FunctionParamDeclNode,
+        FunctionResultNode, FunctionSignatureNode, IfNode, IndexingNode, LiteralNode, MakeNode,
+        NewArgNode, NewNode, SelectClauseNode, SelectNode, SelectionNode, SendNode,
+        ShortVarDeclNode, SlicingNode, StatementNode, StructLiteralFieldsNode, SwitchNode,
+        TypeAssertionNode, TypeInstantiationNode, TypeSwitchCaseClause, TypeSwitchNode,
     },
 };
 
@@ -570,21 +569,6 @@ impl<'a> SymbolCaptureCollector<'a> for LiteralNode<'a> {
             | LiteralNode::Map { values, .. }
             | LiteralNode::UnknownComposite { values, .. } => values,
             LiteralNode::Struct { fields, .. } => fields,
-        };
-
-        sub.collect_captured_symbols(captured, declared);
-    }
-}
-
-impl<'a> SymbolCaptureCollector<'a> for CompositeLiteralKeyNode<'a> {
-    fn collect_captured_symbols(
-        &self,
-        captured: &mut CapturedSymbols<'a>,
-        declared: &mut HashSet<&'a str>,
-    ) {
-        let sub: &dyn SymbolCaptureCollector = match self {
-            CompositeLiteralKeyNode::Expr(expr) => expr,
-            CompositeLiteralKeyNode::Nested { elements, .. } => elements,
         };
 
         sub.collect_captured_symbols(captured, declared);

@@ -4,8 +4,8 @@ use crate::{
     ParsingError, Span, TokenStream,
     ast::{
         AmbiguousBracketAccessNode, CompositeLiteralElementListNode, CompositeLiteralElementNode,
-        CompositeLiteralKeyNode, ConversionNode, ExprNode, IndexingNode, LiteralNode, OrderedF64,
-        SelectionNode, StructLiteralFieldsNode, TypeInstantiationNode, TypeNode,
+        ConversionNode, ExprNode, IndexingNode, LiteralNode, OrderedF64, SelectionNode,
+        StructLiteralFieldsNode, TypeInstantiationNode, TypeNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -174,7 +174,7 @@ fn try_organize_struct_literal_fields(
                 });
             };
 
-            if let CompositeLiteralKeyNode::Expr(ExprNode::Name(id)) = key_expr {
+            if let CompositeLiteralElementNode::Expr(ExprNode::Name(id)) = key_expr {
                 // this is not actually an operand name, it's just parsed as
                 // such: in reality it's an identifier corresponding to a field
                 // name, so now we get rid of that (misconstrued) expression and
@@ -252,16 +252,9 @@ fn parse_composite_literal_element_list<'a>(
 
                 expect(s, TokenKind::Colon, Some("composite literal"))?;
 
-                let CompositeLiteralElementNode::Nested { elements, location } = key else {
-                    unreachable!("a nested composite literal always has a nested shape")
-                };
-
                 let value = parse_composite_literal_element(s, expected_element_type)?;
 
-                values.push((
-                    Some(CompositeLiteralKeyNode::Nested { elements, location }),
-                    value,
-                ));
+                values.push((Some(key), value));
 
                 continue;
             }
@@ -283,7 +276,7 @@ fn parse_composite_literal_element_list<'a>(
 
         let (key, value) = if let Some(Ok(of_kind!(TokenKind::Colon))) = s.peek() {
             // nope, it wasn't a value -- it was a key!
-            let key = CompositeLiteralKeyNode::Expr(value);
+            let key = CompositeLiteralElementNode::Expr(value);
 
             // advance
             s.next();

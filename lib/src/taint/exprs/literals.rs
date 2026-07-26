@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use parser::{
     Location,
     ast::{
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, CompositeLiteralKeyNode,
-        ExprNode, FieldDeclNode, LiteralNode, StructLiteralFieldsNode, TypeNode,
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, FieldDeclNode,
+        LiteralNode, StructLiteralFieldsNode, TypeNode,
     },
 };
 
@@ -167,7 +167,7 @@ fn raw_list_as_struct_fields<'a>(
         let mut pairs = Vec::with_capacity(list.len());
 
         for (key, value) in list {
-            let Some(CompositeLiteralKeyNode::Expr(ExprNode::Name(id))) = key else {
+            let Some(CompositeLiteralElementNode::Expr(ExprNode::Name(id))) = key else {
                 // not a valid Go struct literal shape; degrade by handing
                 // everything off as an exhaustive list with no key info, so
                 // values still contribute to the dyn backtrace
@@ -430,7 +430,7 @@ fn visit_unresolved_composite_literal<'a>(
 
     for (opt_key, element) in values {
         let (key_backtrace, key) = match opt_key {
-            Some(CompositeLiteralKeyNode::Expr(key)) => {
+            Some(CompositeLiteralElementNode::Expr(key)) => {
                 let constant = SimpleConstValue::try_resolve_from_expr(key);
 
                 if constant.is_some() {
@@ -443,7 +443,7 @@ fn visit_unresolved_composite_literal<'a>(
                     (super::get_expr_backtrace(ctx, key), None)
                 }
             }
-            Some(CompositeLiteralKeyNode::Nested { elements, .. }) => (
+            Some(CompositeLiteralElementNode::Nested { elements, .. }) => (
                 visit_nested_composite_literal(ctx, elements, &location).backtrace(),
                 None,
             ),
@@ -511,12 +511,12 @@ fn visit_unresolved_composite_literal<'a>(
 
 fn visit_composite_literal_key<'a>(
     ctx: &mut AnalysisContext<'a>,
-    key: &CompositeLiteralKeyNode<'a>,
+    key: &CompositeLiteralElementNode<'a>,
     location: &Pinned<'a, Location>,
 ) -> (Option<LabelBacktrace<'a>>, Option<SimpleConstValue>) {
     match key {
-        CompositeLiteralKeyNode::Expr(expr) => super::get_expr_backtrace_and_const(ctx, expr),
-        CompositeLiteralKeyNode::Nested { elements, .. } => (
+        CompositeLiteralElementNode::Expr(expr) => super::get_expr_backtrace_and_const(ctx, expr),
+        CompositeLiteralElementNode::Nested { elements, .. } => (
             visit_nested_composite_literal(ctx, elements, location).backtrace(),
             None,
         ),
