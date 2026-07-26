@@ -159,9 +159,22 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
         b.next(); // take colon
         context.commit()?; // we're sure, so we'll use the main stream now
 
+        let inner = if let Some(Ok(token @ of_kind!(TokenKind::CurlyR))) = s.peek() {
+            // it is legal for a label to be right at the end of a block, since
+            // empty statements can be labeled, and terminating semicolons are
+            // allowed to be omitted before a closing curly brace
+            let offset = token.span.location().start;
+
+            StatementNode::Empty {
+                location: offset..offset,
+            }
+        } else {
+            parse_statement(s, true)?
+        };
+
         return Ok(StatementNode::Labeled {
             label: first.span,
-            inner: Box::new(parse_statement(s, true)?),
+            inner: Box::new(inner),
         });
     }
 
@@ -346,6 +359,17 @@ mod tests {
         let mut stream = TokenStream::new(Lexer::new(input));
 
         Ok(parse_block(&mut stream)?.stmts)
+    }
+
+    #[test]
+    fn labeled_empty_statement_before_block_end() {
+        assert_eq!(
+            vec![StatementNode::Labeled {
+                label: Span::new("end", 3, 2),
+                inner: Box::new(StatementNode::Empty { location: 8..8 }),
+            }],
+            parse("{\n end:\n}").unwrap()
+        );
     }
 
     #[test]
