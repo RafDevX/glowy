@@ -431,8 +431,7 @@ impl<'a> SliceValue<'a> {
         branch_backtrace: Option<&LabelBacktrace<'a>>,
         location: &Pinned<'a, Location>,
     ) {
-        if branch_backtrace.is_none()
-            && let Some(source) = source
+        if let Some(source) = source
             && let Some(length) = self
                 .precise_len()
                 .zip(source.precise_len())
@@ -449,37 +448,64 @@ impl<'a> SliceValue<'a> {
                 })
                 .collect();
 
-            for (index, value) in (0..length).zip(copied) {
-                self.write_at_index(Some(index), value, location.clone());
+            if let Some(branch) = branch_backtrace {
+                // the copy might not execute (we cannot overwrite completely,
+                // have to do a weak update), so snapshot the old destination
+                // before writing and retain it in each updated element
+                let previous_values: Vec<_> = (0..length)
+                    .map(|index| self.read_at_index(Some(index), location.clone()))
+                    .collect();
+
+                for ((index, value), previous) in (0..length).zip(copied).zip(previous_values) {
+                    let value = value.nest_backtrace(
+                        LabelBacktraceKind::SliceCopy,
+                        None,
+                        location.clone(),
+                        [branch.clone()],
+                    );
+
+                    let value = previous.merge_with(
+                        &value,
+                        LabelBacktraceKind::SliceCopy,
+                        Cow::Borrowed(location),
+                    );
+
+                    self.write_at_index(Some(index), value, location.clone());
+                }
+            } else {
+                for (index, value) in (0..length).zip(copied) {
+                    self.write_at_index(Some(index), value, location.clone());
+                }
             }
-        } else {
-            // unknown ranges may copy any source element to any destination
-            // position, and a branch-dependent copy might not execute, so it
-            // must retain the old destination. in both cases, weakly add the
-            // source aggregate rather than overwriting any existing element
 
-            let source_element = source.map_or_else(
-                || source_value.clone_inner(),
-                |source| source.range_element(location.clone()),
-            );
+            return;
+        }
 
-            let copied = source_element.nest_backtrace(
-                LabelBacktraceKind::SliceCopy,
-                None,
-                location.clone(),
-                branch_backtrace.cloned(),
-            );
+        // unknown ranges may copy any source element to any destination
+        // position, and a branch-dependent copy might not execute, so it must
+        // retain the old destination. in both cases, weakly add the source
+        // aggregate rather than overwriting any existing element
+        let source_element = source.map_or_else(
+            || source_value.clone_inner(),
+            |source| source.range_element(location.clone()),
+        );
 
-            let aggregate = copied.nest_backtrace(
-                LabelBacktraceKind::Assignment,
-                None,
-                location.clone(),
-                self.range_dependency(LabelBacktraceKind::Assignment, location.clone()),
-            );
+        let copied = source_element.nest_backtrace(
+            LabelBacktraceKind::SliceCopy,
+            None,
+            location.clone(),
+            branch_backtrace.cloned(),
+        );
 
-            for backing in &self.backings {
-                backing.write(None, aggregate.clone(), Cow::Borrowed(location));
-            }
+        let aggregate = copied.nest_backtrace(
+            LabelBacktraceKind::Assignment,
+            None,
+            location.clone(),
+            self.range_dependency(LabelBacktraceKind::Assignment, location.clone()),
+        );
+
+        for backing in &self.backings {
+            backing.write(None, aggregate.clone(), Cow::Borrowed(location));
         }
     }
 
