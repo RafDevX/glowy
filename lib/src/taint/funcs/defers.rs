@@ -22,13 +22,11 @@ impl<'a> DeferredCallReferents<'a> {
         resolved: &ResolvedCall<'a>,
         node: &CallNode<'a>,
     ) -> Self {
-        let resolved_func = resolved.callee.as_function();
-        let func = resolved
-            .blackbox_replacement
-            .as_deref()
-            .or(resolved_func.as_deref());
+        let func = resolved.callee.as_function();
 
-        let receiver = if func.is_some_and(FunctionValue::receiver_is_pointer)
+        let receiver = if func
+            .as_deref()
+            .is_some_and(FunctionValue::receiver_is_pointer)
             && let ExprNode::Selection(selection) = &*node.func
         {
             DeferredReferent::new(ctx, &selection.base)
@@ -37,6 +35,7 @@ impl<'a> DeferredCallReferents<'a> {
         };
 
         let parameter_slots = func
+            .as_deref()
             .and_then(FunctionValue::signature)
             .map(super::collect_parameter_slots);
 

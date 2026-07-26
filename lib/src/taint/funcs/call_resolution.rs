@@ -26,9 +26,7 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     // this looks a bit strange and convoluted, but it is necessary to guarantee
     // special handling for selections: when the callee is a selection (e.g.,
     // `x.M(...)`), we want to evaluate the base exactly once
-    let (value, extracted_from_type, method_receiver) = if let ExprNode::Selection(selection) =
-        &*node.func
-    {
+    let (value, method_receiver_value) = if let ExprNode::Selection(selection) = &*node.func {
         let base_value = exprs::visit_single_expr(ctx, &selection.base);
         let is_method_form = base_value.as_package_ref().is_none();
 
@@ -42,8 +40,6 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
             None
         };
 
-        let extracted_from_type = extracted.is_some();
-
         let value = extracted.unwrap_or_else(|| {
             // typed dispatch didn't apply or didn't conclusively resolve, so we
             // visit the callee normally, but using `exprs::visit_single_expr`
@@ -54,13 +50,13 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
             exprs::visit_selection_with_base(ctx, selection, &base_value).extract_collapsed_single()
         });
 
-        let method_receiver = is_method_form.then_some((selection, base_value));
+        let method_receiver_value = is_method_form.then_some(base_value);
 
-        (value, extracted_from_type, method_receiver)
+        (value, method_receiver_value)
     } else {
         // not a selection, so just visit normally
 
-        (exprs::visit_single_expr(ctx, &node.func), false, None)
+        (exprs::visit_single_expr(ctx, &node.func), None)
     };
 
     // can't call this `func` right away because later we need to manually call
@@ -108,57 +104,19 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
     #[expect(clippy::shadow_unrelated, reason = "Same value as before")]
     let value_func = value.as_function().unwrap();
 
-    // when this was detected as a method-form call but the callee could not be
-    // extracted from type information, fallback to a weaker name-only heuristic
-    // to determine whether the inferred method we decided to assume (from
-    // `visit_selection`) is actually obviously wrong and should be discarded:
-    // if there is exactly one in-package method by that name and it has a
-    // cardinality incompatible with this call site, the heuristic pickup is
-    // conclusively wrong (the receiver must actually be of an unrelated type
-    // whose real `M` we never saw, because the input compiles). enforcing the
-    // inferred method's signature would cascade into spurious errors, so we
-    // use an unknown FunctionValue instead of the known-incorrect `func_value`.
-    // sound: blackbox folds all input taint, Möbius accepts any cardinality
-    let blackbox_replacement = if !extracted_from_type
-        && let Some((selection, _)) = method_receiver.as_ref()
-        && !has_unknown_cardinality
-        && is_incompatible_cardinality_method(
-            ctx,
-            selection,
-            &value_func,
-            args_with_consts.len(),
-            node.variadic,
-        ) {
-        Some(Box::new(FunctionValue::new_unknown(
-            // we keep only the overall access backtrace
-            value_func.backtrace().cloned(),
-            // we don't know the type of the receiver, but we know it exists
-            true,
-        )))
-    } else {
-        None
-    };
-
-    let func: &FunctionValue<'a> = blackbox_replacement.as_deref().unwrap_or(&value_func);
-
     if !validate_call_cardinality(
         ctx,
         node,
-        func,
+        &value_func,
         &mut args_with_consts,
         has_unknown_cardinality,
     ) {
         return CallResolution::Final(vec![]);
     }
 
-    // drop the immutable borrow of `value` (held via `value_func`/`func`)
-    // before moving `value` into the resolved struct
+    // drop the immutable borrow of `value` (held by `value_func`) before moving
+    // it into the resolved struct
     drop(value_func);
-
-    // the selection ref captured alongside `base_value` was only needed for
-    // the blackbox-replacement decision above; from here on, only the base
-    // value matters (its taint flows in via SyntheticSlot::Receiver)
-    let method_receiver_value = method_receiver.map(|(_, base)| base);
 
     let (arg_values, arg_consts) = args_with_consts.into_iter().unzip();
 
@@ -166,7 +124,6 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
         callee: value,
         arg_values,
         arg_consts,
-        blackbox_replacement,
         method_receiver_value,
     })
 }
@@ -343,49 +300,4 @@ fn try_extract_typed_selection_callee<'a>(
 
     // nothing we can do
     None
-}
-
-// whether a heuristically-inferred method is incompatible with expected arity
-//
-// note: we assume the invoker already ruled out the case where this selection
-// is `a.b` and `a` is a valid package import qualifier; invoker must be
-// confident that this is a method, just not this specific method candidate
-fn is_incompatible_cardinality_method<'a>(
-    ctx: &AnalysisContext<'a>,
-    selection: &SelectionNode<'a>,
-    candidate: &FunctionValue<'a>,
-    args_len: usize,
-    variadic_call: bool,
-) -> bool {
-    let Some(method) = ctx
-        .symtab()
-        .lookup_unique_method_in_current_package(selection.selector.content())
-    else {
-        return false;
-    };
-
-    let func_value = method.borrow().value().get();
-    let Some(func) = func_value.as_function() else {
-        return false;
-    };
-
-    let Some(signature) = func.signature() else {
-        return false;
-    };
-
-    // if the method candidate that the invoker holds is not the same as the one
-    // we are checking in this function, then this entire check is irrelevant,
-    // so the analyzer has a bug (we assumed that the lookup above is what
-    // `visit_selection` used to pick up the method that eventually propagated
-    // to become the invoker's candidate, but apparently that assumption was
-    // wrong and so our implied invariant has been broken; this is a bug!)
-    assert_eq!(
-        candidate.r#ref(),
-        func.r#ref(),
-        "Assumption invariant failed on method pickup strategy"
-    );
-
-    let (expected, accepts_extra) = expected_call_cardinality(signature, variadic_call);
-
-    args_len != expected && !(accepts_extra && args_len > expected)
 }

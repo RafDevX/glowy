@@ -45,7 +45,6 @@ pub fn apply_call<'a>(
 ) -> Vec<ValueRef<'a>> {
     let ResolvedCall {
         callee: mut value,
-        blackbox_replacement,
         method_receiver_value,
         arg_values,
         arg_consts,
@@ -58,8 +57,7 @@ pub fn apply_call<'a>(
         .as_function()
         .expect("resolve_call ensures callee is a function value");
 
-    // reconstruct now that we have callee borrowed again
-    let func: &FunctionValue<'a> = blackbox_replacement.as_deref().unwrap_or(&value_func);
+    let func: &FunctionValue<'a> = &value_func;
 
     let ids = func.signature().map(super::collect_parameter_slots);
 
@@ -244,9 +242,7 @@ pub fn apply_call<'a>(
     // re-borrow as mutable
     drop(value_func);
 
-    if blackbox_replacement.is_none()
-        && let Some(mut func_mut) = value.as_function_mut()
-    {
+    if let Some(mut func_mut) = value.as_function_mut() {
         func_mut.record_call();
     }
 

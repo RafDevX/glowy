@@ -42,7 +42,6 @@ pub struct ResolvedCall<'a> {
     callee: ValueRef<'a>,
     arg_values: Vec<ValueRef<'a>>,
     arg_consts: Vec<Option<SimpleConstValue>>,
-    blackbox_replacement: Option<Box<FunctionValue<'a>>>,
     method_receiver_value: Option<ValueRef<'a>>,
 }
 
