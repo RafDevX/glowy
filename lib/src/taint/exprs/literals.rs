@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use parser::{
     Location,
     ast::{
-        CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, FieldDeclNode,
-        LiteralNode, StructLiteralFieldsNode, TypeNode,
+        CompositeLiteralElementListNode, CompositeLiteralElementNode, CompositeLiteralKeyNode,
+        ExprNode, FieldDeclNode, LiteralNode, StructLiteralFieldsNode, TypeNode,
     },
 };
 
@@ -167,7 +167,7 @@ fn raw_list_as_struct_fields<'a>(
         let mut pairs = Vec::with_capacity(list.len());
 
         for (key, value) in list {
-            let Some(ExprNode::Name(id)) = key else {
+            let Some(CompositeLiteralKeyNode::Expr(ExprNode::Name(id))) = key else {
                 // not a valid Go struct literal shape; degrade by handing
                 // everything off as an exhaustive list with no key info, so
                 // values still contribute to the dyn backtrace
@@ -205,8 +205,8 @@ fn visit_integer_keyed_composite_literal<'a>(
     let mut greatest_key = None;
 
     for (opt_key, el) in values {
-        let (key_backtrace, key) = if let Some(expr) = opt_key {
-            let (backtrace, r#const) = super::get_expr_backtrace_and_const(ctx, expr);
+        let (key_backtrace, key) = if let Some(literal_key) = opt_key {
+            let (backtrace, r#const) = visit_composite_literal_key(ctx, literal_key, &location);
 
             let key = match r#const {
                 Some(SimpleConstValue::Integer(int)) => Some(int),
@@ -280,7 +280,7 @@ fn visit_map_composite_literal<'a>(
         // key must be visited before its associated element, and kept even if
         // the element is later pruned via is_prunable (still exposed by range)
         let (key_backtrace, const_key) = opt_key.as_ref().map_or((None, None), |key| {
-            super::get_expr_backtrace_and_const(ctx, key)
+            visit_composite_literal_key(ctx, key, &location)
         });
 
         let mut value = visit_array_literal_element(ctx, el, &location);
@@ -430,7 +430,7 @@ fn visit_unresolved_composite_literal<'a>(
 
     for (opt_key, element) in values {
         let (key_backtrace, key) = match opt_key {
-            Some(key) => {
+            Some(CompositeLiteralKeyNode::Expr(key)) => {
                 let constant = SimpleConstValue::try_resolve_from_expr(key);
 
                 if constant.is_some() {
@@ -443,6 +443,10 @@ fn visit_unresolved_composite_literal<'a>(
                     (super::get_expr_backtrace(ctx, key), None)
                 }
             }
+            Some(CompositeLiteralKeyNode::Nested { elements, .. }) => (
+                visit_nested_composite_literal(ctx, elements, &location).backtrace(),
+                None,
+            ),
             None => (None, next_default_key.map(SimpleConstValue::Integer)),
         };
 
@@ -505,6 +509,20 @@ fn visit_unresolved_composite_literal<'a>(
     CompositeValue::new(map, others, keys, known_len, location)
 }
 
+fn visit_composite_literal_key<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    key: &CompositeLiteralKeyNode<'a>,
+    location: &Pinned<'a, Location>,
+) -> (Option<LabelBacktrace<'a>>, Option<SimpleConstValue>) {
+    match key {
+        CompositeLiteralKeyNode::Expr(expr) => super::get_expr_backtrace_and_const(ctx, expr),
+        CompositeLiteralKeyNode::Nested { elements, .. } => (
+            visit_nested_composite_literal(ctx, elements, location).backtrace(),
+            None,
+        ),
+    }
+}
+
 fn visit_array_literal_element<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &CompositeLiteralElementNode<'a>,
@@ -513,31 +531,38 @@ fn visit_array_literal_element<'a>(
     match &node {
         CompositeLiteralElementNode::Expr(expr) => super::visit_single_expr(ctx, expr),
         CompositeLiteralElementNode::Nested { elements, .. } => {
-            let mut values: Vec<_> = elements
-                .iter()
-                .map(|(_, v)| v)
-                .map(|el| visit_array_literal_element(ctx, el, location))
-                .filter(|v| !is_prunable(v))
-                .collect();
-
-            if values.is_empty() {
-                // quicker escape to avoid clones et al. if they're unnecessary
-                ValueRef::new_bottom(location.clone(), None)
-            } else if values.len() == 1 {
-                values.pop().unwrap()
-            } else {
-                let backtraces: Vec<_> = values.iter().filter_map(ValueRef::backtrace).collect();
-
-                let folded = LabelBacktrace::fold(
-                    &backtraces,
-                    LabelBacktraceKind::Expression,
-                    None,
-                    location.clone(),
-                );
-
-                ValueRef::from_backtrace_or_bottom_at(folded, || location.clone())
-            }
+            visit_nested_composite_literal(ctx, elements, location)
         }
+    }
+}
+
+fn visit_nested_composite_literal<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    elements: &CompositeLiteralElementListNode<'a>,
+    location: &Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    let mut values: Vec<_> = elements
+        .iter()
+        .map(|(_, value)| visit_array_literal_element(ctx, value, location))
+        .filter(|value| !is_prunable(value))
+        .collect();
+
+    if values.is_empty() {
+        // quicker escape to avoid clones et al. if they're unnecessary
+        ValueRef::new_bottom(location.clone(), None)
+    } else if values.len() == 1 {
+        values.pop().unwrap()
+    } else {
+        let backtraces: Vec<_> = values.iter().filter_map(ValueRef::backtrace).collect();
+
+        let folded = LabelBacktrace::fold(
+            &backtraces,
+            LabelBacktraceKind::Expression,
+            None,
+            location.clone(),
+        );
+
+        ValueRef::from_backtrace_or_bottom_at(folded, || location.clone())
     }
 }
 
