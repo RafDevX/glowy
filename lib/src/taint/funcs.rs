@@ -147,20 +147,6 @@ fn visit_type_conversion<'a>(
 }
 
 pub fn visit_defer<'a>(ctx: &mut AnalysisContext<'a>, expr: &ExprNode<'a>, location: &Location) {
-    if ctx.current_function().is_none() {
-        // there is no active function, probably because we are inside an `init`
-        // function, so just fallback to evaluating immediately (we still want
-        // to trigger side effects and enforcement checks inside the function)
-
-        ctx.report_error(AnalysisErrorKind::DeferInInitNotDeferred {
-            location: location.clone(),
-        });
-
-        exprs::visit_expr(ctx, expr);
-
-        return;
-    }
-
     let ExprNode::Call(call) = expr else {
         // invalid Go, but visit the expression anyway for side effects
 

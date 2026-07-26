@@ -77,8 +77,6 @@ present document.
 - Stateful package initialization is replayed repeatedly until labels converge
   rather than executed once in Go's dependency order, so non-idempotent
   initializers/`init` side effects can differ.
-- Deferred calls from inside `init` functions are executed immediately instead
-  of deferred, with a soundness warning being reported.
 - Termination, blocking, scheduling, timing, resource use, allocation failure,
   and other covert/availability channels are outside the noninterference model.
 

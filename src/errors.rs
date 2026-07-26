@@ -505,22 +505,9 @@ pub fn get_structured_error_info<'a>(
             help: Some("ensure the expression's value-arity is compatible with where it is used"),
         },
 
-        AnalysisErrorKind::DeferInInitNotDeferred { location } => StructuredErrorInfo {
-            title: "unsupported `defer` statement in `init` function not deferred".into(),
-            code: "U001".into(),
-            snippets: vec![
-                builder.snippet().annotate(
-                    StructuredAnnotation::primary(location.clone())
-                        .label("this expression was considered to execute immediately"),
-                ),
-            ],
-            help: Some(
-                "this analyzer version does not support `defer` statements in `init` functions",
-            ),
-        },
         AnalysisErrorKind::UnsoundFunctionMergingAssignment { location } => StructuredErrorInfo {
             title: "unsupported unsound assignment of non-portable function value".into(),
-            code: "U002".into(),
+            code: "U001".into(),
             snippets: vec![
                 builder.snippet().annotate(
                     StructuredAnnotation::primary(location.clone())

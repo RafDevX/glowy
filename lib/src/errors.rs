@@ -371,19 +371,6 @@ pub enum AnalysisErrorKind<'a> {
         location: Location,
     },
 
-    /// Unsupported `defer` statement in `init` function.
-    ///
-    /// This analyzer version does not support `defer` statements in `init`
-    /// functions and so just considers the provided function call as executing
-    /// immediately (rather than at the end of the current function), which can
-    /// have unexpected implications regarding its side-effects.
-    ///
-    /// Special treatment is given to `init` functions, so they do not allow for
-    /// all possible constructs, even if otherwise permitted in normal Go.
-    DeferInInitNotDeferred {
-        /// Where the statement was found.
-        location: Location,
-    },
     /// Unsafe assignment of non-portable function value.
     ///
     /// This happens in control-flow-split contexts (such as if a function-typed
@@ -440,9 +427,7 @@ impl AnalysisErrorKind<'_> {
             | Self::UnexpectedVoidExpression { .. }
             | Self::UnexpectedMultiValueExpression { .. } => AnalysisErrorCategory::InvalidGo,
 
-            Self::DeferInInitNotDeferred { .. } | Self::UnsoundFunctionMergingAssignment { .. } => {
-                AnalysisErrorCategory::UnsupportedGo
-            }
+            Self::UnsoundFunctionMergingAssignment { .. } => AnalysisErrorCategory::UnsupportedGo,
 
             Self::DuplicateVirtualFilePath | Self::TooManyBuildTagDimensions { .. } => {
                 AnalysisErrorCategory::Misconfiguration
