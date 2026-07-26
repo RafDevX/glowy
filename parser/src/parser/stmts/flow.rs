@@ -6,7 +6,7 @@ use crate::{
         TypeSwitchCaseClause, TypeSwitchNode,
     },
     parser::{
-        BacktrackingContext, PResult, expect,
+        PResult, expect,
         exprs::{parse_expression, parse_expressions_list_while, parse_primary_expression},
         of_kind,
         stmts::{parse_block, parse_statement, parse_statements_until, terminal_token},
@@ -18,20 +18,25 @@ use crate::{
 pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>> {
     let beginning = expect(s, TokenKind::If, Some("if statement"))?;
 
-    // try to read a statement
-    let mut context = BacktrackingContext::new(s);
-    let b = context.stream();
+    // check if there's a condition expression right after the `if` keyword,
+    // meaning that there is no init statement, because otherwise we would have
+    // ambiguity trying to parse a statement that might have `{` (cannot
+    // distinguish type lit from start of if block)
+    let mut condition_probe = s.clone();
+    let starts_with_condition = parse_expression(&mut condition_probe, false).is_ok()
+        && matches!(
+            condition_probe.peek(),
+            Some(Ok(of_kind!(TokenKind::CurlyL)))
+        );
 
-    let stmt = if let Ok(stmt) = parse_statement(b, false)
-        && let Some(Ok(of_kind!(TokenKind::SemiColon))) = b.next()
-    {
-        // got it, we can continue with the main stream from now on
-        context.commit()?;
+    let stmt = if starts_with_condition {
+        None
+    } else {
+        let stmt = parse_statement(s, false)?;
+
+        expect(s, TokenKind::SemiColon, Some("if statement"))?;
 
         Some(Box::new(stmt))
-    } else {
-        // nope, rollback
-        None
     };
 
     let cond = parse_expression(s, false)?;
@@ -747,6 +752,121 @@ mod tests {
                         };
                     }
                 ",
+            )
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn empty_if_body_after_named_condition_operand() {
+        assert_eq!(
+            vec![
+                StatementNode::If(IfNode {
+                    stmt: None,
+                    cond: ExprNode::BinaryOp {
+                        kind: BinaryOpKind::Eq,
+                        left: Box::new(ExprNode::Name(Span::new("rc", 42, 3))),
+                        right: Box::new(ExprNode::Name(Span::new("ABC_CONST", 48, 3))),
+                        location: 42..57,
+                    },
+                    then: BlockNode {
+                        stmts: vec![],
+                        location: 58..81,
+                    },
+                    otherwise: None,
+                    location: 39..81,
+                }),
+                StatementNode::Return {
+                    exprs: vec![ExprNode::Name(Span::new("rc", 109, 5))],
+                    location: 102..111,
+                },
+            ],
+            parse(
+                "
+                {
+                    if rc == ABC_CONST {
+                    }
+                    return rc
+                }
+            ",
+            )
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn empty_if_body_after_receive_condition() {
+        assert_eq!(
+            vec![
+                StatementNode::If(IfNode {
+                    stmt: None,
+                    cond: ExprNode::UnaryOp {
+                        kind: UnaryOpKind::Receive,
+                        operand: Box::new(ExprNode::Name(Span::new("ch", 44, 3))),
+                        location: 42..46,
+                    },
+                    then: BlockNode {
+                        stmts: vec![],
+                        location: 47..70,
+                    },
+                    otherwise: None,
+                    location: 39..70,
+                }),
+                StatementNode::Return {
+                    exprs: vec![],
+                    location: 91..97,
+                },
+            ],
+            parse(
+                "
+                {
+                    if <-ch {
+                    }
+                    return
+                }
+            ",
+            )
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn if_init_may_contain_composite_literal() {
+        assert_eq!(
+            vec![StatementNode::If(IfNode {
+                stmt: Some(Box::new(StatementNode::ShortVarDecl(ShortVarDeclNode {
+                    ids: vec![Span::new("x", 42, 3)],
+                    exprs: vec![ExprNode::Literal(LiteralNode::UnknownComposite {
+                        r#type: TypeNode::Name(TypeNameNode {
+                            package: None,
+                            id: Span::new("T", 47, 3),
+                            args: vec![],
+                        }),
+                        values: vec![],
+                        location: 47..50,
+                    })],
+                    location: 42..50,
+                    annotation: None,
+                }))),
+                cond: ExprNode::Selection(SelectionNode {
+                    base: Box::new(ExprNode::Name(Span::new("x", 52, 3))),
+                    selector: Span::new("ok", 54, 3),
+                    location: 52..56,
+                }),
+                then: BlockNode {
+                    stmts: vec![],
+                    location: 57..80,
+                },
+                otherwise: None,
+                location: 39..80,
+            })],
+            parse(
+                "
+                {
+                    if x := T{}; x.ok {
+                    }
+                }
+            ",
             )
             .unwrap(),
         );
