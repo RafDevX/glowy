@@ -5,7 +5,7 @@ use crate::{
     ast::{
         AmbiguousBracketAccessNode, CompositeLiteralElementListNode, CompositeLiteralElementNode,
         ConversionNode, ExprNode, IndexingNode, LiteralNode, OrderedF64, SelectionNode,
-        StructLiteralFieldsNode,
+        StructLiteralFieldsNode, TypeNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -54,7 +54,7 @@ fn parse_array_or_slice_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Lite
 
     let element = parse_type(s)?;
 
-    let values = parse_composite_literal_element_list(s, true)?;
+    let values = parse_composite_literal_element_list(s, true, Some(&element))?;
 
     let location = s.location_since(&beginning);
 
@@ -86,7 +86,7 @@ fn parse_map_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<'a>
 
     let element = parse_type(s)?;
 
-    let values = parse_composite_literal_element_list(s, false)?;
+    let values = parse_composite_literal_element_list(s, false, Some(&element))?;
 
     let location = s.location_since(&beginning);
 
@@ -108,7 +108,7 @@ fn parse_struct_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, LiteralNode<
 
     let r#type = parse_type(s)?;
 
-    let list = parse_composite_literal_element_list(s, true)?;
+    let list = parse_composite_literal_element_list(s, true, None)?;
 
     let fields = try_organize_struct_literal_fields(list)?;
 
@@ -131,7 +131,7 @@ fn parse_unknown_composite_literal<'a>(s: &mut TokenStream<'a>) -> PResult<'a, L
 
     let r#type = parse_type(s)?;
 
-    let values = parse_composite_literal_element_list(s, true)?;
+    let values = parse_composite_literal_element_list(s, true, None)?;
 
     let location = s.location_since(&beginning);
 
@@ -221,6 +221,7 @@ fn try_organize_struct_literal_fields(
 fn parse_composite_literal_element_list<'a>(
     s: &mut TokenStream<'a>,
     optional_keys: bool,
+    expected_element_type: Option<&TypeNode<'a>>,
 ) -> PResult<'a, CompositeLiteralElementListNode<'a>> {
     expect(s, TokenKind::CurlyL, Some("composite literal"))?;
 
@@ -241,7 +242,7 @@ fn parse_composite_literal_element_list<'a>(
 
         if optional_keys && let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
             // no key, just nested
-            let value = parse_nested_composite_literal(s, optional_keys)?;
+            let value = parse_nested_composite_literal(s, expected_element_type)?;
 
             values.push((None, value));
 
@@ -260,7 +261,7 @@ fn parse_composite_literal_element_list<'a>(
 
             // parse the actual value
             let value = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
-                parse_nested_composite_literal(s, optional_keys)?
+                parse_nested_composite_literal(s, expected_element_type)?
             } else {
                 CompositeLiteralElementNode::Expr(parse_expression(s, true)?)
             };
@@ -288,11 +289,20 @@ fn parse_composite_literal_element_list<'a>(
 
 fn parse_nested_composite_literal<'a>(
     s: &mut TokenStream<'a>,
-    optional_keys: bool,
+    expected_element_type: Option<&TypeNode<'a>>,
 ) -> PResult<'a, CompositeLiteralElementNode<'a>> {
     let beginning = s.peek().cloned().transpose()?;
 
-    let elements = parse_composite_literal_element_list(s, optional_keys)?;
+    let (optional_keys, expected_element_type) =
+        match expected_element_type.map(TypeNode::strip_pointers) {
+            Some(TypeNode::Map { element, .. }) => (false, Some(&**element)),
+            Some(TypeNode::Array { element, .. } | TypeNode::Slice { element }) => {
+                (true, Some(&**element))
+            }
+            _ => (true, None),
+        };
+
+    let elements = parse_composite_literal_element_list(s, optional_keys, expected_element_type)?;
 
     let location = s.location_since(&beginning.unwrap());
     // ^ unwrap is safe since next token definitely exists
