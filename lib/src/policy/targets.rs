@@ -7,6 +7,8 @@ use std::{
     str::FromStr,
 };
 
+use parser::ast::BinaryOpKind;
+
 use crate::{FullPackagePath, values::SimpleConstValue};
 
 /// Canonical pseudo-package path for Go's predeclared symbols.
@@ -22,6 +24,47 @@ use crate::{FullPackagePath, values::SimpleConstValue};
 /// root package under analysis. It is thus better to report an error when there
 /// is no package qualification rather than make assumptions on unknown intent.
 pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
+
+/// Canonical pseudo-package path for Go operator reference.
+///
+/// Blanket directive targets employ this specific namespace as a package name
+/// to refer to language operators as if functions. The supported operators and
+/// their conventional names are available in [`OPERATOR_TARGET_NAMES`].
+///
+/// Specifying the bare operator name (e.g., `eq`) is not supported as a
+/// shorthand during deserialization because it could lead to silent confusion,
+/// as invokers could assume that specifying no package would mean the current
+/// root package under analysis. It is thus better to report an error when there
+/// is no package qualification rather than make assumptions on unknown intent.
+/// Symbolic literals (e.g., `=`) are also not used to avoid parsing ambiguity.
+pub const OPERATOR_PACKAGE_PATH: &str = "operator";
+
+/// Canonical pseudo-names accepted to reference Go operators.
+///
+/// These mappings can be used in blanket directive targets under the
+/// pseudo-package [`OPERATOR_PACKAGE_PATH`] in order to reference Go
+/// language-based operators.
+pub const OPERATOR_TARGET_NAMES: &[(&str, BinaryOpKind)] = &[
+    ("eq", BinaryOpKind::Eq),
+    ("neq", BinaryOpKind::NotEq),
+    ("lt", BinaryOpKind::Less),
+    ("leq", BinaryOpKind::LessEq),
+    ("gt", BinaryOpKind::Greater),
+    ("geq", BinaryOpKind::GreaterEq),
+    ("sum", BinaryOpKind::Sum),
+    ("diff", BinaryOpKind::Diff),
+    ("prod", BinaryOpKind::Product),
+    ("div", BinaryOpKind::Quotient),
+    ("mod", BinaryOpKind::Remainder),
+    ("shl", BinaryOpKind::ShiftLeft),
+    ("shr", BinaryOpKind::ShiftRight),
+    ("bitOr", BinaryOpKind::BitwiseOr),
+    ("bitAnd", BinaryOpKind::BitwiseAnd),
+    ("bitXor", BinaryOpKind::BitwiseXor),
+    ("bitClear", BinaryOpKind::BitClear),
+    ("and", BinaryOpKind::LogicalAnd),
+    ("or", BinaryOpKind::LogicalOr),
+];
 
 /// Fully-qualified target of a blanket directive.
 ///
@@ -49,7 +92,9 @@ pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
 ///
 /// In order to target Go builtins and predeclared symbols that would otherwise
 /// have no package qualification, [`BUILTIN_PACKAGE_PATH`] should be used as a
-/// placeholder in [`Self::package_path`] in order to refer to such cases.
+/// placeholder in [`Self::package_path`] in order to refer to such cases. The
+/// same applies for [`OPERATOR_PACKAGE_PATH`] regarding language operators.
+/// Operator targets currently support revocation blanket directives only.
 ///
 /// # Parsing and Deserializing
 ///
@@ -98,7 +143,8 @@ pub struct BlanketDirectiveTarget {
     /// Fully-qualified package path.
     ///
     /// If this matches [`BUILTIN_PACKAGE_PATH`], it qualifies predeclared Go
-    /// symbols from the universe scope.
+    /// symbols from the universe scope. If this matches
+    /// [`OPERATOR_PACKAGE_PATH`], it qualifies Go language-based operators.
     pub package_path: FullPackagePath,
     /// Declared name of the receiver type, when the target is a method/field.
     ///

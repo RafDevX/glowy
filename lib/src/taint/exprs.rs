@@ -63,7 +63,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
         } => {
             let pinned = ctx.pin(location.clone());
 
-            let left = get_expr_backtrace(ctx, left);
+            let (left, left_const) = get_expr_backtrace_and_const(ctx, left);
 
             let short_circuit_backtrace = left
                 .as_ref()
@@ -90,7 +90,7 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
             };
 
             // now we can evaluate right
-            let mut right = get_expr_backtrace(ctx, right);
+            let (mut right, right_const) = get_expr_backtrace_and_const(ctx, right);
 
             if short_circuits {
                 ctx.pop_branch_backtrace();
@@ -115,7 +115,21 @@ pub fn visit_expr<'a>(ctx: &mut AnalysisContext<'a>, node: &ExprNode<'a>) -> Vec
                 Cow::Borrowed(&pinned),
             );
 
-            ValueRef::from_backtrace_or_bottom_at(backtrace, || pinned)
+            let mut result = ValueRef::from_backtrace_or_bottom_at(backtrace, || pinned);
+
+            if let Some((name, _)) = policy::OPERATOR_TARGET_NAMES
+                .iter()
+                .find(|(_, target_kind)| target_kind == kind)
+            {
+                funcs::apply_operator_blanket_revocations(
+                    ctx,
+                    name,
+                    &[left_const, right_const],
+                    &mut result,
+                );
+            }
+
+            result
         }
     };
 

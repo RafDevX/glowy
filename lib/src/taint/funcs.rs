@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter, rc::Rc};
+use std::{borrow::Cow, iter, rc::Rc, slice};
 
 use parser::{
     Annotation, Location, Span,
@@ -227,6 +227,30 @@ pub fn apply_predeclared_blanket_revocations<'a>(
     fake_func.absorb_blanket_directives(directives);
 
     call_application::apply_call_blanket_revocations(&fake_func, arg_consts, result);
+}
+
+pub fn apply_operator_blanket_revocations<'a>(
+    ctx: &AnalysisContext<'a>,
+    name: &str,
+    operand_consts: &[Option<SimpleConstValue>],
+    result: &mut ValueRef<'a>,
+) {
+    let directives = ctx.blanket_directives_for(policy::OPERATOR_PACKAGE_PATH, None, name);
+
+    if directives.is_empty() {
+        return;
+    }
+
+    // operators use the same policy semantics as two-argument, single-result
+    // functions; a lightweight function value lets them share that machinery
+    // without introducing synthetic symbols or calls into the analysis
+    let mut fake_func = FunctionValue::new_unknown(None, false);
+
+    fake_func.absorb_blanket_directives(directives);
+
+    let result = slice::from_mut(result);
+
+    call_application::apply_call_blanket_revocations(&fake_func, operand_consts, result);
 }
 
 pub fn nest_receiver_backtrace<'a>(
