@@ -148,7 +148,7 @@
 use std::{borrow::Cow, cmp, collections::HashSet, fmt, path::Path, sync::LazyLock};
 
 pub use analyzer::{Analyzer, AnalyzerFromDirectoryError};
-pub use build_constraints::DEFAULT_MAX_BUILD_TAG_DIMENSIONS;
+pub use build_constraints::DEFAULT_MAX_BUILD_PERMUTATIONS;
 pub use files::SourceFile;
 use indexmap::IndexMap;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
@@ -353,19 +353,23 @@ pub struct AnalysisConfig {
     /// Defaults to `false`, matching the behavior of `go build` (test files
     /// are only compiled by `go test`). Set to `true` to also analyze tests.
     pub include_tests: bool,
-    /// Maximum number of free build-tag dimensions to enumerate.
+    /// Maximum number of distinct build permutations to analyze.
     ///
     /// `//go:build` directives and GOOS/GOARCH-style filename suffixes each
     /// introduce a boolean dimension whose `2^N` on/off combinations the
-    /// analyzer would otherwise explore in full. When a corpus mentions more
-    /// distinct dimensions than this cap, the analysis with a
-    /// [`TooManyBuildTagDimensions`][AEKtmbtd] error so the invoker can decide
+    /// analyzer would otherwise explore in full. Each combination is a separate
+    /// world (permutation) that admits some set of files to be analyzed.
+    ///
+    /// Build-tag constraints that admit the same set of files count as one
+    /// permutation. If the corpus produces more distinct admitted-file sets
+    /// than this cap, analysis aborts with a
+    /// [`TooManyBuildPermutations`][AEKtmbp] error so the invoker can decide
     /// whether to raise the cap and retry.
     ///
-    /// Defaults to [`DEFAULT_MAX_BUILD_TAG_DIMENSIONS`].
+    /// Defaults to [`DEFAULT_MAX_BUILD_PERMUTATIONS`].
     ///
-    /// [AEKtmbtd]: errors::AnalysisErrorKind::TooManyBuildTagDimensions
-    pub max_build_tag_dimensions: usize,
+    /// [AEKtmbp]: errors::AnalysisErrorKind::TooManyBuildPermutations
+    pub max_build_permutations: usize,
 }
 
 impl Default for AnalysisConfig {
@@ -382,7 +386,7 @@ impl Default for AnalysisConfig {
             allow_sinks: IndexMap::new(),
             deny_sinks: IndexMap::new(),
             include_tests: false,
-            max_build_tag_dimensions: DEFAULT_MAX_BUILD_TAG_DIMENSIONS,
+            max_build_permutations: DEFAULT_MAX_BUILD_PERMUTATIONS,
         }
     }
 }

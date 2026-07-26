@@ -6,12 +6,15 @@ use std::{
 
 use parser::ast::{BuildConstraintExprNode, SourceFileNode};
 
-/// Default cap on the number of free build-tag dimensions to enumerate.
+/// Default cap on the number of distinct build permutations to analyze.
 ///
-/// With `2^N` permutations to explore, 8 already produces 256 worlds:
-/// anything larger is impractical and is well past anything observed in most
-/// real-world Go projects.
-pub const DEFAULT_MAX_BUILD_TAG_DIMENSIONS: usize = 8;
+/// This applies after permutation deduplication, i.e., it only counts once any
+/// number of build-tag constraints which collapse to the same set of ultimately
+/// admitted files.
+///
+/// Anything larger than 256 worlds is impractical and is well past anything
+/// observed in the vast majority of real-world Go projects.
+pub const DEFAULT_MAX_BUILD_PERMUTATIONS: usize = 256;
 
 // we know that exactly one of these is active at a time (discard other worlds)
 const KNOWN_COMPILER_VALUES: &[&str] = &["gc", "gccgo"];
@@ -132,8 +135,8 @@ impl fmt::Display for ActiveTags<'_> {
 
 pub fn enumerate_build_permutations<'a>(
     parsed: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
-    max_dimensions: usize,
-) -> Result<Vec<BuildPermutation<'a>>, BTreeSet<&'a str>> {
+    max_permutations: usize,
+) -> Result<Vec<BuildPermutation<'a>>, usize> {
     // start by removing from the pool entirely all the files with an `ignore`
     // build tag constraint, which by convention is only required by files that
     // should never be included (e.g., scripts to generate source code)
@@ -148,21 +151,19 @@ pub fn enumerate_build_permutations<'a>(
         .collect();
 
     let mentioned = collect_mentioned_tags(not_ignored.iter().map(|(p, a)| (*p, *a)));
-
-    if mentioned.len() > max_dimensions {
-        return Err(mentioned);
-    }
-
     let free_dims: Vec<&'a str> = mentioned.iter().copied().collect();
 
     let mut buckets: HashMap<BTreeSet<&'a path::Path>, BTreeSet<ActiveTags<'a>>> = HashMap::new();
+    let mut enabled = vec![false; free_dims.len()];
+    // ^ we don't use a numeric bitmask to avoid potential problems with
+    // overflow if there are more than 64 tags before deduplication
 
-    for mask in 0..(1_usize << free_dims.len()) {
+    loop {
         let world: Vec<&'a str> = free_dims
             .iter()
-            .enumerate()
-            .filter(|(i, _)| mask & (1 << i) != 0)
-            .map(|(_, t)| *t)
+            .zip(&enabled)
+            .filter(|(_, enabled)| **enabled)
+            .map(|(tag, _)| *tag)
             .collect();
 
         if world.iter().filter(|tag| is_known_goos(tag)).count() > 1
@@ -172,23 +173,27 @@ pub fn enumerate_build_permutations<'a>(
             // we know that these values only allow at most one of them at a
             // time, so we are free to discard all permutation worlds where
             // e.g. multiple architectures/compilers are being targeted at once
-            continue;
+        } else {
+            let tags = ActiveTags::new(world.iter().copied());
+
+            let admitted: BTreeSet<&'a path::Path> = not_ignored
+                .iter()
+                .filter(|(path, ast)| tags.admits_file(path, ast))
+                .map(|(path, _)| *path)
+                .collect();
+
+            if !admitted.is_empty() {
+                buckets.entry(admitted).or_default().insert(tags);
+
+                if buckets.len() > max_permutations {
+                    return Err(buckets.len());
+                }
+            }
         }
 
-        let tags = ActiveTags::new(world.iter().copied());
-
-        let admitted: BTreeSet<&'a path::Path> = not_ignored
-            .iter()
-            .filter(|(path, ast)| tags.admits_file(path, ast))
-            .map(|(path, _)| *path)
-            .collect();
-
-        if admitted.is_empty() {
-            // this permutation applies to 0 files, so we are free to skip it
-            continue;
+        if !advance_assignment(&mut enabled) {
+            break;
         }
-
-        buckets.entry(admitted).or_default().insert(tags);
     }
 
     let mut ordered: Vec<_> = buckets
@@ -199,6 +204,20 @@ pub fn enumerate_build_permutations<'a>(
     ordered.sort_by_cached_key(|perm| perm.tag_sets.clone());
 
     Ok(ordered)
+}
+
+fn advance_assignment(enabled: &mut [bool]) -> bool {
+    for bit in enabled {
+        if *bit {
+            *bit = false;
+        } else {
+            *bit = true;
+
+            return true;
+        }
+    }
+
+    false
 }
 
 pub fn always_active_tags<'a>(perms: &[BuildPermutation<'a>]) -> BTreeSet<&'a str> {

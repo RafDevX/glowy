@@ -92,10 +92,10 @@ pub struct Analyzer {
     /// Whether `_test.go` files should be admitted into the analysis, mirroring
     /// `go build` (which excludes them) versus `go test` (which includes them).
     include_tests: bool,
-    /// Maximum number of free build-tag dimensions to enumerate.
+    /// Maximum number of distinct build permutations to analyze.
     ///
-    /// See [`AnalysisConfig::max_build_tag_dimensions`] for semantics.
-    max_build_tag_dimensions: usize,
+    /// See [`AnalysisConfig::max_build_permutations`] for semantics.
+    max_build_permutations: usize,
 }
 
 impl Analyzer {
@@ -193,7 +193,7 @@ impl Analyzer {
             blanket_directives: BlanketDirectives::new(),
             verbose,
             include_tests: config.include_tests,
-            max_build_tag_dimensions: config.max_build_tag_dimensions,
+            max_build_permutations: config.max_build_permutations,
         };
 
         #[cfg(feature = "base-security-policy")]
@@ -871,18 +871,18 @@ impl Analyzer {
 
         let build_permutations = build_constraints::enumerate_build_permutations(
             &parsed,
-            // the enumerator aborts early if it expects to exceed this limit
-            self.max_build_tag_dimensions,
+            // the enumerator aborts early if it exceeds this limit
+            self.max_build_permutations,
         );
 
         let build_permutations = match build_permutations {
             Ok(build_permutations) => build_permutations,
-            Err(mentioned) => {
+            Err(found) => {
                 return Err(vec![AnalysisError {
                     file: path::Path::new("/main.go"), // should never be used
-                    kind: AnalysisErrorKind::TooManyBuildTagDimensions {
-                        limit: self.max_build_tag_dimensions,
-                        found: mentioned,
+                    kind: AnalysisErrorKind::TooManyBuildPermutations {
+                        limit: self.max_build_permutations,
+                        found,
                     },
                 }]);
             }

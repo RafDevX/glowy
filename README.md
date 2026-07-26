@@ -84,7 +84,7 @@ verbose = false
 inherit_base_policy = true
 excluded_base_blanket_directives = ["fmt.Println"]
 include_tests = false
-max_build_tag_dimensions = 8
+max_build_permutations = 256
 
 [sources]
 "os.Getenv#0~=TOKEN" = ["secret:env"]
