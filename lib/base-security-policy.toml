@@ -148,6 +148,9 @@ inherit_base_policy = false
 
 # allow `val := os.Getenv("..."); if len(val) == 0 { return; }` (common pattern)
 "builtin.len" = ["$env"]
+# allow `val := os.Getenv("..."); if val == "" { return; }` (common pattern)
+"operator.eq#*=" = ["$env"]  # only applies for comparisons with empty string!
+"operator.neq#*=" = ["$env"] # only applies for comparisons with empty string!
 
 # ==============================================================================
 [allow_sinks] # === AXIS-RESTRICTING WHITELIST-BASED ENFORCEMENT CHECKS ========
