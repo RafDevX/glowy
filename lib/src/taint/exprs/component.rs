@@ -30,10 +30,6 @@ pub fn visit_selection<'a>(
     visit_selection_with_base(ctx, node, &base)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "Very tight coupling means it would become more confusing if split up"
-)]
 pub fn visit_selection_with_base<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SelectionNode<'a>,
@@ -107,31 +103,13 @@ pub fn visit_selection_with_base<'a>(
                 location,
             );
         }
-        // typed lookup didn't conclusively resolve; fall through to the
-        // name-only heuristic + the final blackbox-softening leaf below
+        // typed lookup did not conclusively resolve; fall through to the
+        // shape-aware and blackbox strategies below
     }
 
     // ----------
 
-    // Strategy B - Heuristic Dispatch: use just the name to try to find the
-    // method if it was declared in the current package (cross-package not
-    // supported), and only if it was the only one with that name in the current
-    // package
-
-    if let Some(method) = ctx
-        .symtab()
-        .lookup_unique_method_in_current_package(selector)
-    {
-        let method_value = method.borrow().value().get();
-
-        let value = funcs::nest_receiver_backtrace(method_value, base, location.clone());
-
-        return nest_optional_backtrace(value, blanket_backtrace, &blanket_revocation, location);
-    }
-
-    // ----------
-
-    // Strategy C - Attempted Upgrade: if we have no information demonstrating
+    // Strategy B - Attempted Upgrade: if we have no information demonstrating
     // otherwise, assume that this is a field access on a struct, and so try to
     // access/upgrade the base into one so that we can treat this as a constant
     // field access
@@ -181,7 +159,7 @@ pub fn visit_selection_with_base<'a>(
 
     // ----------
 
-    // Strategy D - Blackbox Softening: if the selector at least _plausibly_
+    // Strategy C - Blackbox Softening: if the selector at least _plausibly_
     // names a method (i.e., if the selector is the name of at least one method
     // we are aware of, anywhere), assume this selection is method-related
     // (especially since `as_struct` above failed) and just return a blackbox
@@ -190,19 +168,19 @@ pub fn visit_selection_with_base<'a>(
     // keep in mind that there is no other solution, as if this strategy fails
     // the only alternative is to report an error and void the analysis results
 
-    // Criterion D.1: this is a plausible method if there's a registered blanket
+    // Criterion C.1: this is a plausible method if there's a registered blanket
     // directive for it in the base's known type (we'll always want to apply it)
     let has_blanket_directives = type_member_directives.is_some();
 
-    // Criterion D.2: this is a plausible method if we have analyzed the source
+    // Criterion C.2: this is a plausible method if we have analyzed the source
     // code of a method somewhere with this name, on any type (we short-circuit
-    // if D.1 was successful, to avoid the lookup when unnecessary)
+    // if C.1 was successful, to avoid the lookup when unnecessary)
     let any_method_named = !has_blanket_directives && ctx.types().any_method_named(selector);
 
-    // Criterion D.3: this is a plausible method if the base's declared type
+    // Criterion C.3: this is a plausible method if the base's declared type
     // is an external placeholder (declaration never visited, so this is likely
     // a foreign package); we cannot possibly know its method set, so `selector`
-    // might plausibly be one of them. we short-circuit if D.1 or D.2 were
+    // might plausibly be one of them. we short-circuit if C.1 or C.2 were
     // already successful to avoid the lookup when unnecessary
     let base_is_external_opaque = !any_method_named
         && base
@@ -211,7 +189,7 @@ pub fn visit_selection_with_base<'a>(
             .map(TypeInfo::strip_pointers)
             .is_some_and(TypeInfo::is_external);
 
-    // Final D.X aggregate condition
+    // Final C.X aggregate condition
     if has_blanket_directives || any_method_named || base_is_external_opaque {
         let blackbox_backtrace = LabelBacktrace::combine_options(
             base.backtrace(),
