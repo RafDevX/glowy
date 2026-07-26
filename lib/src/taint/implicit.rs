@@ -15,7 +15,7 @@ use crate::{
     context::{AnalysisContext, DeferTarget, SplitControlFlowArm},
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
-    symbols::{Symbol, SymbolRef},
+    symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
     taint::{explicit, exprs, funcs, mutation::LeftValue},
     values::{FunctionRef, FunctionValue, Mergeable, SelfAwareBacktraceContainer, ValueRef},
 };
@@ -545,12 +545,8 @@ fn visit_for_range_operand<'a>(
     // its own label (complicating the tree).
     // we intentionally exclude immutable roots (Go consts) because they can't
     // be channels and the mutation would spuriously flag ImmutableLeftValue
-    let should_fold = ctx.branch_backtrace().is_some()
-        && range_expr.root_operand().is_some_and(|root| {
-            ctx.symtab()
-                .get_symbol(root.content())
-                .is_none_or(|sym| sym.borrow().mutable())
-        });
+    let should_fold = ctx.branch_backtrace().is_some() // (short-circuits)
+        && range_operand_has_mutable_root(ctx, range_expr);
 
     let value = if should_fold {
         // we can only visit range_expr once, so we need to hijack the existing
@@ -610,6 +606,30 @@ fn visit_for_range_operand<'a>(
         value,
         direct_map_symbol,
         function_call,
+    }
+}
+
+fn range_operand_has_mutable_root(ctx: &AnalysisContext<'_>, expr: &ExprNode<'_>) -> bool {
+    if let ExprNode::Selection(selection) = expr
+        && let ExprNode::Name(qualifier) = selection.base.as_ref()
+        && ctx.symtab().qualifier_exists(qualifier.content())
+        && ctx.symtab().get_symbol(qualifier.content()).is_none()
+    {
+        match ctx
+            .symtab()
+            .get_qualified_symbol(qualifier.content(), selection.selector.content())
+        {
+            QualifiedSymbolResolutionResult::Success(symbol) => symbol.borrow().mutable(),
+            QualifiedSymbolResolutionResult::UnknownQualifier
+            | QualifiedSymbolResolutionResult::PendingAnalysis
+            | QualifiedSymbolResolutionResult::UnknownSymbol => true,
+        }
+    } else {
+        expr.root_operand().is_some_and(|root| {
+            ctx.symtab()
+                .get_symbol(root.content())
+                .is_none_or(|symbol| symbol.borrow().mutable())
+        })
     }
 }
 
