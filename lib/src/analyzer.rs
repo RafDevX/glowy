@@ -871,7 +871,9 @@ impl Analyzer {
 
         let build_permutations = build_constraints::enumerate_build_permutations(
             &parsed,
-            // the enumerator aborts early if it exceeds this limit
+            // the enumerator continues even if it exceeds this limit, so we can
+            // present a real count in the error message in case the consumer
+            // wishes to know what to raise the limit to, if retrying
             self.max_build_permutations,
         );
 

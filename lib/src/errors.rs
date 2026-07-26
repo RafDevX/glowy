@@ -86,7 +86,7 @@ pub enum AnalysisErrorKind<'a> {
     TooManyBuildPermutations {
         /// Configured maximum that was exceeded.
         limit: usize,
-        /// Number of distinct permutations found before enumeration stopped.
+        /// Number of distinct permutations found.
         found: usize,
     },
 

@@ -184,16 +184,17 @@ pub fn enumerate_build_permutations<'a>(
 
             if !admitted.is_empty() {
                 buckets.entry(admitted).or_default().insert(tags);
-
-                if buckets.len() > max_permutations {
-                    return Err(buckets.len());
-                }
             }
         }
 
         if !advance_assignment(&mut enabled) {
             break;
         }
+    }
+
+    // we only check against the limit so we can report an accurate "real" count
+    if buckets.len() > max_permutations {
+        return Err(buckets.len());
     }
 
     let mut ordered: Vec<_> = buckets
