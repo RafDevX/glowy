@@ -1036,15 +1036,24 @@ impl<'a> InherentSourceOrRevocation<'a> {
             return true;
         };
 
-        let Some(actual) = arg_consts.get(predicate.arg_index()) else {
-            return false;
+        let actual_consts = if let Some(selection) = predicate.arg_index() {
+            if selection < arg_consts.len() {
+                &arg_consts[selection..=selection]
+            } else {
+                // should only happened for a misconfigured predicate selection
+                &[]
+            }
+        } else {
+            arg_consts
         };
 
-        actual
-            .as_ref()
-            .is_none_or(|actual| predicate.matches_const(actual))
-        // ^^ if we cannot resolve a SimpleConstValue, we have to be
-        // conservative and assume it could match the predicate
+        actual_consts.iter().any(|actual| {
+            actual
+                .as_ref()
+                .is_none_or(|actual| predicate.matches_const(actual))
+            // ^^ if we cannot resolve a SimpleConstValue, we have to be
+            // conservative and assume it could match the predicate
+        })
     }
 }
 

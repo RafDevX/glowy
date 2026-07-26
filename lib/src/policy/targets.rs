@@ -1,4 +1,11 @@
-use std::{collections::BTreeSet, error, fmt, hash::Hash, num::ParseIntError, str::FromStr};
+use std::{
+    collections::BTreeSet,
+    error,
+    fmt::{self, Write},
+    hash::Hash,
+    num::ParseIntError,
+    str::FromStr,
+};
 
 use crate::{FullPackagePath, values::SimpleConstValue};
 
@@ -36,7 +43,9 @@ pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
 /// [`Self::arg_index`], and source/revocation targets may be similarly
 /// restricted to apply only to specific return value zero-indexed positions
 /// ([`Self::result_selector`]) or when a specific argument at a given
-/// zero-indexed position is not provably different from a given value.
+/// zero-indexed position is not provably different from a given value
+/// ([`Self::arg_predicate`], which supports an index of [`None`] to test the
+/// predicate against all call argument positions, indiscriminately).
 ///
 /// In order to target Go builtins and predeclared symbols that would otherwise
 /// have no package qualification, [`BUILTIN_PACKAGE_PATH`] should be used as a
@@ -71,7 +80,9 @@ pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
 ///
 /// Argument predicate values parsed from configuration are intentionally
 /// treated as unquoted constants: `#0=123` matches both the string constant
-/// `"123"` and the integer constant `123`.
+/// `"123"` and the integer constant `123`. When using argument predicates, the
+/// index can be specified as `*` to indicate that the predicate should be
+/// tested against all call arguments, indiscriminately.
 ///
 /// This struct implements [`FromStr`] following this specification, and (if the
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
@@ -205,9 +216,15 @@ impl FromStr for BlanketDirectiveTarget {
                 (arg_str, false)
             };
 
-            let arg_index: usize = arg_str
-                .parse()
-                .map_err(BlanketDirectiveTargetParseError::InvalidArgIndex)?;
+            let arg_index: Option<usize> = if arg_str == "*" {
+                None
+            } else {
+                let index = arg_str
+                    .parse()
+                    .map_err(BlanketDirectiveTargetParseError::InvalidArgIndex)?;
+
+                Some(index)
+            };
 
             let arg_predicate = arg_value_str
                 .map(BlanketSourcePredicateValue::from_str)
@@ -217,7 +234,7 @@ impl FromStr for BlanketDirectiveTarget {
             let arg_index = if arg_predicate.is_some() {
                 None
             } else {
-                Some(arg_index)
+                arg_index
             };
 
             (path, arg_index, arg_predicate)
@@ -329,7 +346,7 @@ impl<'de> serde::Deserialize<'de> for BlanketDirectiveTarget {
 /// conditional revocation blanket directives.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlanketSourceArgPredicate {
-    arg_index: usize,
+    arg_index: Option<usize>, // None = applies to all args
     value: BlanketSourcePredicateValue,
     fuzzy: bool,
 }
@@ -337,13 +354,15 @@ pub struct BlanketSourceArgPredicate {
 impl BlanketSourceArgPredicate {
     /// Constructs a new argument predicate for the given call argument index.
     ///
+    /// If `arg_index` is [`None`], matching is evaluated for all arguments.
+    ///
     /// If `fuzzy` is `true`, matching is performed much more loosely: an
     /// argument value is considered to match if the predicate value is a
     /// case-insensitive substring of the argument's string representation.
     #[must_use]
     #[inline]
     pub fn new(
-        arg_index: usize,
+        arg_index: Option<usize>,
         value: impl Into<BlanketSourcePredicateValue>,
         fuzzy: bool,
     ) -> Self {
@@ -355,9 +374,12 @@ impl BlanketSourceArgPredicate {
     }
 
     /// Returns the zero-based call argument index tested by this predicate.
+    ///
+    /// A value of [`None`] means that the predicate is tested for all argument
+    /// positions.
     #[must_use]
     #[inline]
-    pub fn arg_index(&self) -> usize {
+    pub fn arg_index(&self) -> Option<usize> {
         self.arg_index
     }
 
@@ -387,7 +409,19 @@ impl BlanketSourceArgPredicate {
 impl fmt::Display for BlanketSourceArgPredicate {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}={}", self.arg_index, self.value)
+        if let Some(arg_index) = self.arg_index {
+            arg_index.fmt(f)?;
+        } else {
+            f.write_char('*')?;
+        }
+
+        if self.fuzzy {
+            f.write_char('~')?;
+        }
+
+        f.write_char('=')?;
+
+        self.value.fmt(f)
     }
 }
 
