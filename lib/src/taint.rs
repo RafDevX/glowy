@@ -61,10 +61,8 @@ pub fn visit_source_file<'a>(
         if let DeclNode::Function(func) = decl
             && func.name.content() == "init"
             && func.receiver.is_none()
-            && let Some(body) = &func.body
         {
-            // this will create a new scope, which is intended
-            visit_block(ctx, body);
+            funcs::visit_init_function(ctx, func);
 
             continue;
         }

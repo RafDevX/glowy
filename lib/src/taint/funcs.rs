@@ -1,4 +1,4 @@
-use std::{borrow::Cow, rc::Rc};
+use std::{borrow::Cow, iter, rc::Rc};
 
 use parser::{
     Annotation, Location, Span,
@@ -13,13 +13,15 @@ pub use self::{
 };
 use crate::{
     Pinned,
-    context::{AnalysisContext, DeferredCall},
+    context::{AnalysisContext, DeferTarget, DeferredCall},
     errors::AnalysisErrorKind,
     labels::{LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     policy,
     taint::exprs,
     types::TypeInfo,
-    values::{FunctionRef, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, ValueRef},
+    values::{
+        FunctionRef, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, Value, ValueRef,
+    },
 };
 
 pub mod builtins;
@@ -85,6 +87,39 @@ pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec
         CallResolution::Final(values) => values,
         CallResolution::PendingApply(resolved) => call_application::apply_call(ctx, node, resolved),
     }
+}
+
+pub fn visit_init_function<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
+    let Some(body) = &node.body else {
+        return;
+    };
+
+    let func_name = ctx.pin(node.name);
+    let location = func_name.pinned_location();
+
+    let func = FunctionValue::new(
+        FunctionRef::Named(func_name),
+        Some(node.signature.clone()),
+        None,
+        Vec::new(),
+        None,
+    );
+
+    let value = ValueRef::new(Value::Function(Box::new(func)), location, None);
+
+    // init executes automatically and directly in package initialization order,
+    // so its body must keep the immediate package-state behavior of a top-level
+    // block. however, it still needs a function frame for defers, returns, and
+    // function-depth-scoped state such as range-function feedback
+    ctx.push_function(value, iter::empty());
+    ctx.increase_branch_scope_depth();
+
+    super::visit_block(ctx, body);
+    apply_deferred_calls(ctx);
+
+    ctx.decrease_branch_scope_depth();
+    ctx.trigger_defer_target(DeferTarget::Function);
+    ctx.pop_function();
 }
 
 fn visit_type_conversion<'a>(
