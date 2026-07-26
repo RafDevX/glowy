@@ -80,9 +80,10 @@ pub const BUILTIN_PACKAGE_PATH: &str = "builtin";
 ///
 /// Argument predicate values parsed from configuration are intentionally
 /// treated as unquoted constants: `#0=123` matches both the string constant
-/// `"123"` and the integer constant `123`. When using argument predicates, the
-/// index can be specified as `*` to indicate that the predicate should be
-/// tested against all call arguments, indiscriminately.
+/// `"123"` and the integer constant `123`, and `#0=` with no discernible value
+/// is accepted as matching only an empty string (`""`). When using argument
+/// predicates, the index can be specified as `*` to indicate that the predicate
+/// should be tested against all call arguments, indiscriminately.
 ///
 /// This struct implements [`FromStr`] following this specification, and (if the
 /// `toml-config` Cargo feature is enabled) it is used to support automatically
@@ -434,9 +435,11 @@ pub enum BlanketSourcePredicateValue {
     ///
     /// Since this value has unknown type, it is considered to match with any
     /// other value (of any other type) with the same string representation.
-    /// For example, a [`BlanketSourcePredicateValue::Raw`] holding "123"
-    /// matches both a string-typed argument "123" and an integer-shaped
-    /// argument 123.
+    /// For example, a [`BlanketSourcePredicateValue::Raw`] holding `"123"`
+    /// matches both a string-typed argument `"123"` and an integer-shaped
+    /// argument `123`.
+    ///
+    /// Note that an empty String is allowed, matching `""`.
     Raw(String),
     /// A predicate value bound to a specific, known type.
     ///
@@ -491,10 +494,6 @@ impl FromStr for BlanketSourcePredicateValue {
 
     #[inline]
     fn from_str(raw_value: &str) -> Result<Self, Self::Err> {
-        if raw_value.is_empty() {
-            return Err(BlanketDirectiveTargetParseError::EmptyArgPredicateValue);
-        }
-
         Ok(Self::Raw(raw_value.to_owned()))
     }
 }
@@ -546,8 +545,6 @@ pub enum BlanketDirectiveTargetParseError {
     InvalidResultIndex(ParseIntError),
     /// The argument-index portion (after the `#`) is not a valid `usize`.
     InvalidArgIndex(ParseIntError),
-    /// The provided source argument predicate value is empty.
-    EmptyArgPredicateValue,
 }
 
 impl fmt::Display for BlanketDirectiveTargetParseError {
@@ -572,9 +569,6 @@ impl fmt::Display for BlanketDirectiveTargetParseError {
                     "blanket directive target has invalid argument index: {err}"
                 )
             }
-            Self::EmptyArgPredicateValue => {
-                f.write_str("blanket directive source argument predicate value is empty")
-            }
             Self::EmptyResultSelector => {
                 f.write_str("blanket directive target result selector is empty")
             }
@@ -597,8 +591,7 @@ impl error::Error for BlanketDirectiveTargetParseError {
             | Self::EmptyPackagePath
             | Self::EmptyTypeName
             | Self::EmptyMemberName
-            | Self::EmptyResultSelector
-            | Self::EmptyArgPredicateValue => None,
+            | Self::EmptyResultSelector => None,
             Self::InvalidArgIndex(inner) | Self::InvalidResultIndex(inner) => Some(inner),
         }
     }
@@ -743,14 +736,6 @@ mod tests {
         assert!(matches!(
             "os.Remove#abc".parse::<BlanketDirectiveTarget>(),
             Err(BlanketDirectiveTargetParseError::InvalidArgIndex(_))
-        ));
-    }
-
-    #[test]
-    fn rejects_empty_arg_predicate_value() {
-        assert!(matches!(
-            "os.Getenv#0=".parse::<BlanketDirectiveTarget>(),
-            Err(BlanketDirectiveTargetParseError::EmptyArgPredicateValue)
         ));
     }
 }
