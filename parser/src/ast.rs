@@ -536,9 +536,29 @@ pub enum StructLiteralFieldsNode<'a> {
 
 #[rustfmt::skip]
 pub type CompositeLiteralElementListNode<'a> = Vec<(
-    Option<ExprNode<'a>>,
+    Option<CompositeLiteralKeyNode<'a>>,
     CompositeLiteralElementNode<'a>
 )>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompositeLiteralKeyNode<'a> {
+    Expr(ExprNode<'a>),
+    Nested {
+        elements: CompositeLiteralElementListNode<'a>,
+        location: Location, // for better error messages
+    },
+}
+
+impl CompositeLiteralKeyNode<'_> {
+    #[must_use]
+    #[inline]
+    pub fn location(&self) -> Cow<'_, Location> {
+        match self {
+            Self::Expr(expr) => expr.location(),
+            Self::Nested { location, .. } => Cow::Borrowed(location),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompositeLiteralElementNode<'a> {
