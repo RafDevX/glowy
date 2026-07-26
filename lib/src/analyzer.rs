@@ -1143,18 +1143,6 @@ impl Analyzer {
         // thus overwrite the mutation for which A actually has priority
         sort_files_by_dependency_order(&mut files);
 
-        macro_rules! pass {
-            ($visitor:path) => {{
-                context.symtab_mut().clear_all_package_progress();
-
-                for (path, ast, package_path) in &files {
-                    context.set_current_file(path);
-
-                    $visitor(&mut context, ast, package_path);
-                }
-            }};
-        }
-
         // Stage #1: RecordDeclarations (default for AnalysisContext)
         //     An initial pass through all files to find top-level declarations
         //     and record what symbols exist, since they can be referenced from
@@ -1162,7 +1150,11 @@ impl Analyzer {
         //     This is also used to scaffold sub-module hierarchies and package
         //     scopes, as well as register top-level named types.
 
-        pass!(decls::visit_source_file);
+        for (path, ast, package_path) in &files {
+            context.set_current_file(path);
+
+            decls::visit_source_file(&mut context, ast, package_path);
+        }
 
         // retry resolving type registry entries that were enqueued during the
         // per-file decl walk above because their target was not yet known
@@ -1179,6 +1171,25 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::StabilizeLabels);
 
+        macro_rules! taint_pass {
+            () => {{
+                context.symtab_mut().clear_all_package_progress();
+
+                for package_files in files.chunk_by(|(_, _, left), (_, _, right)| left == right) {
+                    // Go initializes all package bindings before running any
+                    // init function, and invokes `main` only after all init
+                    // functions in the package have returned
+                    for phase in taint::PackageInitializationPhase::ORDERED_PHASES {
+                        for (path, ast, package_path) in package_files {
+                            context.set_current_file(path);
+
+                            taint::visit_source_file(&mut context, ast, package_path, *phase);
+                        }
+                    }
+                }
+            }};
+        }
+
         let mut prev_snapshot: Option<HashMap<_, _>> = None;
 
         // u8 is fine because this number should never be very high (<10), but
@@ -1188,7 +1199,7 @@ impl Analyzer {
         let mut iteration_index = 0_u8;
 
         loop {
-            pass!(taint::visit_source_file);
+            taint_pass!();
 
             let snapshot = context.symtab().snapshot_per_package();
 
@@ -1235,7 +1246,7 @@ impl Analyzer {
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
 
-        pass!(taint::visit_source_file);
+        taint_pass!();
 
         if !self.has_blanket_enforcement_checks() && !context.saw_enforcement_checks() {
             context.report_error_at(

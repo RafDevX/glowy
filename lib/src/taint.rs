@@ -33,10 +33,23 @@ mod types;
 pub use funcs::{DeferredCallReferents, ResolvedCall};
 pub use goto::GotoConvergenceState;
 
+#[derive(Clone, Copy)]
+pub enum PackageInitializationPhase {
+    TopLevelDeclarations,
+    InitFunctions,
+    Main,
+}
+
+impl PackageInitializationPhase {
+    pub const ORDERED_PHASES: &[Self] =
+        &[Self::TopLevelDeclarations, Self::InitFunctions, Self::Main];
+}
+
 pub fn visit_source_file<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &SourceFileNode<'a>,
     package_path: &FullPackagePath,
+    phase: PackageInitializationPhase,
 ) {
     let package_name = ctx.pin(node.package_clause.id);
 
@@ -55,19 +68,38 @@ pub fn visit_source_file<'a>(
     }
 
     for decl in &node.top_level_decls {
-        // init functions are not actually declared (and there may be multiple
-        // defined, even in the same file). note that this only applies for
-        // top-level declarations (i.e., package scope), not anywhere else
-        if let DeclNode::Function(func) = decl
-            && func.name.content() == "init"
-            && func.receiver.is_none()
-        {
-            funcs::visit_init_function(ctx, func);
+        let DeclNode::Function(func) = decl else {
+            if matches!(phase, PackageInitializationPhase::TopLevelDeclarations) {
+                visit_decl(ctx, decl);
+            }
 
             continue;
-        }
+        };
 
-        visit_decl(ctx, decl);
+        let is_init = func.name.content() == "init" && func.receiver.is_none();
+        let is_main = func.name.content() == "main"
+            && func.receiver.is_none()
+            && ctx.current_file().is_some_and(|path| path == "/main.go");
+
+        match phase {
+            PackageInitializationPhase::TopLevelDeclarations => {
+                if !is_init && !is_main {
+                    visit_decl(ctx, decl);
+                }
+            }
+            PackageInitializationPhase::InitFunctions => {
+                if is_init {
+                    // init functions are not actually declared (and there may
+                    // be multiple defined, even in the same file)
+                    funcs::visit_init_function(ctx, func);
+                }
+            }
+            PackageInitializationPhase::Main => {
+                if is_main {
+                    visit_decl(ctx, decl);
+                }
+            }
+        }
     }
 
     ctx.symtab_mut().save_package_progress(package_path);
