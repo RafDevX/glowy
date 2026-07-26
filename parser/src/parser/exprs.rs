@@ -5,7 +5,7 @@ use crate::{
     ast::{
         AmbiguousBracketAccessNode, CompositeLiteralElementListNode, CompositeLiteralElementNode,
         ConversionNode, ExprNode, IndexingNode, LiteralNode, OrderedF64, SelectionNode,
-        StructLiteralFieldsNode, TypeNode,
+        StructLiteralFieldsNode, TypeInstantiationNode, TypeNode,
     },
     parser::{BacktrackingContext, decls, of_kind, stmts, types::parse_type},
     token::{Token, TokenKind},
@@ -451,6 +451,16 @@ fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Ex
     parse_postfix_if_exists(s, expr)
 }
 
+fn is_type_name_shaped(expr: &ExprNode<'_>) -> bool {
+    match expr {
+        ExprNode::Name(_) => true,
+        ExprNode::Selection(SelectionNode { base, .. }) => {
+            matches!(&**base, ExprNode::Name(_))
+        }
+        _ => false,
+    }
+}
+
 pub fn parse_primary_expression<'a>(
     s: &mut TokenStream<'a>,
     allow_composite_after_name: bool,
@@ -469,21 +479,11 @@ pub fn parse_primary_expression<'a>(
     // only attempt (expensive) composite literal parsing if the prefix is valid
     // for a composite literal
     let is_potential_composite_literal_type = match &inner {
-        ExprNode::Name(_) => true,
-        ExprNode::Selection(SelectionNode { base, .. }) => {
-            matches!(&**base, ExprNode::Name(_))
-        }
+        expr @ (ExprNode::Name(_) | ExprNode::Selection(_)) => is_type_name_shaped(expr),
         ExprNode::Indexing(IndexingNode { base, .. })
+        | ExprNode::TypeInstantiation(TypeInstantiationNode { base, .. })
         | ExprNode::AmbiguousBracketAccess(AmbiguousBracketAccessNode { base, .. }) => {
-            match &**base {
-                ExprNode::Name(_) => true,
-                ExprNode::Selection(SelectionNode {
-                    base: inner_base, ..
-                }) => {
-                    matches!(&**inner_base, ExprNode::Name(_))
-                }
-                _ => false,
-            }
+            is_type_name_shaped(base)
         }
         _ => false,
     };
