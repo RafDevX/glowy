@@ -1,4 +1,4 @@
-use std::{env, fs, io};
+use std::{env, fs, io, process};
 
 use codespan_reporting::{
     diagnostic::{Diagnostic, Label},
@@ -21,7 +21,11 @@ fn main() {
 
     match parse(&input) {
         Ok(root) => println!("{root:#?}"),
-        Err(err) => show_error(&path, &input, err.diagnostics()),
+        Err(err) => {
+            show_error(&path, &input, err.diagnostics());
+
+            process::exit(1)
+        }
     }
 }
 
