@@ -488,7 +488,7 @@ impl<'a> SymbolTable<'a> {
         // import path (we don't do this just for the hosts specifically named
         // at https://pkg.go.dev/cmd/go#hdr-Remote_import_paths since real-world
         // examples exists for packages from other hosts, and we already gate
-        // below on what should almost always only be a version number/name
+        // below on what should almost always only be a version number/name)
 
         let last_component = components.clone().next().unwrap();
         let looks_like_revision = last_component == "latest"
@@ -498,7 +498,7 @@ impl<'a> SymbolTable<'a> {
         // ^ we need this gating because otherwise we would strip legitimate
         // submodules (e.g., `example.com/user/pkg/sub`)
 
-        if looks_like_revision && components.clone().count() == 4 {
+        if looks_like_revision {
             // the last component looks like a revision, so skip it and use the
             // penultimate component instead, so that for example
             // `example.com/user/pkg/v3` is inferred as `pkg` (vs. `v3`)
