@@ -515,13 +515,23 @@ fn visit_type_assertion<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &TypeAssertionNode<'a>,
 ) -> ValueRef<'a> {
+    let base = visit_single_expr(ctx, &node.expr);
+
+    visit_type_assertion_with_base(ctx, node, &base)
+}
+
+pub fn visit_type_assertion_with_base<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &TypeAssertionNode<'a>,
+    base: &ValueRef<'a>,
+) -> ValueRef<'a> {
     let declared_type = {
         let (types, symtab) = ctx.types_mut_with_symtab();
 
         types.resolve(symtab, &node.r#type)
     };
 
-    let value = visit_single_expr(ctx, &node.expr).into_with_declared_type(declared_type);
+    let value = base.clone().into_with_declared_type(declared_type);
 
     let location = ctx.pin(node.location.clone());
 

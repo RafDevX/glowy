@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use parser::{
     Location, Span,
     ast::{
-        AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, SlicingNode, TypeNode,
-        UnaryOpKind,
+        AmbiguousBracketAccessNode, ExprNode, IndexingNode, SelectionNode, SlicingNode,
+        TypeAssertionNode, TypeNode, UnaryOpKind,
     },
 };
 
@@ -120,9 +120,10 @@ fn as_valid_left_value<'a, 'b>(
     expr: &'b ExprNode<'a>,
     ctx: Option<&mut AnalysisContext<'a>>,
 ) -> Option<&'b dyn LeftValue<'a>> {
-    if matches!(expr, ExprNode::Slicing(_)) {
-        // slicing expressions are valid mutation targets (e.g., for `copy`),
-        // but they cannot be directly assigned to
+    if matches!(expr, ExprNode::Slicing(_) | ExprNode::TypeAssertion(_)) {
+        // slicing expressions and reference-valued type assertions can expose
+        // mutable storage to a containing expression, but neither expression
+        // is itself directly assignable
 
         if let Some(ctx) = ctx {
             ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
@@ -146,6 +147,7 @@ fn as_mutation_target<'a, 'b>(
         ExprNode::AmbiguousBracketAccess(ambiguous) => ambiguous,
         ExprNode::Selection(selection) => selection,
         ExprNode::Slicing(slicing) => slicing,
+        ExprNode::TypeAssertion(assertion) => assertion,
 
         // Glowy does not model heap addresses, so `&x` and `*p` are treated as
         // transparent over their operand (mirroring the read-side transparency
@@ -172,7 +174,6 @@ fn as_mutation_target<'a, 'b>(
         | ExprNode::Make(_)
         | ExprNode::New(_)
         | ExprNode::Conversion(_)
-        | ExprNode::TypeAssertion(_)
         | ExprNode::TypeInstantiation(_)
         | ExprNode::UnaryOp { .. }
         | ExprNode::BinaryOp { .. } => {
@@ -615,7 +616,7 @@ impl<'a> LeftValue<'a> for SlicingNode<'a> {
         _location: &Location,
     ) {
         // a slicing expression is not directly assignable in Go, even though it
-        // is a valid mutation target for some builtins uch as copy and clear
+        // is a valid mutation target for some builtins such as copy and clear
 
         ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
             location: self.location.clone(),
@@ -653,6 +654,87 @@ impl<'a> LeftValue<'a> for SlicingNode<'a> {
                 // the mutator updates storage through that view
 
                 let view = exprs::visit_slicing_with_base(ctx, self, &target);
+
+                mutator(ctx, view)?;
+
+                Some((target, None))
+            });
+    }
+}
+
+impl<'a> LeftValue<'a> for TypeAssertionNode<'a> {
+    fn assign(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        _backtrace_kind: LabelBacktraceKind,
+        _rhs: ValueRef<'a>,
+        _known_const: Option<SimpleConstValue>,
+        _simple: bool,
+        _explicit_backtrace: Option<&LabelBacktrace<'a>>,
+        _subtract: &Label<'a>,
+        _location: &Location,
+    ) {
+        // a type assertion is not directly assignable in Go, even though it is
+        // a valid mutation target as propagation of its argument
+
+        ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+            location: self.location.clone(),
+        });
+    }
+
+    fn root_operand(&self) -> Option<Span<'a>> {
+        self.expr.root_operand()
+    }
+
+    fn mutate_target(
+        &self,
+        ctx: &mut AnalysisContext<'a>,
+        assignment_location: &Location,
+        mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
+    ) {
+        let asserted_type = {
+            let (types, symtab) = ctx.types_mut_with_symtab();
+
+            types.resolve(symtab, &self.r#type)
+        };
+
+        let exposes_mutable_storage = matches!(
+            &self.r#type,
+            TypeNode::Pointer { .. } | TypeNode::Slice { .. } | TypeNode::Map { .. }
+        ) || asserted_type.as_deref().is_some_and(|r#type| {
+            matches!(
+                r#type.underlying(),
+                Some(TypeKind::Pointer(_) | TypeKind::Slice | TypeKind::Map)
+            )
+        });
+
+        if !exposes_mutable_storage {
+            ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                location: self.location.clone(),
+            });
+
+            return;
+        }
+
+        if self.expr.root_operand().is_none() {
+            // the interface expression need not itself be assignable: a
+            // reference-valued assertion still exposes its referenced storage,
+            // for example `factory().([]byte)[0] = x`.
+            let target = exprs::visit_single_expr(ctx, &self.clone().into());
+
+            let _ = mutator(ctx, target);
+
+            return;
+        }
+
+        #[expect(
+            clippy::shadow_unrelated,
+            reason = "Same context, just threaded through closures"
+        )]
+        self.expr
+            .mutate_target(ctx, assignment_location, &|ctx, target| {
+                let view = exprs::visit_type_assertion_with_base(ctx, self, &target)
+                    .extract_collapsed_single();
 
                 mutator(ctx, view)?;
 
