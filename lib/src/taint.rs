@@ -78,11 +78,15 @@ pub fn visit_source_file<'a>(
 fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a>) {
     let first_stage = ctx.stage().is_first();
 
+    let qualifier = node.identifier.as_ref().map(Span::content);
+
+    if qualifier == Some("_") {
+        // blank identifier; skip
+        return;
+    }
+
     match ctx.register_import_spec(
-        node.identifier
-            .as_ref()
-            .map(Span::content)
-            .map(str::to_owned),
+        qualifier.map(str::to_owned),
         node.path.clone(),
         !first_stage,
     ) {
