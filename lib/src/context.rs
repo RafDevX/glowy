@@ -36,6 +36,8 @@ pub struct AnalysisContext<'a> {
 
     /// Current stack of functions being declared.
     funcs: Vec<ValueRef<'a>>,
+    /// Type parameters declared by each function in [`Self::funcs`].
+    func_type_params: Vec<Vec<&'a str>>,
     // Current stack of stacks awaiting deferred execution (from `defer`).
     deferred_calls: Vec<Vec<DeferredCall<'a>>>,
 
@@ -111,6 +113,7 @@ impl<'a> AnalysisContext<'a> {
             current_file: None,
             errors: Vec::new(),
             funcs: Vec::new(),
+            func_type_params: Vec::new(),
             deferred_calls: Vec::new(),
             branch_backtraces: Vec::new(),
             deferred_branch_backtraces: Vec::new(),
@@ -201,17 +204,31 @@ impl<'a> AnalysisContext<'a> {
         self.funcs.iter().rev().cloned()
     }
 
-    pub fn push_function(&mut self, func: ValueRef<'a>) {
+    pub fn push_function(
+        &mut self,
+        func: ValueRef<'a>,
+        type_params: impl IntoIterator<Item = &'a str>,
+    ) {
         self.funcs.push(func);
+        self.func_type_params
+            .push(type_params.into_iter().collect());
 
         self.deferred_calls.push(Vec::new());
     }
 
     pub fn pop_function(&mut self) {
         self.funcs.pop();
+        self.func_type_params.pop();
 
         // supposedly all already handled before `pop_function` is called
         self.deferred_calls.pop();
+    }
+
+    pub fn is_type_param_in_scope(&self, name: &str) -> bool {
+        self.func_type_params
+            .iter()
+            .rev() // more likely to be in inner functions (code locality)
+            .any(|params| params.contains(&name))
     }
 
     pub fn register_deferred_call(

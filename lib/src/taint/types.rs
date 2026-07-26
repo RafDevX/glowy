@@ -64,6 +64,20 @@ pub fn resolve_named_underlying<'a>(
     }
 }
 
+pub fn is_known_type<'a>(ctx: &mut AnalysisContext<'a>, r#type: &TypeNode<'a>) -> bool {
+    if let TypeNode::Name(name) = r#type.strip_pointers()
+        && name.package.is_none()
+        && name.args.is_empty()
+        && ctx.is_type_param_in_scope(name.id.content())
+    {
+        return true;
+    }
+
+    let (types, symtab) = ctx.types_mut_with_symtab();
+
+    types.resolve(symtab, r#type).is_some()
+}
+
 fn lookup_symbol_for_type_resolution<'a>(
     ctx: &AnalysisContext<'a>,
     declaration_context: Option<&TypeDeclarationContext>,

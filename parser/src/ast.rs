@@ -107,7 +107,17 @@ pub enum TypeNode<'a> {
     },
 }
 
-impl TypeNode<'_> {
+impl<'a> TypeNode<'a> {
+    #[must_use]
+    #[inline]
+    pub fn as_name(&self) -> Option<&TypeNameNode<'a>> {
+        if let Self::Name(name) = self {
+            Some(name)
+        } else {
+            None
+        }
+    }
+
     #[must_use]
     #[inline]
     pub fn strip_pointers(&self) -> &Self {

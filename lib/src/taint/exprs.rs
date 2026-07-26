@@ -16,6 +16,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::{self, BlanketDirective, BlanketDirectiveKind},
     symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
+    taint::types,
     values::{
         ExpandableValue, FunctionValue, PackageRefValue, SelfAwareBacktraceContainer,
         SimpleConstValue, Value, ValueRef,
@@ -525,13 +526,7 @@ fn visit_ambiguous_bracket_access<'a>(
     ctx: &mut AnalysisContext<'a>,
     node: &AmbiguousBracketAccessNode<'a>,
 ) -> ValueRef<'a> {
-    let is_type_known = {
-        let (types, symtab) = ctx.types_mut_with_symtab();
-
-        types
-            .resolve(symtab, &node.type_arg_if_instantiation)
-            .is_some()
-    };
+    let is_type_known = types::is_known_type(ctx, &node.type_arg_if_instantiation);
 
     if is_type_known {
         // if the type is known here, it's a type instantiation

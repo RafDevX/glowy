@@ -4,7 +4,7 @@ use parser::{
     Annotation, Location, Span,
     ast::{
         BlockNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode,
-        TypeNode,
+        TypeNode, TypeParam,
     },
 };
 
@@ -22,6 +22,7 @@ use crate::{
     },
 };
 
+#[expect(clippy::too_many_arguments, reason = "No obvious arg aggregation")]
 #[expect(
     clippy::too_many_lines,
     reason = "Very tight coupling means it would become more confusing if split up"
@@ -30,6 +31,7 @@ pub fn visit_function_def<'a>(
     ctx: &mut AnalysisContext<'a>,
     r#ref: &FunctionRef<'a>,
     decl_symbol: Option<Pinned<'a, Span<'a>>>,
+    type_params: &[TypeParam<'a>],
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
     body: Option<&BlockNode<'a>>,
@@ -187,7 +189,26 @@ pub fn visit_function_def<'a>(
         ctx.push_branch_backtrace(bt);
     }
 
-    ctx.push_function(value.clone());
+    let mut active_type_params: Vec<_> = type_params
+        .iter()
+        .flat_map(|param| param.ids.iter())
+        .map(Span::content)
+        .collect();
+
+    if let Some(receiver) = receiver
+        && let TypeNode::Name(receiver_type) = receiver.r#type.strip_pointers()
+    {
+        let active_receiver_type_params = receiver_type
+            .args
+            .iter()
+            .filter_map(TypeNode::as_name)
+            .filter(|name| name.package.is_none() && name.args.is_empty())
+            .map(|name| name.id.content());
+
+        active_type_params.extend(active_receiver_type_params);
+    }
+
+    ctx.push_function(value.clone(), active_type_params);
     ctx.increase_branch_scope_depth();
 
     visit_function_body(ctx, body);

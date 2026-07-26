@@ -106,17 +106,11 @@ pub fn visit_new<'a>(ctx: &mut AnalysisContext<'a>, node: &NewNode<'a>) -> Value
             return exprs::visit_single_expr(ctx, expr).with_location(location);
         }
         NewArgNode::Ambiguous { if_type, if_expr } => {
-            let resolved = {
-                let (types, symtab) = ctx.types_mut_with_symtab();
-
-                types.resolve(symtab, if_type)
-            };
-
-            if resolved.is_none() {
+            if types::is_known_type(ctx, if_type) {
+                (if_type, None)
+            } else {
                 return exprs::visit_single_expr(ctx, if_expr).with_location(location);
             }
-
-            (if_type, resolved)
         }
     };
 

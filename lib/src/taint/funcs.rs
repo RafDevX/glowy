@@ -51,6 +51,7 @@ pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
         ctx,
         &FunctionRef::Named(func_name),
         Some(func_name),
+        &node.type_params,
         &node.signature,
         node.receiver.as_ref(),
         node.body.as_ref(),
@@ -67,7 +68,16 @@ pub fn visit_function_literal<'a>(
 ) -> ValueRef<'a> {
     let r#ref = FunctionRef::Anonymous(ctx.pin(location.clone()));
 
-    definitions::visit_function_def(ctx, &r#ref, None, signature, None, Some(body), annotation)
+    definitions::visit_function_def(
+        ctx,
+        &r#ref,
+        None,
+        &[],
+        signature,
+        None,
+        Some(body),
+        annotation,
+    )
 }
 
 pub fn visit_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> Vec<ValueRef<'a>> {
