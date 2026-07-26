@@ -18,6 +18,7 @@ use crate::{
             captures::{self, call_site::CallCaptureConcretes},
         },
     },
+    types::TypeKind,
     values::{
         BacktraceContainer, FunctionRef, FunctionValue, InherentSourceOrRevocation, MobiusValue,
         SelfAwareBacktraceContainer, SimpleConstValue, UnifiedRealization, Value, ValueRef,
@@ -741,6 +742,17 @@ fn tag_results_with_declared_types<'a>(func: &FunctionValue<'a>, results: &mut [
 
     for (result, declared_type) in results.iter_mut().zip(func.declared_result_types()) {
         if let Some(r#type) = declared_type {
+            if matches!(
+                r#type.strip_pointers().underlying(),
+                Some(TypeKind::Interface)
+            ) {
+                // an interface hides its concrete representation, so retaining
+                // that representation here can make recursive interface values
+                // unfold (unbounded) across convergence passes. we thus
+                // downgrade the result into its aggregate taint
+                *result = result.downgrade(|| result.location().clone());
+            }
+
             result.set_declared_type(Rc::clone(r#type));
         }
     }
