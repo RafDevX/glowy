@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     env, fs,
     io::{self, BufRead},
-    path,
+    path, time,
 };
 #[cfg(feature = "parallelism")]
 use std::{
@@ -1148,7 +1148,16 @@ impl Analyzer {
         // it changed during the last iteration) and not A (because it did not)
         // would lead to inconsistent results, as B would re-initialize Var and
         // thus overwrite the mutation for which A actually has priority
+        let dependency_sort_started = time::Instant::now();
         sort_files_by_dependency_order(&mut files);
+
+        if self.verbose {
+            println!(
+                "{verbose_prefix}Sorted {} file(s) by package dependencies in {:.2?}",
+                files.len(),
+                dependency_sort_started.elapsed()
+            );
+        }
 
         // Stage #1: RecordDeclarations (default for AnalysisContext)
         //     An initial pass through all files to find top-level declarations
@@ -1156,6 +1165,8 @@ impl Analyzer {
         //     anywhere in any order (even textually before their definition).
         //     This is also used to scaffold sub-module hierarchies and package
         //     scopes, as well as register top-level named types.
+
+        let stage1_started = time::Instant::now();
 
         for (path, ast, package_path) in &files {
             context.set_current_file(path);
@@ -1165,10 +1176,15 @@ impl Analyzer {
 
         // retry resolving type registry entries that were enqueued during the
         // per-file decl walk above because their target was not yet known
+        let deferred_resolution_started = time::Instant::now();
         context.types_mut().run_deferred_resolutions();
 
         if self.verbose {
-            println!("{verbose_prefix}Finished Stage 1");
+            println!(
+                "{verbose_prefix}Finished Stage 1 in {:.2?} (deferred type resolution: {:.2?})",
+                stage1_started.elapsed(),
+                deferred_resolution_started.elapsed()
+            );
         }
 
         // Stage #2: StabilizeLabels
@@ -1177,6 +1193,7 @@ impl Analyzer {
         //     to support, for example, mutually recursive functions.
 
         context.set_stage(AnalysisStage::StabilizeLabels);
+        let stage2_started = time::Instant::now();
 
         macro_rules! taint_pass {
             () => {{
@@ -1206,6 +1223,8 @@ impl Analyzer {
         let mut iteration_index = 0_u8;
 
         loop {
+            let iteration_started = time::Instant::now();
+
             taint_pass!();
 
             let snapshot = context.symtab().snapshot_per_package();
@@ -1235,15 +1254,17 @@ impl Analyzer {
             if self.verbose {
                 println!(
                     "{verbose_prefix}Finished convergence iteration #{iteration_index} (Stage 2) \
-                     - {changed_package_count} package(s) changed",
+                     in {:.2?} - {changed_package_count} package(s) changed",
+                    iteration_started.elapsed(),
                 );
             }
         }
 
         if self.verbose {
             println!(
-                "{verbose_prefix}Finished Stage 2 in {} iterations",
-                iteration_index + 1 // count the one where nothing changed
+                "{verbose_prefix}Finished Stage 2 in {} iterations ({:.2?})",
+                iteration_index + 1, // count the one where nothing changed
+                stage2_started.elapsed(),
             );
         }
 
@@ -1252,6 +1273,7 @@ impl Analyzer {
         //     violations, now that labels are final.
 
         context.set_stage(AnalysisStage::EnforceSecurityPolicies);
+        let stage3_started = time::Instant::now();
 
         taint_pass!();
 
@@ -1263,7 +1285,10 @@ impl Analyzer {
         }
 
         if self.verbose {
-            println!("{verbose_prefix}Finished Stage 3");
+            println!(
+                "{verbose_prefix}Finished Stage 3 in {:.2?}",
+                stage3_started.elapsed(),
+            );
         }
 
         match Result::from(context) {
@@ -1341,7 +1366,7 @@ fn compute_package_path(module_base: &str, virtual_file_path: &path::Path) -> Fu
 
 fn list_build_permutations(permutations: &[BuildPermutation<'_>], width: usize) {
     println!(
-        "Detected {} distinct build-constraint permutation(s):",
+        "Detected {} distinct build-constraint permutations:",
         permutations.len()
     );
 
