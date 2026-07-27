@@ -15,7 +15,7 @@ use std::{borrow::Cow, cell::Cell, collections::HashMap, rc::Rc};
 
 use parser::{
     Location,
-    ast::{CallNode, ExprNode, MakeNode, NewArgNode, NewNode, TypeNode},
+    ast::{CallNode, ExprNode, MakeNode, NewArgNode, NewNode, TypeNameNode, TypeNode},
 };
 
 use crate::{
@@ -100,25 +100,35 @@ pub fn visit_make<'a>(
 pub fn visit_new<'a>(ctx: &mut AnalysisContext<'a>, node: &NewNode<'a>) -> ValueRef<'a> {
     let location = ctx.pin(node.location.clone());
 
-    let (r#type, resolved) = match &node.arg {
-        NewArgNode::Type(r#type) => (r#type, None),
+    let r#type = match &node.arg {
+        NewArgNode::Type(r#type) => r#type,
         NewArgNode::Expr(expr) => {
             return exprs::visit_single_expr(ctx, expr).with_location(location);
         }
         NewArgNode::Ambiguous { if_type, if_expr } => {
-            if types::is_known_type(ctx, if_type) {
-                (if_type, None)
+            if types::is_known_type(ctx, if_type)
+                || matches!(
+                    if_type,
+                    TypeNode::Name(TypeNameNode {
+                        package: Some(_),
+                        ..
+                    })
+                )
+            {
+                // we assume that all `new(pkg.Qualified)` are external types
+
+                if_type
             } else {
                 return exprs::visit_single_expr(ctx, if_expr).with_location(location);
             }
         }
     };
 
-    let declared_type = resolved.or_else(|| {
+    let declared_type = {
         let (types, symtab) = ctx.types_mut_with_symtab();
 
         types.resolve(symtab, r#type)
-    });
+    };
 
     ValueRef::new_bottom(location, declared_type)
 }
