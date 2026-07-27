@@ -539,7 +539,11 @@ impl<'a> SymbolTable<'a> {
         if looks_like_revision {
             // the last component looks like a revision, so skip it and use the
             // penultimate component instead, so that for example
-            // `example.com/user/pkg/v3` is inferred as `pkg` (vs. `v3`)
+            // `example.com/user/pkg/v3` is inferred as `pkg` (vs. `v3`).
+            // note there are some packages out there which legitimately use
+            // `vX` as their native package name, but hopefully they are in the
+            // minority compared to those who should have it stripped, otherwise
+            // the world is truly doomed and humanity is lost
             components.next();
         }
 
@@ -562,11 +566,13 @@ impl<'a> SymbolTable<'a> {
         // repository name with a `go-`/`-go` tag around what is actually their
         // native package name, so strip that from our native name candidate.
         // the same logic applies for `lib-`/`-lib`, and probably several others
-        // but we only support these here (it is unlikely that real package
+        // but we only support a few here (it is unlikely that real package
         // names have dash-separated tags because Go privileges one-word names)
         native_name
             .strip_prefix("go-")
             .or_else(|| native_name.strip_suffix("-go"))
+            .or_else(|| native_name.strip_prefix("golang-"))
+            .or_else(|| native_name.strip_suffix("-golang"))
             .or_else(|| native_name.strip_prefix("lib-"))
             .or_else(|| native_name.strip_suffix("-lib"))
             .filter(|stripped| !stripped.is_empty())
