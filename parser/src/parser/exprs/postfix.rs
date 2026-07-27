@@ -10,15 +10,26 @@ use crate::{
 };
 
 fn parse_call<'a>(s: &mut TokenStream<'a>, func: ExprNode<'a>) -> PResult<'a, ExprNode<'a>> {
-    if let ExprNode::Name(id) = func {
+    if let ExprNode::Name(id) = &func {
         // make(T, ...) and new(T) are treated specially, not as a function call
         match id.content() {
             "make" => return Ok(parse_make(s, id.location().start)?.into()),
-            "new" => return Ok(parse_new(s, id.location().start)?.into()),
+            "new" => {
+                let start = id.location().start;
+
+                return parse_new(s, func, start);
+            }
             _ => {}
         }
     }
 
+    parse_regular_call(s, func)
+}
+
+fn parse_regular_call<'a>(
+    s: &mut TokenStream<'a>,
+    func: ExprNode<'a>,
+) -> PResult<'a, ExprNode<'a>> {
     expect(s, TokenKind::ParenL, Some("function call"))?;
     let annotation = s.take_last_annotation();
 
@@ -96,7 +107,28 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
     })
 }
 
-fn parse_new<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, NewNode<'a>> {
+fn parse_new<'a>(
+    s: &mut TokenStream<'a>,
+    func: ExprNode<'a>,
+    start: usize,
+) -> PResult<'a, ExprNode<'a>> {
+    let mut context = BacktrackingContext::new(s);
+    let b = context.stream();
+
+    let new = parse_builtin_new(b, start);
+
+    if let Ok(new) = new {
+        context.commit()?;
+
+        Ok(new.into())
+    } else {
+        // a call with zero or multiple arguments cannot be the predeclared
+        // new(T), but is valid when the identifier `new` is shadowed
+        parse_regular_call(s, func)
+    }
+}
+
+fn parse_builtin_new<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, NewNode<'a>> {
     expect(s, TokenKind::ParenL, Some("new call"))?;
 
     let mut type_probe = s.clone();
@@ -104,19 +136,28 @@ fn parse_new<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, NewNode<'
     let mut context = BacktrackingContext::new(s);
     let b = context.stream();
 
-    let expr = parse_expression(b, true)
-        .ok()
-        .filter(|_| matches!(b.peek(), Some(Ok(of_kind!(TokenKind::ParenR)))));
+    let expr = parse_expression(b, true).ok().filter(|_| {
+        if matches!(b.peek(), Some(Ok(of_kind!(TokenKind::Comma)))) {
+            b.next();
+        }
+
+        matches!(b.peek(), Some(Ok(of_kind!(TokenKind::ParenR))))
+    });
 
     let arg = if let Some(expr) = expr {
         context.commit()?;
 
         let closing = expect(s, TokenKind::ParenR, Some("new call"))?;
 
-        match parse_type(&mut type_probe)
-            .ok()
-            .filter(|_| type_probe.peek() == Some(&Ok(closing)))
-        {
+        let r#type = parse_type(&mut type_probe).ok().filter(|_| {
+            if matches!(type_probe.peek(), Some(Ok(of_kind!(TokenKind::Comma)))) {
+                type_probe.next();
+            }
+
+            type_probe.peek() == Some(&Ok(closing.clone()))
+        });
+
+        match r#type {
             Some(r#type) => NewArgNode::Ambiguous {
                 if_type: r#type,
                 if_expr: Box::new(expr),
