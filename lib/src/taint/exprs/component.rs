@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, rc::Rc};
 
 use parser::{
     Location,
@@ -83,18 +83,12 @@ pub fn visit_selection_with_base<'a>(
             );
         }
 
-        // ordering matters: `lookup_promoted_field` already gates on the
-        // underlying being a struct (either directly or via an embedded chain),
-        // so we only reach `as_struct` (which would otherwise force an
-        // unwanted upgrade) once we know the shape is genuinely struct-like
-        if let Some(promoted) = r#type.lookup_promoted_field(selector)
-            && let Some(r#struct) = base.as_struct()
-        {
+        if let Some(promoted) = r#type.lookup_promoted_field(selector) {
             let field = promoted.field_info();
 
-            let value = r#struct
-                .get_const(&selector.to_owned(), location.clone())
-                .into_with_declared_type(field.resolved_type());
+            // `lookup_promoted_field` already gates on the underlying being a
+            // struct (either directly or via an embedded chain)
+            let value = read_typed_field(base, selector, field.resolved_type(), location.clone());
 
             return nest_field_backtraces(
                 value,
@@ -218,6 +212,24 @@ pub fn visit_selection_with_base<'a>(
     });
 
     ValueRef::new_bottom(location, None)
+}
+
+fn read_typed_field<'a>(
+    base: &ValueRef<'a>,
+    selector: &str,
+    declared_type: Option<Rc<TypeInfo<'a>>>,
+    location: Pinned<'a, Location>,
+) -> ValueRef<'a> {
+    let value = match base.as_struct() {
+        Some(r#struct) => r#struct.get_const(&selector.to_owned(), location.clone()),
+        // sometimes the base is known to be a struct (based on statically-known
+        // typing) but it does not have the right shape (& is not upgradable),
+        // usually because of pointer problems, but we still accept it and use
+        // its aggregate backtrace as a sound approximation
+        None => base.downgrade(|| location.clone()).with_location(location),
+    };
+
+    value.into_with_declared_type(declared_type)
 }
 
 fn nest_receiver_backtraces<'a>(
