@@ -146,6 +146,16 @@ inherit_base_policy = false
 [revocations] # === EXPLICIT SECURITY LABEL DOWNGRADING AND TAINT EXCEPTIONS ===
 # ==============================================================================
 
+# No broader revocations are defined since their scope is not appropriate for a
+# widely-applicable base security policy. It does not make sense, for example,
+# to revoke `?http` for common HTML escaping utilities, since all sanitizers are
+# necessarily context-specific and thus a simple `<` -> `&gt;` transformation
+# does not make untrusted input any safer to use, e.g., in a literal SQL query.
+# Revocations are thus domain-specific and depend on each project's particular
+# usage, as well as more specialized labeling per use-case. Given this, the
+# revocations below handle only hyper-focused cases in order to offset other
+# directives in this policy that would otherwise be too strict.
+
 # allow `val := os.Getenv("..."); if len(val) == 0 { return; }` (common pattern)
 "builtin.len" = ["$env"]
 # allow `val := os.Getenv("..."); if val == "" { return; }` (common pattern)
