@@ -33,6 +33,8 @@ pub struct AnalysisContext<'a> {
     current_file: Option<&'a Path>,
     /// Errors emitted during analysis.
     errors: Vec<AnalysisError<'a>>,
+    /// Whether to report statements detected after block-terminating others.
+    report_unreachable: bool,
 
     /// Current stack of functions being declared.
     funcs: Vec<ValueRef<'a>>,
@@ -105,12 +107,13 @@ pub struct AnalysisContext<'a> {
 }
 
 impl<'a> AnalysisContext<'a> {
-    pub(crate) fn new(blanket_directives: &'a BlanketDirectives) -> Self {
+    pub(crate) fn new(report_unreachable: bool, blanket_directives: &'a BlanketDirectives) -> Self {
         AnalysisContext {
             stage: AnalysisStage::default(),
             symbol_table: SymbolTable::new(),
             type_registry: TypeRegistry::new(),
             current_file: None,
+            report_unreachable,
             errors: Vec::new(),
             funcs: Vec::new(),
             func_type_params: Vec::new(),
@@ -590,6 +593,14 @@ impl<'a> AnalysisContext<'a> {
     }
 
     pub fn report_error_at(&mut self, file: &'a Path, kind: AnalysisErrorKind<'a>) {
+        if !self.report_unreachable && matches!(kind, AnalysisErrorKind::Unreachable { .. }) {
+            // unreachable code is not really invalid Go per the spec, just
+            // heavily discouraged, and it should not compromise analysis
+            // results, so the consumer might have chosen not to pollute the
+            // analysis results with any unreachable diagnostics
+            return;
+        }
+
         if self.stage.admits_errors() && self.error_suppression_depth == 0 {
             self.errors.push(AnalysisError { file, kind });
         }

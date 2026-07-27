@@ -245,6 +245,7 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 /// to automatically populate default configuration values when manually
 /// constructing an instance and the invoker only wishes to partially specify
 /// configuration preferences.
+#[expect(clippy::struct_excessive_bools, reason = "Independent options")]
 #[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
 pub struct AnalysisConfig {
     /// Whether to output more detailed status information during the analysis.
@@ -370,6 +371,21 @@ pub struct AnalysisConfig {
     ///
     /// [AEKtmbp]: errors::AnalysisErrorKind::TooManyBuildPermutations
     pub max_build_permutations: usize,
+    /// Whether to report statements detected after block-terminating others.
+    ///
+    /// While unreachable code (and code detected as unreachable, in general) is
+    /// a sign that something is probably wrong, it is still valid Go and its
+    /// existence does not compromise analysis results, so it can make sense
+    /// both to flag and not to flag unreachable code, depending on the error
+    /// handling pipeline and its sensitivity to any reported diagnostics.
+    ///
+    /// If this configuration option is set to `false`, any
+    /// [`errors::AnalysisError`] that would be reported with
+    /// [`errors::AnalysisErrorKind::Unreachable`] are instead silently
+    /// discarded.
+    ///
+    /// Defaults to `false`.
+    pub report_unreachable: bool,
 }
 
 impl Default for AnalysisConfig {
@@ -387,6 +403,7 @@ impl Default for AnalysisConfig {
             deny_sinks: IndexMap::new(),
             include_tests: false,
             max_build_permutations: DEFAULT_MAX_BUILD_PERMUTATIONS,
+            report_unreachable: false,
         }
     }
 }

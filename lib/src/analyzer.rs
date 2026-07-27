@@ -89,13 +89,17 @@ pub struct Analyzer {
     blanket_directives: BlanketDirectives,
     /// Whether to output more detailed status information during the analysis.
     verbose: bool,
-    /// Whether `_test.go` files should be admitted into the analysis, mirroring
-    /// `go build` (which excludes them) versus `go test` (which includes them).
+    /// Whether `_test.go` files should be admitted into the analysis.
+    ///
+    /// This mirrors the contrast between `go build` (which excludes `_test.go`
+    /// files) and `go test` (which includes them).
     include_tests: bool,
     /// Maximum number of distinct build permutations to analyze.
     ///
     /// See [`AnalysisConfig::max_build_permutations`] for semantics.
     max_build_permutations: usize,
+    /// Whether to report statements detected after block-terminating others.
+    report_unreachable: bool,
 }
 
 impl Analyzer {
@@ -194,6 +198,7 @@ impl Analyzer {
             verbose,
             include_tests: config.include_tests,
             max_build_permutations: config.max_build_permutations,
+            report_unreachable: config.report_unreachable,
         };
 
         #[cfg(feature = "base-security-policy")]
@@ -1126,7 +1131,7 @@ impl Analyzer {
         admitted_asts: &[(&'a path::Path, &SourceFileNode<'a>)],
         verbose_prefix: &str,
     ) -> Vec<AnalysisError<'a>> {
-        let mut context = AnalysisContext::new(&self.blanket_directives);
+        let mut context = AnalysisContext::new(self.report_unreachable, &self.blanket_directives);
 
         let mut files: Vec<_> = admitted_asts
             .iter()
