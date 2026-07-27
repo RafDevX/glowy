@@ -78,6 +78,25 @@ pub fn is_known_type<'a>(ctx: &mut AnalysisContext<'a>, r#type: &TypeNode<'a>) -
         return true;
     }
 
+    // type resolution below never really "fails" for qualified names since a
+    // placeholder stable identity is generated, so before we do that we check
+    // if there is a matching qualified symbol we can base off our assessment on
+    if let TypeNode::Name(name) = r#type.strip_pointers()
+        && name.package.is_some()
+        && let Some(symbol) = lookup_symbol_for_type_resolution(ctx, None, name.package, name.id)
+    {
+        let value = symbol.borrow().value().get();
+
+        return value.is_function()
+            && value
+                .as_function()
+                // ^^^ it is safe to perform as_function without first doing
+                // `value.clone_inner()` because we already checked is_function,
+                // so an upgrade will never happen and we won't violate the
+                // restrictions imposed by AssumedImmutable
+                .is_some_and(|func| func.is_type_constructor());
+    }
+
     let (types, symtab) = ctx.types_mut_with_symtab();
 
     types.resolve(symtab, r#type).is_some()
