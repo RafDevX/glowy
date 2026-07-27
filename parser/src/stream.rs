@@ -1,4 +1,8 @@
-use crate::{Annotation, Location, Span, lexer::Lexer, token::Token};
+use crate::{
+    Annotation, Location, Span,
+    lexer::{LegacyBuildConstraints, Lexer},
+    token::Token,
+};
 
 // this is almost equivalent to std::iter::Peekable<Lexer<'a>>,
 // but sadly we can't use a type alias because we need a few
@@ -55,6 +59,10 @@ impl<'a> TokenStream<'a> {
 
     pub fn get_build_constraint(&self) -> Option<Span<'a>> {
         self.lexer.get_build_constraint()
+    }
+
+    pub fn get_legacy_build_constraints(&self) -> Option<&LegacyBuildConstraints<'a>> {
+        self.lexer.get_legacy_build_constraints()
     }
 }
 

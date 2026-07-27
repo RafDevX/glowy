@@ -2,6 +2,7 @@ use std::{
     collections::VecDeque,
     hash, mem,
     num::{ParseFloatError, ParseIntError},
+    ops::Range,
     str::{Chars, FromStr},
     sync::LazyLock,
 };
@@ -10,7 +11,7 @@ use finl_unicode::categories::CharacterCategories;
 use regex::Regex;
 
 use crate::{
-    Span,
+    Location, Span,
     errors::{Diagnostics, ErrorDiagnosticInfo},
     token::{Annotation, Token, TokenKind},
 };
@@ -183,6 +184,7 @@ pub struct Lexer<'a> {
     enable_implicit_semicolon: bool, // whether to enable implicit semicolon insertion
 
     build_constraint: Option<Span<'a>>, // from `//go:build ...` at the beginning
+    legacy_build_constraints: Option<LegacyBuildConstraints<'a>>,
 }
 
 type LResult<'a> = Result<Token<'a>, LexingError<'a>>;
@@ -203,6 +205,7 @@ impl<'a> Lexer<'a> {
             enable_implicit_semicolon: true,
 
             build_constraint: None,
+            legacy_build_constraints: None,
         }
     }
 
@@ -212,6 +215,10 @@ impl<'a> Lexer<'a> {
 
     pub fn get_build_constraint(&self) -> Option<Span<'a>> {
         self.build_constraint
+    }
+
+    pub fn get_legacy_build_constraints(&self) -> Option<&LegacyBuildConstraints<'a>> {
+        self.legacy_build_constraints.as_ref()
     }
 
     fn peek_char(&mut self) -> Option<char> {
@@ -452,6 +459,84 @@ impl<'a> Lexer<'a> {
         self.read_n(2); // for the 2 \n
 
         self.build_constraint = Some(span);
+    }
+
+    fn try_extract_legacy_build_constraints(&mut self) {
+        if self.build_constraint.is_some()
+            || self.legacy_build_constraints.is_some()
+            || self.last_token_kind.is_some()
+        {
+            return;
+        }
+
+        let view = self.src.as_str();
+        let Some(first_line_end) = view.find('\n') else {
+            return;
+        };
+
+        if legacy_build_constraint_expression_range(view[..first_line_end].trim_start()).is_none() {
+            return;
+        }
+
+        let mut lines = Vec::new();
+        let mut location_start = None;
+        let mut location_end = 0;
+        let mut cursor = 0;
+        let mut line_number = self.line;
+
+        let consumed_bytes = loop {
+            let remaining = &view[cursor..];
+
+            let Some(line_end) = remaining.find('\n') else {
+                return;
+            };
+
+            let line = remaining[..line_end]
+                .strip_suffix('\r')
+                .unwrap_or(&remaining[..line_end]);
+
+            let comment_offset = line.len() - line.trim_start().len();
+            let comment = &line[comment_offset..];
+
+            if line.trim().is_empty() {
+                break cursor + line_end + 1;
+            }
+
+            // a modern `//go:build` directive is authoritative, so we just
+            // advance to it for the regular extractor to handle it
+            if comment.starts_with(BUILD_CONSTRAINT_PREFIX) {
+                let consumed_chars = view[..(cursor + comment_offset)].chars().count();
+
+                self.read_n(consumed_chars);
+
+                return;
+            }
+
+            if !comment.starts_with("//") {
+                return;
+            }
+
+            if let Some(expression_range) = legacy_build_constraint_expression_range(comment) {
+                let line = Span::new(comment, self.offset + cursor + comment_offset, line_number);
+                let line_location = line.location();
+
+                location_start.get_or_insert(line_location.start);
+                location_end = line_location.end;
+
+                lines.push(line.subspan(expression_range));
+            }
+
+            cursor += line_end + 1;
+            line_number += 1;
+        };
+
+        let consumed_chars = view[..consumed_bytes].chars().count();
+        self.read_n(consumed_chars);
+
+        self.legacy_build_constraints = Some(LegacyBuildConstraints {
+            lines,
+            location: location_start.unwrap()..location_end,
+        });
     }
 
     fn identifier_or_keyword(&mut self) -> Token<'a> {
@@ -965,6 +1050,10 @@ impl<'a> Iterator for Lexer<'a> {
         }
 
         self.try_extract_build_constraint();
+        self.try_extract_legacy_build_constraints();
+        // legacy extraction may advance directly to a modern directive, so we
+        // try it again now from the new position
+        self.try_extract_build_constraint();
 
         if let Err(err) = self.skip_comments() {
             return Some(Err(err));
@@ -1113,6 +1202,44 @@ fn is_unicode_digit(ch: char) -> bool {
 
 fn is_whitespace(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '\r' | '\n')
+}
+
+#[derive(Clone)]
+pub struct LegacyBuildConstraints<'a> {
+    lines: Vec<Span<'a>>,
+    location: Location,
+}
+
+impl<'a> LegacyBuildConstraints<'a> {
+    pub fn lines(&self) -> &[Span<'a>] {
+        &self.lines
+    }
+
+    pub fn location(&self) -> &Location {
+        &self.location
+    }
+}
+
+fn legacy_build_constraint_expression_range(line: &str) -> Option<Range<usize>> {
+    let comment = line.strip_prefix("//")?;
+    let prefix_whitespace = comment.len() - comment.trim_start().len();
+    let after_prefix = comment.trim_start().strip_prefix("+build")?;
+
+    if after_prefix
+        .chars()
+        .next()
+        .is_some_and(|ch| !ch.is_whitespace())
+    {
+        return None;
+    }
+
+    let expression = after_prefix.trim();
+    let start = 2
+        + prefix_whitespace
+        + "+build".len()
+        + (after_prefix.len() - after_prefix.trim_start().len());
+
+    Some(start..(start + expression.len()))
 }
 
 // truly a sign of decaying times; see invoker for more context
