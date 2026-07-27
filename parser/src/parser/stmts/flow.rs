@@ -9,7 +9,9 @@ use crate::{
         PResult, expect,
         exprs::{parse_expression, parse_expressions_list_while, parse_primary_expression},
         of_kind,
-        stmts::{parse_block, parse_statement, parse_statements_until, terminal_token},
+        stmts::{
+            parse_block, parse_control_header_statement, parse_statements_until, terminal_token,
+        },
         types::parse_types_until,
     },
     token::TokenKind,
@@ -32,7 +34,7 @@ pub fn parse_if_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, IfNode<'a>
     let stmt = if starts_with_condition {
         None
     } else {
-        let stmt = parse_statement(s, false)?;
+        let stmt = parse_control_header_statement(s)?;
 
         expect(s, TokenKind::SemiColon, Some("if statement"))?;
 
@@ -97,7 +99,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
             let post = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
                 None
             } else {
-                Some(Box::new(parse_statement(s, false)?))
+                Some(Box::new(parse_control_header_statement(s)?))
             };
 
             ForHeaderNode::Clause(ForClauseNode {
@@ -175,7 +177,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
                     })
                 }
                 ForKind::ClauseWithInit => {
-                    let init = Some(Box::new(parse_statement(s, false)?));
+                    let init = Some(Box::new(parse_control_header_statement(s)?));
 
                     expect(s, TokenKind::SemiColon, Some("for clause"))?;
 
@@ -190,7 +192,7 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
                     let post = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
                         None
                     } else {
-                        Some(Box::new(parse_statement(s, false)?))
+                        Some(Box::new(parse_control_header_statement(s)?))
                     };
 
                     ForHeaderNode::Clause(ForClauseNode { init, cond, post })
@@ -292,22 +294,27 @@ pub fn parse_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Switch
 fn parse_expr_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ExprSwitchNode<'a>> {
     let beginning = expect(s, TokenKind::Switch, Some("switch statement"))?;
 
-    let mut stmt = None;
-    for future in s.clone() {
-        match future?.kind {
-            TokenKind::CurlyL => break, // didn't find any semicolon
-            TokenKind::SemiColon => {
-                // we now know there's a simple statement we need to parse
-                // before the switch expression
-                stmt = Some(Box::new(parse_statement(s, false)?));
+    // if the header begins with the optional expression, it must consume
+    // everything up to the switch body's opening brace; probing with the real
+    // expression parser avoids mistaking a nested composite literal's opening
+    // brace for the switch body
+    let mut expression_probe = s.clone();
+    let starts_with_expression = parse_expression(&mut expression_probe, false).is_ok()
+        && matches!(
+            expression_probe.peek(),
+            Some(Ok(of_kind!(TokenKind::CurlyL)))
+        );
 
-                expect(s, TokenKind::SemiColon, Some("switch statement"))?;
+    let stmt =
+        if matches!(s.peek(), Some(Ok(of_kind!(TokenKind::CurlyL)))) || starts_with_expression {
+            None
+        } else {
+            let stmt = parse_control_header_statement(s)?;
 
-                break;
-            }
-            _ => {}
-        }
-    }
+            expect(s, TokenKind::SemiColon, Some("switch statement"))?;
+
+            Some(Box::new(stmt))
+        };
 
     let expr = if let Some(Ok(of_kind!(TokenKind::CurlyL))) = s.peek() {
         // no switch expression (equivalent to true)
@@ -369,7 +376,7 @@ fn parse_type_switch_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, TypeS
             TokenKind::SemiColon => {
                 // we now know there's a simple statement we need to parse
                 // before the switch expression
-                stmt = Some(Box::new(parse_statement(s, false)?));
+                stmt = Some(Box::new(parse_control_header_statement(s)?));
 
                 expect(s, TokenKind::SemiColon, Some("switch statement"))?;
 
@@ -839,31 +846,31 @@ mod tests {
                     exprs: vec![ExprNode::Literal(LiteralNode::UnknownComposite {
                         r#type: TypeNode::Name(TypeNameNode {
                             package: None,
-                            id: Span::new("T", 47, 3),
+                            id: Span::new("T", 48, 3),
                             args: vec![],
                         }),
                         values: vec![],
-                        location: 47..50,
+                        location: 48..51,
                     })],
-                    location: 42..50,
+                    location: 42..52,
                     annotation: None,
                 }))),
                 cond: ExprNode::Selection(SelectionNode {
-                    base: Box::new(ExprNode::Name(Span::new("x", 52, 3))),
-                    selector: Span::new("ok", 54, 3),
-                    location: 52..56,
+                    base: Box::new(ExprNode::Name(Span::new("x", 54, 3))),
+                    selector: Span::new("ok", 56, 3),
+                    location: 54..58,
                 }),
                 then: BlockNode {
                     stmts: vec![],
-                    location: 57..80,
+                    location: 59..82,
                 },
                 otherwise: None,
-                location: 39..80,
+                location: 39..82,
             })],
             parse(
                 "
                 {
-                    if x := T{}; x.ok {
+                    if x := (T{}); x.ok {
                     }
                 }
             ",

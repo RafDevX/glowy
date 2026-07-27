@@ -60,7 +60,7 @@ pub fn parse_select_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Select
                 // technically we should only allow send or receive statements
                 // here, but it would be much more awkward to actually worry
                 // about that, so we'll leave any validation to the invoker
-                Some(super::parse_statement(s, false)?)
+                Some(super::parse_statement(s, false, true)?)
             }
         };
 

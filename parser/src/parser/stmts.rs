@@ -33,8 +33,11 @@ fn resume_parsing_assignment_rhs<'a>(
     lhs: Vec<ExprNode<'a>>,
     kind: AssignmentKind,
     annotation: Option<Box<Annotation<'a>>>,
+    allow_composite_after_name: bool,
 ) -> PResult<'a, StatementNode<'a>> {
-    if let Some(rhs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind), true)? {
+    if let Some(rhs) =
+        parse_expressions_list_while(s, |t| !terminal_token(&t.kind), allow_composite_after_name)?
+    {
         let location = s.location_starting_at(lhs.first().unwrap().location().start);
 
         Ok(StatementNode::Assignment(AssignmentNode {
@@ -56,18 +59,21 @@ fn resume_parsing_assignment_rhs<'a>(
 fn resume_parsing_assignment_lhs<'a>(
     s: &mut TokenStream<'a>,
     mut lhs: Vec<ExprNode<'a>>,
+    allow_composite_after_name: bool,
 ) -> PResult<'a, StatementNode<'a>> {
     // collect the rest of the expressions, if any
-    if let Some((rest, kind)) =
-        parse_expressions_list(s, |t| AssignmentKind::try_from(t.kind), true)?
-    {
+    if let Some((rest, kind)) = parse_expressions_list(
+        s,
+        |t| AssignmentKind::try_from(t.kind),
+        allow_composite_after_name,
+    )? {
         s.next(); // step over operator
 
         lhs.extend(rest);
 
         let annotation = s.take_last_annotation();
 
-        resume_parsing_assignment_rhs(s, lhs, kind, annotation)
+        resume_parsing_assignment_rhs(s, lhs, kind, annotation, allow_composite_after_name)
     } else {
         // reached end-of-file and found no assignment operator...
         Err(ParsingError::UnexpectedConstruct {
@@ -78,8 +84,11 @@ fn resume_parsing_assignment_lhs<'a>(
 }
 
 // statements that start with an expression and then diverge wrt operator
-fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
-    let lhs = parse_expression(s, true)?;
+fn parse_expression_first_stmt<'a>(
+    s: &mut TokenStream<'a>,
+    allow_composite_after_name: bool,
+) -> PResult<'a, StatementNode<'a>> {
+    let lhs = parse_expression(s, allow_composite_after_name)?;
 
     // this needs to be separate so we don't consume the semicolon, as well as
     // to avoid using peek on the match (would require .next in every branch)
@@ -115,7 +124,7 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     let node = match s.next().transpose()? {
         Some(of_kind!(TokenKind::LtMinus)) => StatementNode::Send(SendNode {
             channel: lhs,
-            expr: parse_expression(s, true)?,
+            expr: parse_expression(s, allow_composite_after_name)?,
             location: s.location_starting_at(lhs_location.start),
             annotation: s.take_last_annotation(),
         }),
@@ -127,14 +136,22 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
             operand: lhs,
             location: s.location_starting_at(lhs_location.start),
         },
-        Some(of_kind!(TokenKind::Comma)) => resume_parsing_assignment_lhs(s, vec![lhs])?,
+        Some(of_kind!(TokenKind::Comma)) => {
+            resume_parsing_assignment_lhs(s, vec![lhs], allow_composite_after_name)?
+        }
         found => {
             if let Some(token) = found.clone()
                 && let Ok(kind) = AssignmentKind::try_from(token.kind)
             {
                 let annotation = s.take_last_annotation();
 
-                return resume_parsing_assignment_rhs(s, vec![lhs], kind, annotation);
+                return resume_parsing_assignment_rhs(
+                    s,
+                    vec![lhs],
+                    kind,
+                    annotation,
+                    allow_composite_after_name,
+                );
             }
 
             return Err(ParsingError::UnexpectedTokenKind {
@@ -148,7 +165,10 @@ fn parse_expression_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     Ok(node)
 }
 
-fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
+fn parse_identifier_first_stmt<'a>(
+    s: &mut TokenStream<'a>,
+    allow_composite_after_name: bool,
+) -> PResult<'a, StatementNode<'a>> {
     let mut context = BacktrackingContext::new(s);
     let b = context.stream();
 
@@ -169,7 +189,7 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
                 location: offset..offset,
             }
         } else {
-            parse_statement(s, true)?
+            parse_statement(s, true, true)?
         };
 
         return Ok(StatementNode::Labeled {
@@ -210,7 +230,7 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
             Some(of_kind!(TokenKind::ColonAssign)) if !was_comma => break, // short var decl!
 
             // we got it wrong... they're expressions
-            _ => return parse_expression_first_stmt(s), // backtrack
+            _ => return parse_expression_first_stmt(s, allow_composite_after_name), // backtrack
         }
     }
 
@@ -218,7 +238,9 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
     context.commit()?; // we're sure it's a short var decl so we can go back to the main stream now
     let annotation = s.take_last_annotation();
 
-    if let Some(exprs) = parse_expressions_list_while(s, |t| !terminal_token(&t.kind), true)? {
+    if let Some(exprs) =
+        parse_expressions_list_while(s, |t| !terminal_token(&t.kind), allow_composite_after_name)?
+    {
         Ok(StatementNode::ShortVarDecl(ShortVarDeclNode {
             ids,
             exprs,
@@ -236,6 +258,7 @@ fn parse_identifier_first_stmt<'a>(s: &mut TokenStream<'a>) -> PResult<'a, State
 fn parse_statement<'a>(
     s: &mut TokenStream<'a>,
     allow_non_simple: bool,
+    allow_composite_after_name: bool,
 ) -> PResult<'a, StatementNode<'a>> {
     let node = match s.peek().cloned().transpose()? {
         Some(t @ of_kind!(TokenKind::SemiColon)) => StatementNode::Empty {
@@ -267,11 +290,17 @@ fn parse_statement<'a>(
         Some(of_kind!(TokenKind::Var)) if allow_non_simple => parse_var_decl(s)?.into(),
         Some(of_kind!(TokenKind::Type)) if allow_non_simple => parse_type_decl(s)?.into(),
 
-        Some(of_kind!(TokenKind::Ident)) => parse_identifier_first_stmt(s)?,
-        _ => parse_expression_first_stmt(s)?,
+        Some(of_kind!(TokenKind::Ident)) => {
+            parse_identifier_first_stmt(s, allow_composite_after_name)?
+        }
+        _ => parse_expression_first_stmt(s, allow_composite_after_name)?,
     };
 
     Ok(node)
+}
+
+fn parse_control_header_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, StatementNode<'a>> {
+    parse_statement(s, false, false)
 }
 
 pub fn parse_statements_until<'a>(
@@ -281,7 +310,7 @@ pub fn parse_statements_until<'a>(
     let mut stmts = vec![];
 
     while !s.peek().cloned().transpose()?.as_ref().is_none_or(&stop) {
-        stmts.push(parse_statement(s, true)?);
+        stmts.push(parse_statement(s, true, true)?);
 
         // spec allows omitting semicolon before closing } and )
         if let Some(Ok(t @ of_kind!(TokenKind::CurlyR | TokenKind::ParenR))) = s.peek()
