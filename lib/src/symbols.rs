@@ -637,6 +637,14 @@ impl<'a> SymbolTable<'a> {
         &self.current_file_wildcard_imports
     }
 
+    pub fn may_resolve_from_unavailable_wildcard_import(&self, name: &str) -> bool {
+        name.chars().next().is_some_and(char::is_uppercase)
+            && self
+                .current_file_wildcard_imports
+                .iter()
+                .any(|path| !self.package_scopes.contains_key(path))
+    }
+
     pub fn current_file_imports_record(&self) -> FileImportsRecord {
         FileImportsRecord {
             named: self.current_file_named_imports.clone(),

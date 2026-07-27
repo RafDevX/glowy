@@ -372,6 +372,24 @@ pub fn resolve_operand_name<'a>(
         ctx.symtab().get_symbol(name.content())
     };
 
+    if symbol.is_none()
+        && qualifier.is_none()
+        && ctx
+            .symtab()
+            .may_resolve_from_unavailable_wildcard_import(name.content())
+    {
+        // if this could possibly be an unqualified access to a wildcard import
+        // of a package not under analysis, we synthesize a fake symbol to
+        // represent it instead of emitting an unknown symbol error (which would
+        // frequently be a false positive, because of wildcard imports, as we
+        // assume input programs are valid Go programs that compile)
+
+        let pinned = ctx.pin(name);
+        let value = ValueRef::new(Value::Simple(None), pinned.pinned_location(), None);
+
+        return Some(Symbol::new_ref(pinned, false, value, None));
+    }
+
     if symbol.is_none() {
         // symbol not found -- report error
         ctx.report_error(AnalysisErrorKind::UnknownSymbol { found: name });
