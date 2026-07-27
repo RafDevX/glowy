@@ -531,6 +531,7 @@ impl<'a> SymbolTable<'a> {
             .or_else(|| native_name.strip_suffix("-go"))
             .or_else(|| native_name.strip_prefix("lib-"))
             .or_else(|| native_name.strip_suffix("-lib"))
+            .filter(|stripped| !stripped.is_empty())
             .unwrap_or(native_name)
             .to_owned()
     }
