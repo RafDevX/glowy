@@ -313,6 +313,17 @@ pub fn visit_raw_binding_decl_spec<'a>(
 }
 
 pub fn visit_short_var_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &ShortVarDeclNode<'a>) {
+    // scope trees survive stabilization passes, so hide variables left behind
+    // by an earlier visit to this declaration before evaluating its RHS: per
+    // the Go spec, their scope begins only after the short var decl. the normal
+    // declaration path below recreates them after the RHS has been evaluated
+    for name in node.ids.iter().filter(|name| name.content() != "_") {
+        let declaration = ctx.pin(*name);
+
+        ctx.symtab_mut()
+            .hide_current_symbol_declared_at(declaration);
+    }
+
     let rhs_values = exprs::visit_multi_exprs_with_consts(ctx, &node.exprs);
 
     visit_short_var_decl_with(ctx, node, rhs_values);

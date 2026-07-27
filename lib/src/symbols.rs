@@ -446,6 +446,31 @@ impl<'a> SymbolTable<'a> {
         envelope.set_method(receiver_type, name, symbol)
     }
 
+    pub fn hide_current_symbol_declared_at(&mut self, declaration: Pinned<'a, Span<'a>>) {
+        // scopes can contain a symbol from an earlier analysis pass before its
+        // declaration is revisited, even though it should not yet be visible.
+        // removing only an exact declaration match lets callers restore the
+        // source-level scope at that point without disturbing an earlier
+        // declaration of the same name
+
+        // note that the reverse index is not cleared, and that the symbol is
+        // always restored by the end of the analysis pass (the point at which
+        // convergence snapshots are calculated), so this is sound
+
+        let name = declaration.content();
+
+        let mut scope = self.current_scope.borrow_mut();
+
+        let was_declared_here = scope
+            .symbols
+            .get(name)
+            .is_some_and(|symbol| symbol.borrow().declared_name() == declaration);
+
+        if was_declared_here {
+            scope.symbols.remove(name);
+        }
+    }
+
     fn index_declaration(&mut self, symbol: &SymbolRef<'a>) {
         let decl = symbol.borrow().declared_name();
 
