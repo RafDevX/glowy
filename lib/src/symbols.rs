@@ -511,6 +511,15 @@ impl<'a> SymbolTable<'a> {
         // the overwhelming majority of cases, including stdlib]
         let native_name = components.next().unwrap();
 
+        // some packages encode the major version as a suffix, so strip that
+        // (e.g., `example.com/yaml.v3` -> `yaml`, stripping `.v3`)
+        let native_name = native_name
+            .rsplit_once(".v")
+            .filter(|(name, version)| {
+                !name.is_empty() && version.starts_with(|c: char| c.is_ascii_digit())
+            })
+            .map_or(native_name, |(name, _)| name);
+
         // final consideration: many packages have their hosting platform
         // repository name with a `go-`/`-go` tag around what is actually their
         // native package name, so strip that from our native name candidate.
