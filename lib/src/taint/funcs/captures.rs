@@ -97,12 +97,10 @@ pub fn register_captures<'a>(
         // that global mutations can survive relay calls
         for (declaration, _) in symbol_func.captures() {
             if let Some(captured_symbol) = ctx.symtab().get_symbol_by_declaration(declaration) {
-                insert_capture(
-                    &mut captures,
-                    declaration,
-                    captured_symbol,
-                    bind_in_function_scope,
-                );
+                // relayed captures are not referenced lexically by this
+                // function, so exposing them in its scope could shadow a local
+                // declaration with the same name
+                insert_capture(&mut captures, declaration, captured_symbol, false);
             }
         }
     }
