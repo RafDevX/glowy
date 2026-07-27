@@ -272,6 +272,44 @@ impl<'a> SymbolTable<'a> {
         Self::get_symbol_from_scope_chain(self, Some(Rc::clone(&self.current_scope)), name)
     }
 
+    pub fn current_lexical_scope(&self) -> LexicalScope<'a> {
+        LexicalScope(Rc::clone(&self.current_scope))
+    }
+
+    pub fn get_symbol_from_lexical_scope(
+        &self,
+        scope: &LexicalScope<'a>,
+        imports: &FileImportsRecord,
+        name: &str,
+    ) -> Option<SymbolRef<'a>> {
+        let mut checking = Some(Rc::clone(&scope.0));
+
+        while let Some(scope_ref) = &checking {
+            let borrowed = scope_ref.borrow();
+
+            if let Some(symbol) = borrowed.get_local_symbol(name) {
+                return Some(symbol);
+            }
+
+            let parent = borrowed.parent();
+            drop(borrowed);
+
+            checking = parent;
+        }
+
+        if name.chars().next().is_some_and(char::is_uppercase) {
+            for path in imports.wildcard() {
+                if let Some(envelope) = self.package_scopes.get(path)
+                    && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
+                {
+                    return Some(symbol);
+                }
+            }
+        }
+
+        self.universe_scope.get_local_symbol(name)
+    }
+
     pub fn get_symbol_in_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
         self.current_scope.borrow().get_local_symbol(name)
     }
@@ -733,6 +771,26 @@ impl<'a> PackageScopeEnvelope<'a> {
 
 type ScopeRef<'a> = Rc<RefCell<Scope<'a>>>;
 type WeakScopeRef<'a> = Weak<RefCell<Scope<'a>>>;
+
+// for opaque, external reference
+#[derive(Clone)]
+pub struct LexicalScope<'a>(ScopeRef<'a>);
+
+impl PartialEq for LexicalScope<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for LexicalScope<'_> {}
+
+impl fmt::Debug for LexicalScope<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("LexicalScope")
+            .field(&Rc::as_ptr(&self.0))
+            .finish()
+    }
+}
 
 // In the Go spec, this is called a block, but that's a bit confusing
 // since blocks are lexical elements that don't necessarily exist for

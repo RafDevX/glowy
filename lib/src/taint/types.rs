@@ -1,9 +1,14 @@
-use parser::{Span, ast::TypeNode};
+use parser::{
+    Span,
+    ast::{TypeDeclSpecNode, TypeNode},
+};
 
 use crate::{
     context::AnalysisContext,
-    symbols::{QualifiedSymbolResolutionResult, SymbolRef},
-    types::TypeDeclarationContext,
+    labels::FunctionRef,
+    symbols::{QualifiedSymbolResolutionResult, Symbol, SymbolRef},
+    types::{TypeDeclarationContext, TypeRegistry},
+    values::{FunctionValue, Value, ValueRef},
 };
 
 pub fn resolve_named_underlying<'a>(
@@ -80,11 +85,19 @@ pub fn is_known_type<'a>(ctx: &mut AnalysisContext<'a>, r#type: &TypeNode<'a>) -
 
 fn lookup_symbol_for_type_resolution<'a>(
     ctx: &AnalysisContext<'a>,
-    declaration_context: Option<&TypeDeclarationContext>,
+    declaration_context: Option<&TypeDeclarationContext<'a>>,
     package: Option<Span<'a>>,
     id: Span<'a>,
 ) -> Option<SymbolRef<'a>> {
     if let Some(context) = declaration_context {
+        if package.is_none() {
+            return ctx.symtab().get_symbol_from_lexical_scope(
+                context.scope(),
+                context.imports(),
+                id.content(),
+            );
+        }
+
         return ctx.symtab().get_symbol_in_file_context(
             context.package(),
             context.imports(),
@@ -104,5 +117,71 @@ fn lookup_symbol_for_type_resolution<'a>(
             | QualifiedSymbolResolutionResult::UnknownSymbol
             | QualifiedSymbolResolutionResult::PendingAnalysis => None,
         },
+    }
+}
+
+pub fn visit_local_type_decl<'a>(ctx: &mut AnalysisContext<'a>, specs: &[TypeDeclSpecNode<'a>]) {
+    for node in specs {
+        visit_local_type_decl_spec(ctx, node);
+    }
+}
+
+fn visit_local_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNode<'a>) {
+    let name = ctx.pin(node.id);
+
+    if ctx.symtab().get_symbol_by_declaration(name).is_some() {
+        // the retained lexical scope already contains this declaration from a
+        // previous stabilization pass
+        return;
+    }
+
+    let package = ctx
+        .symtab()
+        .current_package_path()
+        .expect("a local type must be declared inside a package")
+        .clone();
+
+    let target_type = if node.alias {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, &node.r#type)
+    } else {
+        let placeholder = TypeRegistry::declare_local_placeholder(package, node.id.content());
+
+        Some(placeholder)
+    };
+
+    let decl_context = {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.current_declaration_context(symtab).unwrap()
+    };
+
+    let func_value = FunctionValue::new_type_constructor(
+        FunctionRef::Named(name),
+        Some((node.r#type.clone(), decl_context)),
+        target_type.clone(),
+    );
+
+    let value = ValueRef::new(
+        Value::Function(Box::new(func_value)),
+        name.pinned_location(),
+        None,
+    );
+
+    ctx.declare_new_symbol(Symbol::new_ref(name, false, value, None));
+
+    if !node.alias {
+        let current_file = ctx
+            .current_file()
+            .expect("some file should be under analysis");
+
+        let target_type = target_type.expect("defined local types have an identity");
+
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.define_local(symtab, &target_type, &node.r#type, current_file);
+
+        target_type.register_direct_interface_methods(ctx, node);
     }
 }

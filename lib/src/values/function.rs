@@ -45,7 +45,7 @@ pub struct FunctionValue<'a> {
     // composite literals such as `T{...` to the correct shape interpretation
     // when X is array/slice/map rather than struct. this also captures the
     // declaration file context needed to resolve names within X
-    declared_underlying_type: Option<(TypeNode<'a>, TypeDeclarationContext)>,
+    declared_underlying_type: Option<(TypeNode<'a>, TypeDeclarationContext<'a>)>,
     // expected result yielded by invoking this function (with synthetics)
     outcome: Option<Vec<ValueRef<'a>>>, // None if no known implementation
     // overall backtrace, e.g. from func lit assignments w/ explicit annotations
@@ -159,7 +159,7 @@ impl<'a> FunctionValue<'a> {
 
     pub fn new_type_constructor(
         r#ref: FunctionRef<'a>,
-        underlying: Option<(TypeNode<'a>, TypeDeclarationContext)>,
+        underlying: Option<(TypeNode<'a>, TypeDeclarationContext<'a>)>,
         target_type: Option<Rc<TypeInfo<'a>>>,
     ) -> Self {
         let dummy_type = TypeNode::Name(TypeNameNode {
@@ -224,7 +224,15 @@ impl<'a> FunctionValue<'a> {
         self.is_type_constructor
     }
 
-    pub fn declared_underlying_type(&self) -> Option<(&TypeNode<'a>, &TypeDeclarationContext)> {
+    pub fn constructed_type(&self) -> Option<Rc<TypeInfo<'a>>> {
+        if !self.is_type_constructor {
+            return None;
+        }
+
+        self.declared_result_types.first().cloned().flatten()
+    }
+
+    pub fn declared_underlying_type(&self) -> Option<(&TypeNode<'a>, &TypeDeclarationContext<'a>)> {
         self.declared_underlying_type.as_ref().map(|(t, c)| (t, c))
     }
 

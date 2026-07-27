@@ -18,7 +18,7 @@
 use std::{
     cell::{OnceCell, RefCell},
     collections::{HashMap, HashSet},
-    fmt, mem,
+    fmt, iter, mem,
     path::Path,
     rc::Rc,
     sync::LazyLock,
@@ -27,15 +27,20 @@ use std::{
 use indexmap::IndexMap;
 use parser::{
     Location,
-    ast::{FieldDeclNode, TypeNameNode, TypeNode},
+    ast::{
+        FieldDeclNode, FunctionResultNode, InterfaceElementNode, TypeDeclSpecNode, TypeNameNode,
+        TypeNode,
+    },
 };
 pub use promotion::PromotedField;
 use regex::Regex;
 
 use crate::{
     FullPackagePath, Pinned,
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
-    symbols::{FileImportsRecord, SymbolRef, SymbolTable},
+    context::AnalysisContext,
+    labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind},
+    symbols::{FileImportsRecord, LexicalScope, Symbol, SymbolRef, SymbolTable},
+    values::{FunctionValue, ReceiverKind, Value, ValueRef},
 };
 
 static FIELD_TAG_REGEX: LazyLock<Regex> = {
@@ -173,6 +178,48 @@ impl<'a> TypeInfo<'a> {
         // embedded fields directly on the outer object without having to go
         // through the implicit field (e.g. `x.M` is short-hand for `x.y.M`)
         promotion::lookup_promoted_method(name, self)
+    }
+
+    pub fn register_direct_interface_methods(
+        self: &Rc<Self>,
+        ctx: &mut AnalysisContext<'a>,
+        node: &TypeDeclSpecNode<'a>,
+    ) {
+        let TypeNode::Interface { elements } = &node.r#type else {
+            return;
+        };
+
+        for element in elements {
+            let InterfaceElementNode::Method { name, signature } = element else {
+                continue;
+            };
+
+            let declared_result_types = resolve_result_types(ctx, &signature.result);
+
+            let pinned_name = ctx.pin(*name);
+            let location = pinned_name.pinned_location();
+
+            let mut func = FunctionValue::new(
+                FunctionRef::Named(pinned_name),
+                Some(signature.clone()),
+                // the interface's dynamic value may hold a pointer receiver, so
+                // retain the more conservative receiver semantics
+                Some(ReceiverKind::Pointer),
+                declared_result_types,
+                None,
+            );
+
+            let directives =
+                ctx.blanket_directives_for(self.package(), Some(self.name()), name.content());
+
+            func.absorb_blanket_directives(directives.iter());
+
+            let value = ValueRef::new(Value::Function(Box::new(func)), location, None);
+            let symbol = Symbol::new_ref(pinned_name, false, value, None);
+
+            self.register_method(name.content(), symbol);
+            ctx.types_mut().record_method_name(name.content());
+        }
     }
 }
 
@@ -363,6 +410,22 @@ impl<'a> TypeRegistry<'a> {
         Some(resolved)
     }
 
+    pub fn declare_local_placeholder(package: FullPackagePath, name: &'a str) -> Rc<TypeInfo<'a>> {
+        Rc::new(TypeInfo::new_placeholder(package, name))
+    }
+
+    pub fn define_local(
+        &mut self,
+        symtab: &SymbolTable<'a>,
+        info: &Rc<TypeInfo<'a>>,
+        underlying: &TypeNode<'a>,
+        current_file: &'a Path,
+    ) {
+        let underlying_kind = self.build_kind(symtab, underlying, current_file);
+
+        info.promote(underlying_kind);
+    }
+
     pub fn lookup(&self, package: &str, name: &str) -> Option<Rc<TypeInfo<'a>>> {
         self.types
             .get(package)
@@ -390,6 +453,25 @@ impl<'a> TypeRegistry<'a> {
         symtab: &SymbolTable<'a>,
         node: &TypeNameNode<'a>,
     ) -> Option<Rc<TypeInfo<'a>>> {
+        if node.package.is_none()
+            && let Some(symbol) = symtab.get_symbol(node.id.content())
+        {
+            let value = symbol.borrow().value();
+            let value = value.get();
+
+            if !value.is_function() {
+                return None;
+            }
+
+            let func = value.as_function()?;
+
+            if !func.is_type_constructor() {
+                return None;
+            }
+
+            return func.constructed_type();
+        }
+
         self.resolve_name_with(
             symtab.current_package_path(),
             symtab.current_file_named_imports(),
@@ -782,10 +864,11 @@ impl<'a> TypeRegistry<'a> {
     pub fn current_declaration_context(
         &mut self,
         symtab: &SymbolTable<'a>,
-    ) -> Option<TypeDeclarationContext> {
+    ) -> Option<TypeDeclarationContext<'a>> {
         Some(TypeDeclarationContext {
             package: symtab.current_package_path()?.clone(),
             imports: self.current_file_imports(symtab),
+            scope: symtab.current_lexical_scope(),
         })
     }
 
@@ -801,18 +884,23 @@ impl Default for TypeRegistry<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TypeDeclarationContext {
+pub struct TypeDeclarationContext<'a> {
     package: FullPackagePath,
     imports: Rc<FileImportsRecord>,
+    scope: LexicalScope<'a>,
 }
 
-impl TypeDeclarationContext {
+impl<'a> TypeDeclarationContext<'a> {
     pub fn package(&self) -> &FullPackagePath {
         &self.package
     }
 
     pub fn imports(&self) -> &FileImportsRecord {
         &self.imports
+    }
+
+    pub fn scope(&self) -> &LexicalScope<'a> {
+        &self.scope
     }
 }
 
@@ -891,4 +979,24 @@ struct DeferredMethod<'a> {
 struct DeferredStructFields<'a> {
     owner: Rc<TypeInfo<'a>>,
     imports: Rc<FileImportsRecord>,
+}
+
+fn resolve_result_types<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    result: &FunctionResultNode<'a>,
+) -> Vec<Option<Rc<TypeInfo<'a>>>> {
+    let mut resolve = |r#type| {
+        let (types, symtab) = ctx.types_mut_with_symtab();
+
+        types.resolve(symtab, r#type)
+    };
+
+    match result {
+        FunctionResultNode::None => Vec::new(),
+        FunctionResultNode::Single(r#type) => vec![resolve(r#type)],
+        FunctionResultNode::Params(params) => params
+            .iter()
+            .flat_map(|param| iter::repeat_n(resolve(&param.r#type), param.ids.len().max(1)))
+            .collect(),
+    }
 }

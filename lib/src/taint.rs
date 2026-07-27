@@ -146,8 +146,13 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
         } => {
             explicit::visit_binding_decl(ctx, specs, true, location, annotation.as_deref());
         }
-        // we just ignore these; already registered during Stage 1
-        DeclNode::Type { .. } => {}
+        DeclNode::Type { specs, .. } => {
+            // package-level types were already registered during Stage 1, but
+            // local types enter scope only when we reach them now
+            if ctx.current_function().is_some() {
+                types::visit_local_type_decl(ctx, specs);
+            }
+        }
         DeclNode::Function(func_node) => funcs::visit_function_decl(ctx, func_node),
     }
 }
