@@ -844,6 +844,14 @@ impl Analyzer {
     /// detected, but should not be misconstrued as an assurance that the
     /// program is categorically secure.
     ///
+    /// All detected build tag constraint permutations are analyzed
+    /// independently (deduplicated by the effective set of files that they
+    /// admit), except for worlds which would have multiple active known-`GOOS`/
+    /// `GOARCH` tags. Build tags containing the word `ignore` are
+    /// conventionally considered unsatisfiable and thus resolve to `false`. All
+    /// build tags are derived from `//go:build` constraints, legacy `// +build`
+    /// directives, or `GOOS`/`GOARCH`-form file names suffixes.
+    ///
     /// # Errors
     ///
     /// If any parsing errors are reported, analysis is aborted and the
