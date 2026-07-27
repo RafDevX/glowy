@@ -291,10 +291,11 @@ impl Analyzer {
     /// module path (via a `module` directive).
     ///
     /// The specified directory is traversed recursively and all files with a
-    /// `.go` extension are collected, except those with a `_test.go` suffix
-    /// (unless the [`AnalysisConfig::include_tests`] option is enabled). Only
-    /// real files and directories are considered: symlinks, for example, are
-    /// ignored, since they could lead to cycles.
+    /// `.go` extension are collected, except those below `vendor`/`testdata`
+    /// directories, as well as those with a `_test.go` suffix (unless the
+    /// [`AnalysisConfig::include_tests`] option is enabled). Only real files
+    /// and directories are considered: symlinks, for example, are ignored,
+    /// since they could lead to cycles.
     ///
     /// If a subdirectory of the provided module directory is found to contain a
     /// nested `go.mod`, then that subdirectory is considered a separate
@@ -485,9 +486,9 @@ impl Analyzer {
                 reason = "Symlinks currently unsupported (could lead to cycles)"
             )]
             if file_type.is_dir() {
-                if file_name.to_str() == Some("testdata") {
-                    // the `go` tool ignores any directory whose name is exactly
-                    // "testdata", so we also ignore them here
+                if matches!(file_name.to_str(), Some("testdata" | "vendor")) {
+                    // the `go` tool ignores these directories when recursively
+                    // matching packages, so we also ignore them here
                     continue;
                 }
 

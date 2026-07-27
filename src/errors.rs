@@ -42,7 +42,7 @@ pub fn get_structured_error_info<'a>(
             ),
         },
         AnalysisErrorKind::TooManyBuildPermutations { limit, found } => StructuredErrorInfo {
-            title: format!("too many distinct build permutations: {found} > limit {limit}",).into(),
+            title: format!("too many distinct build permutations: {found} > limit {limit}").into(),
             code: "C002".into(),
             snippets: vec![],
             help: Some("consider raising the configured `max_build_permutations`"),
