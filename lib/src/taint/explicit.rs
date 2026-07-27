@@ -72,6 +72,11 @@ fn visit_binding_decl_spec<'a>(
         // (branch label is irrelevant in this case)
 
         for name in &node.ids {
+            if name.content() == "_" {
+                // blank identifier
+                continue;
+            }
+
             let pinned = ctx.pin(*name);
             let value = ValueRef::new_bottom(
                 pinned.pinned_location(),
