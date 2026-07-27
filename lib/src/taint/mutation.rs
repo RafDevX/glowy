@@ -851,66 +851,122 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
             return;
         }
 
+        if self.base.root_operand().is_none() {
+            // a selector on a non-addressable expression is nevertheless
+            // assignable when the expression yields a pointer to a struct:
+            // Go implicitly dereferences that pointer for the field access.
+            // we thus evaluate the base exactly once, both to preserve call
+            // side effects and to retain the returned value's shared identity
+            let target = exprs::visit_single_expr(ctx, &self.base);
+
+            if !selection_base_may_expose_mutable_storage(&target) {
+                ctx.report_error(AnalysisErrorKind::InvalidLeftValue {
+                    location: self.location.clone(),
+                });
+
+                return;
+            }
+
+            let _ = mutate_selected_field(ctx, self, target, mutator);
+
+            return;
+        }
+
         #[expect(
             clippy::shadow_unrelated,
             reason = "Same context, just threaded through closures"
         )]
         self.base
             .mutate_target(ctx, assignment_location, &|ctx, target| {
-                let selector = self.selector.content().to_owned();
-
-                // resolve the field's static metadata (shape hint + tag) before
-                // `as_struct_mut` has the chance to upgrade `target`
-                let field = target
-                    .declared_type()
-                    .and_then(|r#type| r#type.lookup_promoted_field(&selector));
-
-                let field_hint = field
-                    .as_ref()
-                    .map(PromotedField::field_info)
-                    .and_then(FieldShapeHint::for_field);
-
-                let field_tag_backtrace = field
-                    .as_ref()
-                    .map(PromotedField::field_info)
-                    .and_then(StructFieldInfo::tag_backtrace)
-                    .cloned();
-
-                let Some(mut r#struct) = target.as_struct_mut() else {
-                    ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
-                        location: self.location.clone(),
-                    });
-
-                    return None;
-                };
-
-                let child = r#struct.get_const(&selector, ctx.pin(self.location.clone()));
-
-                if let Some(hint) = field_hint {
-                    hint.try_apply(&child);
-                }
-
-                // fold in the field-tag backtrace (if any) at the access site
-                // so complex assignments (which read `child` before merging)
-                // propagate the label declared by the struct field tag
-                let child = match field_tag_backtrace {
-                    Some(tag) => child.nest_backtrace(
-                        LabelBacktraceKind::Expression,
-                        None,
-                        ctx.pin(self.location.clone()),
-                        [tag],
-                    ),
-                    None => child,
-                };
-
-                let (child, _) = mutator(ctx, child)?;
-
-                r#struct.set_const(selector, child);
-
-                drop(r#struct);
-                Some((target, None))
+                mutate_selected_field(ctx, self, target, mutator)
             });
     }
+}
+
+fn selection_base_may_expose_mutable_storage(base: &ValueRef<'_>) -> bool {
+    let Some(r#type) = base.declared_type() else {
+        // an untyped blackbox result may be a pointer; treating it as such is
+        // the conservative choice for flow analysis (input presumably compile)
+        return true;
+    };
+
+    match r#type.underlying() {
+        // an external placeholder does not reveal whether it is a pointer
+        None => true,
+        Some(TypeKind::Pointer(target)) => {
+            matches!(target.underlying(), None | Some(TypeKind::Struct { .. }))
+        }
+        Some(
+            TypeKind::Opaque
+            | TypeKind::Struct { .. }
+            | TypeKind::Map
+            | TypeKind::Slice
+            | TypeKind::Array
+            | TypeKind::Channel
+            | TypeKind::Interface
+            | TypeKind::Function,
+        ) => false,
+    }
+}
+
+fn mutate_selected_field<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    selection: &SelectionNode<'a>,
+    target: ValueRef<'a>,
+    mutator: &dyn Fn(&mut AnalysisContext<'a>, ValueRef<'a>) -> MutationResult<'a>,
+) -> MutationResult<'a> {
+    let selector = selection.selector.content().to_owned();
+
+    // resolve the field's static metadata (shape hint + tag) before
+    // `as_struct_mut` has the chance to upgrade `target`
+    let field = target
+        .declared_type()
+        .and_then(|r#type| r#type.lookup_promoted_field(&selector));
+
+    let field_hint = field
+        .as_ref()
+        .map(PromotedField::field_info)
+        .and_then(FieldShapeHint::for_field);
+
+    let field_tag_backtrace = field
+        .as_ref()
+        .map(PromotedField::field_info)
+        .and_then(StructFieldInfo::tag_backtrace)
+        .cloned();
+
+    let Some(mut r#struct) = target.as_struct_mut() else {
+        ctx.report_error(AnalysisErrorKind::InvalidSelectionBase {
+            location: selection.location.clone(),
+        });
+
+        return None;
+    };
+
+    let child = r#struct.get_const(&selector, ctx.pin(selection.location.clone()));
+
+    if let Some(hint) = field_hint {
+        hint.try_apply(&child);
+    }
+
+    // fold in the field-tag backtrace (if any) at the access site so complex
+    // assignments (which read `child` before merging) propagate the label
+    // declared by the struct field tag
+    let child = match field_tag_backtrace {
+        Some(tag) => child.nest_backtrace(
+            LabelBacktraceKind::Expression,
+            None,
+            ctx.pin(selection.location.clone()),
+            [tag],
+        ),
+        None => child,
+    };
+
+    let (child, _) = mutator(ctx, child)?;
+
+    r#struct.set_const(selector, child);
+
+    drop(r#struct);
+    Some((target, None))
 }
 
 // coarse-grained hint about the shape a struct field's declared type imposes
