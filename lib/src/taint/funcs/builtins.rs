@@ -261,17 +261,15 @@ pub fn visit_append<'a>(
 
     let location = ctx.pin(node.location.clone());
 
-    if node.args.len() < 2 {
+    let Some(original) = node.args.first() else {
         ctx.report_error(AnalysisErrorKind::IncorrectCallCardinality {
-            expected: 2,
+            expected: 1,
             found: node.args.len(),
             location: node.location.clone(),
         });
 
         return ValueRef::new_bottom(location, None);
-    }
-
-    let original = node.args.first().unwrap(); // already checked length
+    };
 
     capture_arg_const(ctx, original, arg_consts, 0);
 
