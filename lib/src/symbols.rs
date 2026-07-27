@@ -238,6 +238,7 @@ impl<'a> SymbolTable<'a> {
     fn get_symbol_from_scope_chain(
         &self,
         upwards_from: Option<ScopeRef<'a>>,
+        wildcard_imports: &[FullPackagePath],
         name: &str,
     ) -> Option<SymbolRef<'a>> {
         let mut checking = upwards_from;
@@ -256,7 +257,7 @@ impl<'a> SymbolTable<'a> {
         }
 
         if name.chars().next().is_some_and(char::is_uppercase) {
-            for path in &self.current_file_wildcard_imports {
+            for path in wildcard_imports {
                 if let Some(envelope) = self.package_scopes.get(path)
                     && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
                 {
@@ -269,7 +270,12 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn get_symbol(&self, name: &str) -> Option<SymbolRef<'a>> {
-        Self::get_symbol_from_scope_chain(self, Some(Rc::clone(&self.current_scope)), name)
+        Self::get_symbol_from_scope_chain(
+            self,
+            Some(Rc::clone(&self.current_scope)),
+            &self.current_file_wildcard_imports,
+            name,
+        )
     }
 
     pub fn current_lexical_scope(&self) -> LexicalScope<'a> {
@@ -282,32 +288,7 @@ impl<'a> SymbolTable<'a> {
         imports: &FileImportsRecord,
         name: &str,
     ) -> Option<SymbolRef<'a>> {
-        let mut checking = Some(Rc::clone(&scope.0));
-
-        while let Some(scope_ref) = &checking {
-            let borrowed = scope_ref.borrow();
-
-            if let Some(symbol) = borrowed.get_local_symbol(name) {
-                return Some(symbol);
-            }
-
-            let parent = borrowed.parent();
-            drop(borrowed);
-
-            checking = parent;
-        }
-
-        if name.chars().next().is_some_and(char::is_uppercase) {
-            for path in imports.wildcard() {
-                if let Some(envelope) = self.package_scopes.get(path)
-                    && let Some(symbol) = envelope.scope.borrow().get_local_symbol(name)
-                {
-                    return Some(symbol);
-                }
-            }
-        }
-
-        self.universe_scope.get_local_symbol(name)
+        Self::get_symbol_from_scope_chain(self, Some(Rc::clone(&scope.0)), imports.wildcard(), name)
     }
 
     pub fn get_symbol_in_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
@@ -315,7 +296,12 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn get_symbol_above_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
-        Self::get_symbol_from_scope_chain(self, self.get_parent_scope(), name)
+        Self::get_symbol_from_scope_chain(
+            self,
+            self.get_parent_scope(),
+            &self.current_file_wildcard_imports,
+            name,
+        )
     }
 
     pub fn get_qualified_symbol(
