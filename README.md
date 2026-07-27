@@ -27,7 +27,9 @@ cd glowy
 cargo run --release -- path/to/go/module
 ```
 
-Add `--strict` to upgrade warnings to errors.
+Add `--strict` to upgrade warnings to errors. If the `GLOWY_VERBOSE` environment
+variable is set, high-level progress information is issued by the underlying
+analyzer to standard output.
 
 Glowy automatically enables its
 [base security policy](.lib/base-security-policy.toml), which recognizes common
