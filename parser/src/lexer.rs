@@ -601,7 +601,11 @@ impl<'a> Lexer<'a> {
                     }
 
                     invalid!(state, lexer);
-                } else if ch.is_ascii_digit() {
+                } else if ch.is_ascii_digit()
+                    || (matches!(state.mode, NumberLexMode::Hex)
+                        && !state.seen_exp
+                        && ch.is_ascii_hexdigit())
+                {
                     state.last_was_digit = true;
                 }
 
