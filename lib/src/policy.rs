@@ -10,7 +10,8 @@ pub(crate) use blanket_directives::{
 };
 use parser::Location;
 pub use targets::{
-    BUILTIN_PACKAGE_PATH, BlanketDirectiveTarget, BlanketSourceArgPredicate, OPERATOR_PACKAGE_PATH,
+    BUILTIN_PACKAGE_PATH, BlanketDirectiveTarget, BlanketDirectiveTargetParseError,
+    BlanketSourceArgPredicate, BlanketSourcePredicateValue, OPERATOR_PACKAGE_PATH,
     OPERATOR_TARGET_NAMES,
 };
 
