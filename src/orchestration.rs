@@ -277,6 +277,13 @@ fn list_dirs_in_dir<P: AsRef<Path>>(path: P) -> impl Iterator<Item = PathBuf> {
             )
         })
         .into_iter()
-        .filter(|entry| entry.file_type().as_ref().is_ok_and(fs::FileType::is_dir))
+        .filter(|entry| match entry.file_type() {
+            Ok(file_type) => file_type.is_dir(),
+            Err(err) => fatal(
+                "IO error occurred while listing the specified directory.",
+                "Do you have permission to access all of its contents?",
+                Some(err),
+            ),
+        })
         .map(|entry| entry.path())
 }
