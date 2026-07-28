@@ -145,7 +145,9 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::unescaped_backticks)]
 
-use std::{borrow::Cow, cmp, collections::HashSet, fmt, path::Path, sync::LazyLock};
+#[cfg(feature = "base-security-policy")]
+use std::collections::HashSet;
+use std::{borrow::Cow, cmp, fmt, path::Path, sync::LazyLock};
 
 pub use analyzer::{Analyzer, AnalyzerFromDirectoryError};
 pub use build_constraints::{DEFAULT_MAX_BUILD_PERMUTATIONS, MAX_ENUMERATED_BUILD_WORLDS};
