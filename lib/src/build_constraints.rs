@@ -117,6 +117,13 @@ impl<'a> ActiveTags<'a> {
 
     pub fn contains(&self, tag: &str) -> bool {
         self.0.contains(tag)
+            || match tag {
+                // special handling per Go tool convention
+                "linux" => self.0.contains("android"),
+                "solaris" => self.0.contains("illumos"),
+                "darwin" => self.0.contains("ios"),
+                _ => false,
+            }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &'a str> {
