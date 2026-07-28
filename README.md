@@ -32,7 +32,7 @@ variable is set, high-level progress information is issued by the underlying
 analyzer to standard output.
 
 Glowy automatically enables its
-[base security policy](.lib/base-security-policy.toml), which recognizes common
+[base security policy](./lib/base-security-policy.toml), which recognizes common
 secret sources, untrusted input, and disclosure sinks. It is deliberately based
 on heuristics and just a starting point, not a security guarantee.
 
@@ -114,7 +114,7 @@ cargo run --release -- base-security-policy --eject
 
 ## Correctness Benchmarks
 
-This repository includes a directory [`ifc-benchmarks/`](/.ifc-benchmarks) which
+This repository includes a directory [`ifc-benchmarks/`](./ifc-benchmarks) which
 contains several Go modules illustrating how to provide annotations and what
 kinds of features are supported by the analyzer. These examples may be fed
 directly as input to the tool, and in fact double as tests to the analyzer which
@@ -130,7 +130,7 @@ them as safe.
 The (currently known) chief analyzer soundness gaps are described in
 [`OUT_OF_SCOPE.md`](./OUT_OF_SCOPE.md), with some of them being illustrated by
 the modules in the dedicated benchmarks suite
-[`ifc-benchmarks/suite-x-failures`](ifc-benchmarks/suite-x-failures). These
+[`ifc-benchmarks/suite-x-failures`](./ifc-benchmarks/suite-x-failures). These
 cover difficult cases involving assignment-order, aliasing/mutation,
 dynamic-dispatch, and concurrency, among others.
 
