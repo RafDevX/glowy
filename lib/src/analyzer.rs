@@ -176,6 +176,13 @@ impl Analyzer {
     /// [`Analyzer::from_directory`] constructor automatically invokes this
     /// constructor if a `glowy.toml` file is found in the project root.
     #[cfg_attr(
+        not(feature = "base-security-policy"),
+        expect(
+            rustdoc::broken_intra_doc_links,
+            reason = "Describe feature-specific API functionality"
+        )
+    )]
+    #[cfg_attr(
         feature = "base-security-policy",
         expect(
             clippy::missing_panics_doc,
@@ -260,6 +267,7 @@ impl Analyzer {
     /// [`Analyzer::from_directory`] if a `glowy.toml` file is found in the
     /// project root.
     #[cfg(feature = "toml-config")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "toml-config")))]
     #[inline]
     pub fn new_with_config_file<P: AsRef<path::Path>>(
         module_base: &str,
@@ -324,6 +332,13 @@ impl Analyzer {
     ///
     /// # Ok::<(), glowy::AnalyzerFromDirectoryError>(())
     /// ```
+    #[cfg_attr(
+        not(feature = "toml-config"),
+        expect(
+            rustdoc::broken_intra_doc_links,
+            reason = "Describe feature-specific API functionality"
+        )
+    )]
     #[inline]
     pub fn from_directory<P: AsRef<path::Path>>(
         path: P,
@@ -1324,6 +1339,7 @@ pub enum AnalyzerFromDirectoryError {
     /// its contents do not adhere to the structure expected by Glowy in order
     /// to unmarshall them into an instance of [`AnalysisConfig`].
     #[cfg(feature = "toml-config")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "toml-config")))]
     ConfigFileDeserializationFailure(toml::de::Error),
 }
 

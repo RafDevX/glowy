@@ -140,6 +140,7 @@
 // Documentation lint configuration
 #![warn(missing_docs)]
 #![deny(rustdoc::all)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "base-security-policy")]
 use std::collections::HashSet;
@@ -254,7 +255,17 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 /// to automatically populate default configuration values when manually
 /// constructing an instance and the invoker only wishes to partially specify
 /// configuration preferences.
-#[expect(clippy::struct_excessive_bools, reason = "Independent options")]
+#[cfg_attr(
+    not(feature = "toml-config"),
+    expect(
+        rustdoc::broken_intra_doc_links,
+        reason = "Describe feature-specific API functionality"
+    )
+)]
+#[cfg_attr(
+    feature = "base-security-policy",
+    expect(clippy::struct_excessive_bools, reason = "Independent options")
+)]
 #[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
 pub struct AnalysisConfig {
     /// Whether to output more detailed status information during the analysis.
@@ -282,6 +293,7 @@ pub struct AnalysisConfig {
     /// Defaults to `true`, but is only present with Cargo feature
     /// `base-security-policy` enabled (which it is, by default).
     #[cfg(feature = "base-security-policy")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "base-security-policy")))]
     pub inherit_base_policy: bool,
     /// Targets for which blanket directives in Glowy's base policy are ignored.
     ///
@@ -298,6 +310,7 @@ pub struct AnalysisConfig {
     /// Alternatively, the entire base security policy can be disabled by
     /// setting [`AnalysisConfig::inherit_base_policy`] to `false`.
     #[cfg(feature = "base-security-policy")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "base-security-policy")))]
     pub excluded_base_blanket_directives: HashSet<BlanketDirectiveTarget>,
     /// Targets universally recognized as blanket information sources.
     ///

@@ -36,6 +36,7 @@ mod targets;
 ///
 /// [ACibp]: crate::AnalysisConfig::inherit_base_policy
 #[cfg(feature = "base-security-policy")]
+#[cfg_attr(docsrs, doc(cfg(feature = "base-security-policy")))]
 pub const BASE_SECURITY_POLICY: &str = include_str!("../base-security-policy.toml");
 
 /// Structured information representing a declared sink.
