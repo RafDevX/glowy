@@ -68,14 +68,18 @@ fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a
     // discard the returned value: any potential errors are reported later in
     // the analysis process, for now we just want to try registering all imports
 
-    let _ = ctx.register_import_spec(
-        node.identifier
-            .as_ref()
-            .map(parser::Span::content)
-            .map(str::to_owned),
-        node.path.clone(),
-        true,
-    );
+    let qualifier = node
+        .identifier
+        .as_ref()
+        .map(parser::Span::content)
+        .map(str::to_owned);
+
+    if qualifier.as_deref() == Some("_") {
+        // blank identifier; skip
+        return;
+    }
+
+    let _ = ctx.register_import_spec(qualifier, node.path.clone(), true);
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
