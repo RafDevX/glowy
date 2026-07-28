@@ -580,15 +580,15 @@ impl<'a> SymbolTable<'a> {
         // but we only support a few here (it is unlikely that real package
         // names have dash-separated tags because Go privileges one-word names)
         native_name
-            .strip_prefix("go-")
-            .or_else(|| native_name.strip_suffix("-go"))
+            .strip_suffix(".go")
             .or_else(|| native_name.strip_prefix("golang-"))
             .or_else(|| native_name.strip_suffix("-golang"))
             .or_else(|| native_name.strip_prefix("lib-"))
             .or_else(|| native_name.strip_suffix("-lib"))
             .or_else(|| native_name.strip_prefix("sdk-go-"))
             .or_else(|| native_name.strip_suffix("-sdk-go"))
-            .or_else(|| native_name.strip_suffix(".go"))
+            .or_else(|| native_name.strip_prefix("go-"))
+            .or_else(|| native_name.strip_suffix("-go"))
             .filter(|stripped| !stripped.is_empty())
             .unwrap_or(native_name)
             .to_owned()
