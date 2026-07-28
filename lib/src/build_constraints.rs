@@ -6,11 +6,41 @@ use std::{
 
 use parser::ast::{BuildConstraintExprNode, SourceFileNode};
 
+use crate::errors::AnalysisErrorKind;
+
+/// Upper cap on the number of build constraint worlds to enumerate.
+///
+/// This applies after obviously-nonsensical worlds have been filtered out (for
+/// example, worlds where both `windows` and `linux` are satisfied at once).
+///
+/// However, the number of worlds necessarily does not take into account the
+/// duplicate final sets of ultimately admitted files, since this limit is
+/// checked pre-enumeration. This means that it is possible (yet unlikely) that
+/// a significant share of worlds would have collapsed into a much more
+/// manageable number of permutations, potentially even of a sufficiently low
+/// number that the maximum permutations limit would not be triggered (see
+/// [`DEFAULT_MAX_BUILD_PERMUTATIONS`]). Nevertheless, the inherent process of
+/// obtaining that result (enumerating and deduplicating) would take an
+/// extraordinary amount of time, extending virtually forever and greatly
+/// surpassing even the associated hypothetical analysis time.
+///
+/// Since `N` calculated build tag dimensions corresponds to `2^N` worlds, the
+/// present limit of `2^20` allows for roughly 20 build tag dimensions,
+/// depending on architecture/compiler tag prevalence. The theoretical maximum
+/// value for this cap is [`usize::MAX`], roughly corresponding to approximately
+/// 64 dimensions (or 32 on 32-bit systems), but that would lead to an enormous
+/// enumeration time, making run time virtually infinite.
+pub const MAX_ENUMERATED_BUILD_WORLDS: usize = 1 << 20;
+
 /// Default cap on the number of distinct build permutations to analyze.
 ///
 /// This applies after permutation deduplication, i.e., it only counts once any
 /// number of build-tag constraints which collapse to the same set of ultimately
 /// admitted files.
+///
+/// The present build permutations limit is only applied after a more liberal
+/// (but less precise) [`MAX_ENUMERATED_BUILD_WORLDS`] cap is checked prior to
+/// world enumeration and deduplication.
 ///
 /// Anything larger than 256 worlds is impractical and is well past anything
 /// observed in the vast majority of real-world Go projects.
@@ -139,7 +169,7 @@ impl fmt::Display for ActiveTags<'_> {
 pub fn enumerate_build_permutations<'a>(
     parsed: &BTreeMap<&'a path::Path, SourceFileNode<'a>>,
     max_permutations: usize,
-) -> Result<Vec<BuildPermutation<'a>>, usize> {
+) -> Result<Vec<BuildPermutation<'a>>, Box<AnalysisErrorKind<'a>>> {
     // start by removing from the pool entirely all the files whose build
     // constraint can never be satisfied because it requires a conventional
     // ignore tag, which should only be required by files that ought never be
@@ -155,50 +185,118 @@ pub fn enumerate_build_permutations<'a>(
         .collect();
 
     let mentioned = collect_mentioned_tags(not_ignored.iter().map(|(p, a)| (*p, *a)));
-    let free_dims: Vec<&'a str> = mentioned.iter().copied().collect();
+
+    // we know that GOOS/GOARCH/compiler tags each allow only at most one value
+    // at a time (e.g., `linux && windows` is invalid), so we are free to
+    // discard all permutation worlds where e.g. several architectures/compilers
+    // are being targeted at once. to do that effectively, we have to partition
+    // the mentioned tags into 4 different groups to treat them differently
+    let mut ordinary_dims = vec![];
+    let mut goos_dims = vec![];
+    let mut goarch_dims = vec![];
+    let mut compiler_dims = vec![];
+
+    for tag in mentioned {
+        if is_known_goos(tag) {
+            goos_dims.push(tag);
+        } else if is_known_goarch(tag) {
+            goarch_dims.push(tag);
+        } else if is_known_compiler(tag) {
+            compiler_dims.push(tag);
+        } else {
+            ordinary_dims.push(tag);
+        }
+    }
+
+    // 2^ordinary_dimensions x SUM_i(special_i_dimensions + 1)
+    // (the +1 comes from None, where e.g. files included for all architectures)
+    let considered_worlds = ordinary_dims
+        .len()
+        .try_into()
+        .ok()
+        .and_then(|ordinary| 2_usize.checked_pow(ordinary))
+        .and_then(|count| count.checked_mul(goos_dims.len() + 1))
+        .and_then(|count| count.checked_mul(goarch_dims.len() + 1))
+        .and_then(|count| count.checked_mul(compiler_dims.len() + 1));
+
+    if considered_worlds.is_none_or(|n| n > MAX_ENUMERATED_BUILD_WORLDS) {
+        return Err(Box::new(AnalysisErrorKind::TooManyEnumerableBuildWorlds {
+            found: considered_worlds,
+            found_formula: format!(
+                "(2^D_Ordinary) * (D_GOOS + 1) * (D_GOARCH + 1) * (D_Compiler + 1) = (2^{}) * {} \
+                 * {} * {}",
+                ordinary_dims.len(),
+                (goos_dims.len() + 1),
+                (goarch_dims.len() + 1),
+                (compiler_dims.len() + 1)
+            ),
+        }));
+    }
 
     let mut buckets: HashMap<BTreeSet<&'a path::Path>, BTreeSet<ActiveTags<'a>>> = HashMap::new();
-    let mut enabled = vec![false; free_dims.len()];
+    let mut ordinary_enabled = vec![false; ordinary_dims.len()];
     // ^ we don't use a numeric bitmask to avoid potential problems with
     // overflow if there are more than 64 tags before deduplication
 
+    // since there is only one of each of these active at a time, we don't need
+    // a mask, just a selection index is sufficient for them
+    let mut goos_choice: usize = 0;
+    let mut goarch_choice: usize = 0;
+    let mut compiler_choice: usize = 0;
+
     loop {
-        let world: Vec<&'a str> = free_dims
+        let world = ordinary_dims
             .iter()
-            .zip(&enabled)
+            .zip(&ordinary_enabled)
             .filter(|(_, enabled)| **enabled)
             .map(|(tag, _)| *tag)
+            // checked_sub(1) means that choice 0 = None, and all other choices
+            // become 1-based indexes of their respective dimension vectors
+            .chain(goos_choice.checked_sub(1).map(|index| goos_dims[index]))
+            .chain(goarch_choice.checked_sub(1).map(|index| goarch_dims[index]))
+            .chain(
+                compiler_choice
+                    .checked_sub(1)
+                    .map(|index| compiler_dims[index]),
+            );
+
+        let tags = ActiveTags::new(world);
+
+        let admitted: BTreeSet<&'a path::Path> = not_ignored
+            .iter()
+            .filter(|(path, ast)| tags.admits_file(path, ast))
+            .map(|(path, _)| *path)
             .collect();
 
-        if world.iter().filter(|tag| is_known_goos(tag)).count() > 1
-            || world.iter().filter(|tag| is_known_goarch(tag)).count() > 1
-            || world.iter().filter(|tag| is_known_compiler(tag)).count() > 1
-        {
-            // we know that these values only allow at most one of them at a
-            // time, so we are free to discard all permutation worlds where
-            // e.g. multiple architectures/compilers are being targeted at once
-        } else {
-            let tags = ActiveTags::new(world.iter().copied());
-
-            let admitted: BTreeSet<&'a path::Path> = not_ignored
-                .iter()
-                .filter(|(path, ast)| tags.admits_file(path, ast))
-                .map(|(path, _)| *path)
-                .collect();
-
-            if !admitted.is_empty() {
-                buckets.entry(admitted).or_default().insert(tags);
-            }
+        if !admitted.is_empty() {
+            buckets.entry(admitted).or_default().insert(tags);
         }
 
-        if !advance_assignment(&mut enabled) {
-            break;
+        if advance_assignment(&mut ordinary_enabled) {
+            continue;
         }
+
+        if advance_choice(&mut goos_choice, goos_dims.len()) {
+            continue;
+        }
+
+        if advance_choice(&mut goarch_choice, goarch_dims.len()) {
+            continue;
+        }
+
+        if advance_choice(&mut compiler_choice, compiler_dims.len()) {
+            continue;
+        }
+
+        break;
     }
 
     // we only check against the limit so we can report an accurate "real" count
     if buckets.len() > max_permutations {
-        return Err(buckets.len());
+        return Err(Box::new(AnalysisErrorKind::TooManyBuildPermutations {
+            limit: max_permutations,
+            found: buckets.len(),
+        }));
     }
 
     let mut ordered: Vec<_> = buckets
@@ -223,6 +321,20 @@ fn advance_assignment(enabled: &mut [bool]) -> bool {
     }
 
     false
+}
+
+fn advance_choice(choice: &mut usize, maximum: usize) -> bool {
+    if *choice < maximum {
+        *choice += 1;
+
+        true
+    } else {
+        // already at maximum, so wrap around
+
+        *choice = 0;
+
+        false
+    }
 }
 
 pub fn always_active_tags<'a>(perms: &[BuildPermutation<'a>]) -> BTreeSet<&'a str> {

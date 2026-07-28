@@ -71,6 +71,27 @@ pub enum AnalysisErrorKind<'a> {
     /// analyzer, potentially with distinct content.
     DuplicateVirtualFilePath,
 
+    /// Enumerable build worlds exceed the maximum permitted limit.
+    ///
+    /// Build worlds, based on declared build-tag constraints derived from
+    /// `//go:build` (or `// +build`) directives or filename suffixes,
+    /// correspond to different possibilities that need to be enumerated and
+    /// exhaustively investigated so that they can later be deduplicated by
+    /// their calculated effective set of admitted files.
+    ///
+    /// When more worlds are set to be enumerated than the
+    /// [`MAX_ENUMERATED_BUILD_WORLDS`](crate::MAX_ENUMERATED_BUILD_WORLDS)
+    /// limit, analysis aborts so the invoker can refine the corpus into a more
+    /// manageable set of files.
+    ///
+    /// The file path associated with this error is irrelevant and should be
+    /// ignored.
+    TooManyEnumerableBuildWorlds {
+        /// Exact number of worlds found, if representable by a [`usize`].
+        found: Option<usize>,
+        /// Textual representation of the formula corresponding to `found`.
+        found_formula: String,
+    },
     /// Distinct build permutations exceed the configured limit.
     ///
     /// Permutations, based on declared build-tag constraints derived from
@@ -86,7 +107,7 @@ pub enum AnalysisErrorKind<'a> {
     TooManyBuildPermutations {
         /// Configured maximum that was exceeded.
         limit: usize,
-        /// Number of distinct permutations found.
+        /// Exact number of distinct permutations found.
         found: usize,
     },
 
@@ -431,9 +452,9 @@ impl AnalysisErrorKind<'_> {
 
             Self::UnsoundFunctionMergingAssignment { .. } => AnalysisErrorCategory::UnsupportedGo,
 
-            Self::DuplicateVirtualFilePath | Self::TooManyBuildPermutations { .. } => {
-                AnalysisErrorCategory::Misconfiguration
-            }
+            Self::DuplicateVirtualFilePath
+            | Self::TooManyEnumerableBuildWorlds { .. }
+            | Self::TooManyBuildPermutations { .. } => AnalysisErrorCategory::Misconfiguration,
 
             Self::UnknownAnnotationDirective { .. } => AnalysisErrorCategory::UnrecognizedFeature,
 

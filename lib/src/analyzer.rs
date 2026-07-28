@@ -893,13 +893,10 @@ impl Analyzer {
 
         let build_permutations = match build_permutations {
             Ok(build_permutations) => build_permutations,
-            Err(found) => {
+            Err(kind) => {
                 return Err(vec![AnalysisError {
                     file: path::Path::new("/main.go"), // should never be used
-                    kind: AnalysisErrorKind::TooManyBuildPermutations {
-                        limit: self.max_build_permutations,
-                        found,
-                    },
+                    kind: *kind,
                 }]);
             }
         };

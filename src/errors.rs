@@ -41,9 +41,30 @@ pub fn get_structured_error_info<'a>(
                 "another file with this virtual path had already been registered to the analyzer",
             ),
         },
+        AnalysisErrorKind::TooManyEnumerableBuildWorlds {
+            found,
+            found_formula,
+        } => {
+            let found_str = if let Some(found) = found {
+                format!(" = {found}")
+            } else {
+                String::new()
+            };
+
+            StructuredErrorInfo {
+                title: format!(
+                    "too many enumerable build worlds: {found_formula}{found_str} > limit {}",
+                    glowy::MAX_ENUMERATED_BUILD_WORLDS
+                )
+                .into(),
+                code: "C002".into(),
+                snippets: vec![],
+                help: Some("consider refining the files corpus to limit build tag dimensions"),
+            }
+        }
         AnalysisErrorKind::TooManyBuildPermutations { limit, found } => StructuredErrorInfo {
             title: format!("too many distinct build permutations: {found} > limit {limit}").into(),
-            code: "C002".into(),
+            code: "C003".into(),
             snippets: vec![],
             help: Some("consider raising the configured `max_build_permutations`"),
         },

@@ -148,7 +148,7 @@
 use std::{borrow::Cow, cmp, collections::HashSet, fmt, path::Path, sync::LazyLock};
 
 pub use analyzer::{Analyzer, AnalyzerFromDirectoryError};
-pub use build_constraints::DEFAULT_MAX_BUILD_PERMUTATIONS;
+pub use build_constraints::{DEFAULT_MAX_BUILD_PERMUTATIONS, MAX_ENUMERATED_BUILD_WORLDS};
 pub use files::SourceFile;
 use indexmap::IndexMap;
 pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
