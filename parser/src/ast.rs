@@ -531,8 +531,17 @@ pub enum LiteralNode<'a> {
 }
 
 /// Wrapper for f64 to support Eq and Ord
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct OrderedF64(pub f64);
+
+// we cannot derive this because f64's PartialEq has explicitly different
+// behavior to f64::total_cmp (which is what we use for Ord)
+impl PartialEq for OrderedF64 {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
 
 impl Eq for OrderedF64 {}
 
