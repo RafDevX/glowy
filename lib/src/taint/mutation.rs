@@ -898,6 +898,7 @@ fn selection_base_may_expose_mutable_storage(base: &ValueRef<'_>) -> bool {
         }
         Some(
             TypeKind::Opaque
+            | TypeKind::Named(_)
             | TypeKind::Struct { .. }
             | TypeKind::Map
             | TypeKind::Slice
@@ -1004,6 +1005,7 @@ impl FieldShapeHint {
             TypeKind::Map
             | TypeKind::Function
             | TypeKind::Opaque
+            | TypeKind::Named(_)
             | TypeKind::Interface
             | TypeKind::Pointer(_) => None,
         }

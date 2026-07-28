@@ -20,6 +20,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt, iter, mem,
     path::Path,
+    ptr,
     rc::Rc,
     sync::LazyLock,
 };
@@ -80,7 +81,7 @@ mod promotion;
 /// [`Some`] holding [`TypeKind::Opaque`], as the first case means we know
 /// nothing about the type (we have never seen its declaration, so it might
 /// refer to some foreign type), while the latter case means we did see its
-/// declaration and know that it is part of a chain (`type Wrapper SomeType`).
+/// declaration but could not resolve its shape.
 ///
 /// A placeholder can be promoted to Known in place: [`Self::underlying`] is
 /// backed by a [`OnceCell`], so filling it does not require reallocating the
@@ -134,6 +135,32 @@ impl<'a> TypeInfo<'a> {
 
     pub fn is_external(&self) -> bool {
         self.underlying().is_none()
+    }
+
+    pub fn may_have_struct_underlying(&self) -> bool {
+        let mut current = self;
+        let mut visited = HashSet::new();
+
+        loop {
+            if !visited.insert(ptr::from_ref(current)) {
+                // cycles are rejected conservatively
+                return false;
+            }
+
+            match current.underlying() {
+                None | Some(TypeKind::Struct { .. }) => return true,
+                Some(TypeKind::Named(inner) | TypeKind::Pointer(inner)) => current = inner,
+                Some(
+                    TypeKind::Opaque
+                    | TypeKind::Map
+                    | TypeKind::Slice
+                    | TypeKind::Array
+                    | TypeKind::Channel
+                    | TypeKind::Interface
+                    | TypeKind::Function,
+                ) => return false,
+            }
+        }
     }
 
     fn promote(&self, underlying: TypeKind<'a>) {
@@ -258,9 +285,12 @@ impl fmt::Debug for TypeInfo<'_> {
 
 #[derive(Debug)]
 pub enum TypeKind<'a> {
-    // built-in types (`int`, `string`, ...), defined-type chain
-    // (`type Wrapper Other`), or otherwise anything opaque to analysis
+    // built-in types (`int`, `string`, ...), or otherwise anything with a shape
+    // that could not be resolved (opaque to analysis)
     Opaque,
+    // an underlying named type (`type Wrapper Other`); kept distinct from
+    // Opaque so its recursively-defined underlying shape remains observable
+    Named(Rc<TypeInfo<'a>>),
     Struct {
         // IndexMap preserves declaration order upon iteration
         fields: IndexMap<&'a str, StructFieldInfo<'a>>,
@@ -590,7 +620,9 @@ impl<'a> TypeRegistry<'a> {
         current_file: &'a Path,
     ) -> TypeKind<'a> {
         match node {
-            TypeNode::Name(_) => TypeKind::Opaque,
+            TypeNode::Name(_) => self
+                .resolve(symtab, node)
+                .map_or(TypeKind::Opaque, TypeKind::Named),
             TypeNode::Pointer { base } => match self.resolve(symtab, base) {
                 Some(info) => TypeKind::Pointer(info),
                 None => TypeKind::Opaque,

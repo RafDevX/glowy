@@ -111,12 +111,11 @@ pub fn visit_selection_with_base<'a>(
     let struct_shape_plausible = base
         .declared_type()
         .map(AsRef::as_ref)
-        .map(TypeInfo::strip_pointers)
-        .and_then(TypeInfo::underlying)
-        .is_none_or(|kind| matches!(kind, TypeKind::Struct { .. }));
+        .is_none_or(TypeInfo::may_have_struct_underlying);
     // ^^^ we treat this as plausibly a struct when the base's shape is
-    // unknown to us (no declared type, or an external placeholder), and also
-    // when we do know it's a struct; otherwise upgrading would be known wrong
+    // unknown to us (no declared type, an external placeholder, or a named
+    // underlying chain ending in one), and also when we know it's a struct;
+    // otherwise upgrading would be known wrong
 
     // directives that depend on call semantics demonstrate that this is not a
     // field access. unconditional sources/revocations are deliberately omitted
