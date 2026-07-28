@@ -2,7 +2,7 @@ use std::{borrow::Cow, iter, rc::Rc};
 
 use parser::{
     Location, Span,
-    ast::{CallNode, ExprNode, FunctionSignatureNode, TypeNode},
+    ast::{CallNode, ExprNode, TypeNode},
 };
 
 use crate::{
@@ -142,34 +142,6 @@ pub fn apply_call<'a>(
         }
     }
 
-    let Some(outcome) = func.outcome() else {
-        // we don't have a known implementation of this function, so we must
-        // treat it as a blackbox and assume the label of all its outputs is the
-        // union of the label of all its inputs; we can't do anything fancy
-
-        let mut result = visit_blackbox_call(
-            ctx,
-            func,
-            &with_backtraces_ref,
-            &call_location,
-            func.signature(),
-        );
-
-        add_yield_feedback(yield_owner.as_ref(), &call_location, &mut result);
-        apply_call_blanket_sources(func, &arg_consts, &call_location, &mut result);
-        apply_call_blanket_revocations(func, &arg_consts, &mut result);
-
-        return result;
-    };
-
-    // by this point, we know `func.outcome()` is `Some`, which means we have
-    // an implementation for it (i.e., we have access to the function's source
-    // code and we have analyzed it) -- given this information, there should be
-    // no possibility that we don't have the function's declaration, so we
-    // must know its signature, meaning that `ids` will be Some, and this unwrap
-    // will never panic if all assumptions hold
-    let ids = ids.unwrap();
-
     let receiver = match &method_receiver_value {
         // method-form call: reuse the receiver value we already evaluated up
         // top, taint and all
@@ -188,29 +160,77 @@ pub fn apply_call<'a>(
         None => None,
     };
 
-    let capture_concretes = captures::call_site::apply_capture_mutations_and_derive_concretes(
-        ctx,
-        func,
-        &with_backtraces_ref,
-        &call_location,
-    );
-
-    let call_realization = CallRealization {
-        receiver: receiver.as_ref().map(Option::as_ref),
-        ids: &ids,
-        args: &with_backtraces_ref,
-        capture_concretes: &capture_concretes,
-        location: &call_location,
+    let capture_concretes = if func.signature().is_some() {
+        Some(
+            captures::call_site::apply_capture_mutations_and_derive_concretes(
+                ctx,
+                func,
+                &with_backtraces_ref,
+                &call_location,
+            ),
+        )
+    } else {
+        None
     };
 
-    #[rustfmt::skip]
-    let call_branch = super::calc_effective_call_site_branch_backtrace_for(
-        ctx,
-        func,
-        &call_location
-    );
+    let call_realization =
+        if let Some((ids, capture_concretes)) = ids.as_ref().zip(capture_concretes.as_ref()) {
+            let call_realization = CallRealization {
+                receiver: receiver.as_ref().map(Option::as_ref),
+                ids,
+                args: &with_backtraces_ref,
+                capture_concretes,
+                location: &call_location,
+            };
 
-    handle_deferred_checks(ctx, func, &call_realization, call_branch.as_ref(), None);
+            #[rustfmt::skip]
+            let call_branch = super::calc_effective_call_site_branch_backtrace_for(
+                ctx,
+                func,
+                &call_location
+            );
+
+            handle_deferred_checks(ctx, func, &call_realization, call_branch.as_ref(), None);
+
+            Some(call_realization)
+        } else {
+            // a completely unknown blackbox has no synthetic slots to realize,
+            // but it may still be a recursively initialized closure with
+            // relevant capture state
+            captures::call_site::apply_capture_write_backs(
+                ctx,
+                func,
+                &with_backtraces_ref,
+                &call_location,
+            );
+
+            None
+        };
+
+    let Some((outcome, call_realization)) = func.outcome().zip(call_realization) else {
+        // we have no known implementation for this function (or at least one
+        // possible implementation is unknown), so we must treat it as a
+        // blackbox and assume the label of all its outputs is the union of the
+        // label of all its inputs
+        //
+        // any known alternatives' summarized side effects and deferred checks
+        // were still applied above
+
+        let mut result = visit_blackbox_call(func, &with_backtraces_ref, &call_location);
+
+        add_yield_feedback(yield_owner.as_ref(), &call_location, &mut result);
+        apply_call_blanket_sources(func, &arg_consts, &call_location, &mut result);
+        apply_call_blanket_revocations(func, &arg_consts, &mut result);
+
+        let should_record_call = !func.deferred_checks().is_empty();
+        drop(value_func);
+
+        if should_record_call && let Some(mut func_mut) = value.as_function_mut() {
+            func_mut.record_call();
+        }
+
+        return result;
+    };
 
     let mut result = calculate_call_result(ctx, func, outcome, &call_realization);
 
@@ -250,19 +270,10 @@ pub fn apply_call<'a>(
 }
 
 fn visit_blackbox_call<'a>(
-    ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     call_location: &Pinned<'a, Location>,
-    signature_hint: Option<&FunctionSignatureNode<'a>>,
 ) -> Vec<ValueRef<'a>> {
-    // note that this case is still possible even if func is a closure, since
-    // e.g. closures can be assigned to previously declared (but not
-    // initialized) variables in an effort to make them self-recursive, as the
-    // whole point of closure capturing is that outer symbols are only really
-    // "evaluated" when the closure is invoked
-    captures::call_site::apply_capture_write_backs(ctx, func, args, call_location);
-
     let bt = LabelBacktrace::fold(
         args.iter()
             .filter_map(|(_, bt)| *bt)
@@ -272,7 +283,7 @@ fn visit_blackbox_call<'a>(
         call_location.clone(),
     );
 
-    let mut result = if let Some(signature) = signature_hint {
+    let mut result = if let Some(signature) = func.signature() {
         // we have a signature, so we know exactly how many values it returns
         // and so can use that known cardinality here
 
@@ -671,7 +682,7 @@ impl<'a> IterableFunctionCall<'a> {
 fn calculate_call_result<'a>(
     ctx: &AnalysisContext<'a>,
     func: &FunctionValue<'a>,
-    outcome: &Vec<ValueRef<'a>>,
+    outcome: &[ValueRef<'a>],
     call: &CallRealization<'_, 'a>,
 ) -> Vec<ValueRef<'a>> {
     let parameter_concretes: Vec<_> = call

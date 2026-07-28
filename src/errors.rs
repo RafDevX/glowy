@@ -522,7 +522,7 @@ pub fn get_structured_error_info<'a>(
         },
 
         AnalysisErrorKind::UnsoundFunctionMergingAssignment { location } => StructuredErrorInfo {
-            title: "unsupported unsound assignment of non-portable function value".into(),
+            title: "unsupported merge of alternative function values".into(),
             code: "U001".into(),
             snippets: vec![
                 builder.snippet().annotate(
@@ -532,9 +532,9 @@ pub fn get_structured_error_info<'a>(
             ],
             help: Some(
                 "this assignment is inside a control-flow split (e.g., an `if`), so the analyzer \
-                 must merge the previous function value into the new one rather than overwrite \
-                 it; discarding the previous value's body-derived analysis information would be \
-                 unsound, so the construct is rejected with prejudice instead",
+                 must preserve both the previous and newly assigned callable behaviors, but their \
+                 signatures, capture storage, or result summaries cannot be represented soundly \
+                 by one single callable summary, so the construct is rejected instead",
             ),
         },
     }

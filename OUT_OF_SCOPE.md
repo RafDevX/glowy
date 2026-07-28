@@ -63,6 +63,9 @@ present document.
 - Branch-merging incompatible function values is recognized as not representable
   under the current single-function-value model and thus unsound (even if valid
   Go and holding a relevant security value), thus yielding an error.
+- Function values returned directly from alternative implementations cannot be
+  merged without losing their callable summaries, so they are rejected, and the
+  same is also true for function values nested inside composite results.
 - Calls to shadowed `make` and `new` are still interpreted as if invoking the
   respectively-named built-in functions, rather than the user-defined shadows.
 

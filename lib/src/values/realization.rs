@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
+};
 
 use crate::{
     labels::{LabelBacktrace, SyntheticSlot},
@@ -14,6 +18,11 @@ enum RealizationKind<'a, 'b> {
     Multiple {
         from_func: &'b FunctionRef<'a>,
         substitutions: &'b [(SyntheticSlot, Option<&'b LabelBacktrace<'a>>)],
+    },
+    Remapping {
+        from_func: &'b FunctionRef<'a>,
+        to_func: &'b FunctionRef<'a>,
+        capture_slots: &'b BTreeMap<usize, usize>,
     },
 }
 
@@ -51,6 +60,25 @@ impl<'a, 'b> UnifiedRealization<'a, 'b> {
         }
     }
 
+    pub(super) fn remap(
+        from_func: &'b FunctionRef<'a>,
+        to_func: &'b FunctionRef<'a>,
+        capture_slots: &'b BTreeMap<usize, usize>,
+    ) -> Self {
+        Self {
+            kind: RealizationKind::Remapping {
+                from_func,
+                to_func,
+                capture_slots,
+            },
+            value_cache: HashMap::new(),
+        }
+    }
+
+    pub(super) fn is_remapping(&self) -> bool {
+        matches!(self.kind, RealizationKind::Remapping { .. })
+    }
+
     pub fn dispatch(&self, backtrace: &LabelBacktrace<'a>) -> Option<LabelBacktrace<'a>> {
         match self.kind {
             RealizationKind::Single {
@@ -62,6 +90,11 @@ impl<'a, 'b> UnifiedRealization<'a, 'b> {
                 from_func,
                 substitutions,
             } => backtrace.realize_all(from_func, substitutions),
+            RealizationKind::Remapping {
+                from_func,
+                to_func,
+                capture_slots,
+            } => Some(backtrace.remap_synthetics(from_func, to_func, capture_slots)),
         }
     }
 

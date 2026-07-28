@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     cmp,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt,
     rc::Rc,
 };
@@ -24,7 +24,8 @@ use crate::{
     symbols::{Symbol, SymbolRef},
     types::{TypeDeclarationContext, TypeInfo},
     values::{
-        BacktraceContainer, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade, ValueRef,
+        BacktraceContainer, Mergeable, SelfAwareBacktraceContainer, SimpleConstValue, Upgrade,
+        ValueRef,
     },
 };
 
@@ -331,52 +332,193 @@ impl<'a> FunctionValue<'a> {
         self.deferred_checks.push(check);
     }
 
-    // try to absorb body-derived analysis state from another function, usually
-    // useful only when this value "shadows" or replaces in some way the other
-    #[must_use = "if false, caller should report a soundness limitation"]
-    pub fn try_absorb_body_state_from(&mut self, other: &Self) -> bool {
-        if other.deferred_checks.is_empty() {
-            // nothing to lose, so trivially sound (nothing to do)
-            return true;
-        }
+    #[must_use = "if false, invoker should report a soundness limitation"]
+    pub fn try_merge_summary_from(
+        &mut self,
+        other: &Self,
+        merge_kind: LabelBacktraceKind,
+        location: &Pinned<'a, Location>,
+    ) -> bool {
+        // a joined summary can only reuse a single call realization when every
+        // slot has the same meaning in both original functions
 
-        if !self.captures.is_empty() || !other.captures.is_empty() {
-            // captured outer symbols from one function definition do not
-            // map onto another's: even if both happen to capture the same
-            // number of symbols, those symbols' Capture(i) slot indices are
-            // assigned independently per closure and so are not portable
+        if !self.is_summary_shape_compatible_with(other) {
             return false;
         }
 
-        if self.receiver_kind != other.receiver_kind {
-            // a missing receiver would leave a Receiver slot without a
-            // counterpart, while differing receiver kinds would change whether
-            // deferred invocation observes mutable referent state
+        let Some(capture_slots) = self.capture_slot_remapping_for(other) else {
             return false;
+        };
+
+        // canonicalizing the incoming summary once keeps every downstream
+        // realization on the ordinary single-function path
+        let mut remapping = super::UnifiedRealization::remap(
+            other.r#ref(),
+            self.r#ref(),
+            // capture slots need an explicit mapping because each closure
+            // allocates them independently
+            &capture_slots,
+        );
+
+        let mut incoming = other.realize_unified(&mut remapping);
+        incoming.remap_capture_indices(&capture_slots);
+
+        self.receiver_kind = merge_receiver_kinds(self.receiver_kind, incoming.receiver_kind);
+
+        if self.signature.is_none() {
+            self.signature.clone_from(&incoming.signature);
         }
 
-        if self
-            .parameter_count()
-            .zip(other.parameter_count())
-            .is_none_or(|(a, b)| a != b)
-        {
-            // mismatching arity means Param(i) slots beyond the smaller
-            // arity have no counterpart, leaving placeholders unrealizable
-            return false;
+        if self.declared_result_types.is_empty() {
+            self.declared_result_types
+                .clone_from(&incoming.declared_result_types);
+        } else {
+            for (left, right) in self
+                .declared_result_types
+                .iter_mut()
+                .zip(&incoming.declared_result_types)
+            {
+                if left.is_none() {
+                    left.clone_from(right);
+                }
+            }
         }
 
-        let from_func = other.r#ref();
-        let to_func = self.r#ref().clone();
+        // if either implementation is unknown, the joined call must keep
+        // blackbox result semantics; body side effects and checks remain
+        // summarized separately below
+        self.outcome = self
+            .outcome
+            .take()
+            .map(Vec::into_iter)
+            .zip(incoming.outcome.as_ref())
+            .map(|(left, right)| {
+                left.zip(right)
+                    .map(|(left, right)| {
+                        left.merge_with(right, merge_kind, Cow::Borrowed(location))
+                    })
+                    .collect()
+            });
 
-        for check in other
-            .deferred_checks()
-            .iter()
-            .map(|check| check.rebind_synthetic_func(from_func, &to_func))
-        {
-            self.defer_check(check);
+        for source in &incoming.sources {
+            self.add_source(source.clone());
+        }
+
+        // a revocation is safe at the join only if every possible callee
+        // applies it, unlike sources and sinks which should be unioned together
+        self.revocations
+            .retain(|revocation| incoming.revocations.contains(revocation));
+
+        for sink in &incoming.sinks {
+            self.add_sink(sink.clone());
+        }
+
+        for check in &incoming.deferred_checks {
+            self.defer_check(check.clone());
+        }
+
+        self.merge_captures_from(&incoming, merge_kind, location);
+
+        for (left, right) in self.yield_acc.iter_mut().zip(&incoming.yield_acc) {
+            *left = LabelBacktrace::combine_options(
+                left.take(),
+                right.clone(),
+                merge_kind,
+                Cow::Borrowed(location),
+            );
+        }
+
+        if self.yield_param.is_none() {
+            self.yield_param = incoming.yield_param;
         }
 
         true
+    }
+
+    fn is_summary_shape_compatible_with(&self, other: &Self) -> bool {
+        let outcomes_are_compatible = || {
+            self.outcome
+                .as_ref()
+                .zip(other.outcome.as_ref())
+                .is_none_or(|(left, right)| left.len() == right.len())
+        };
+
+        // Mergeable deliberately flattens function-shaped values, but doing
+        // that to a returned function would discard its own callable summary,
+        // so we consider it to be unsafe
+        let has_function_outcome = || {
+            self.outcome
+                .iter()
+                .flatten()
+                .chain(other.outcome.iter().flatten())
+                .any(ValueRef::is_function)
+        };
+
+        self.is_type_constructor == other.is_type_constructor
+            && self.declared_underlying_type == other.declared_underlying_type
+            && self.yield_acc.len() == other.yield_acc.len()
+            && signatures_have_compatible_slots(self.signature.as_ref(), other.signature.as_ref())
+            && outcomes_are_compatible()
+            && !has_function_outcome()
+    }
+
+    fn capture_slot_remapping_for(&self, other: &Self) -> Option<BTreeMap<usize, usize>> {
+        let mut captures: Vec<_> = other.captures.iter().collect();
+        captures.sort_unstable_by_key(|(_, binding)| binding.index);
+        // ^^ unstable is fine since indexes should be unique
+
+        let mut next_index = self.captures.len();
+        let mut remapping = BTreeMap::new();
+
+        for (outer_decl, incoming) in captures {
+            let target_index = if let Some(existing) = self.captures.get(outer_decl) {
+                if !existing.can_merge_with(incoming) {
+                    return None;
+                }
+
+                existing.index
+            } else {
+                let index = next_index;
+
+                next_index += 1;
+
+                index
+            };
+
+            remapping.insert(incoming.index, target_index);
+        }
+
+        Some(remapping)
+    }
+
+    fn remap_capture_indices(&mut self, remapping: &BTreeMap<usize, usize>) {
+        #[expect(clippy::iter_over_hash_type, reason = "Independent metadata update")]
+        for binding in self.captures.values_mut() {
+            let mapped = remapping
+                .get(&binding.index)
+                .expect("every capture binding must have a slot remapping");
+
+            binding.index = *mapped;
+        }
+    }
+
+    fn merge_captures_from(
+        &mut self,
+        other: &Self,
+        merge_kind: LabelBacktraceKind,
+        location: &Pinned<'a, Location>,
+    ) {
+        let mut captures: Vec<_> = other.captures.iter().collect();
+        captures.sort_unstable_by_key(|(_, binding)| binding.index);
+        // ^^ unstable is fine since indexes should be unique
+
+        for (outer_decl, other_binding) in captures {
+            if let Some(binding) = self.captures.get_mut(outer_decl) {
+                binding.merge_body_state_from(other_binding, merge_kind, location);
+            } else {
+                self.captures.insert(*outer_decl, other_binding.clone());
+            }
+        }
     }
 
     pub fn parameter_count(&self) -> Option<usize> {
@@ -690,6 +832,38 @@ impl SnapshotAware for FunctionValue<'_> {
     }
 }
 
+fn signatures_have_compatible_slots(
+    left: Option<&FunctionSignatureNode<'_>>,
+    right: Option<&FunctionSignatureNode<'_>>,
+) -> bool {
+    let (Some(left), Some(right)) = (left, right) else {
+        // a missing blackbox signature can be shaped by the known alternative
+        return true;
+    };
+
+    left.result.len() == right.result.len()
+        && left.count_inputs() == right.count_inputs()
+        && left.params.last().is_some_and(|param| param.variadic)
+            == right.params.last().is_some_and(|param| param.variadic)
+}
+
+fn merge_receiver_kinds(
+    left: Option<ReceiverKind>,
+    right: Option<ReceiverKind>,
+) -> Option<ReceiverKind> {
+    match (left, right) {
+        // treating a possible value receiver as a pointer receiver may retain
+        // extra mutable state, but cannot lose a flow
+        (Some(ReceiverKind::Pointer), _) | (_, Some(ReceiverKind::Pointer)) => {
+            Some(ReceiverKind::Pointer)
+        }
+        (Some(ReceiverKind::Value), _) | (_, Some(ReceiverKind::Value)) => {
+            Some(ReceiverKind::Value)
+        }
+        (None, None) => None,
+    }
+}
+
 /// Represents an unambiguous reference to a function declaration.
 ///
 /// Among other uses, this is necessary to guarantee uniqueness of a
@@ -915,8 +1089,65 @@ impl<'a> CaptureBinding<'a> {
         );
     }
 
+    fn can_merge_with(&self, other: &Self) -> bool {
+        match (&self.iteration_cell, &other.iteration_cell) {
+            // closures created by distinct range iterations intentionally hold
+            // different cells but can still be joined by merging cell state
+            (None, None) | (Some(_), Some(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn merge_body_state_from(
+        &mut self,
+        other: &Self,
+        kind: LabelBacktraceKind,
+        location: &Pinned<'a, Location>,
+    ) {
+        merge_symbol_state(&self.local_symbol, &other.local_symbol, kind, location);
+
+        if let (Some(left), Some(right)) = (&self.iteration_cell, &other.iteration_cell)
+            && !Rc::ptr_eq(left, right)
+        {
+            merge_symbol_state(left, right, kind, location);
+        }
+
+        self.hybrid_fallback = match (self.hybrid_fallback.take(), other.hybrid_fallback.clone()) {
+            (Some(left), Some(right)) => Some(LabelBacktrace::combine_options(
+                left,
+                right,
+                kind,
+                Cow::Borrowed(location),
+            )),
+            (left, right) => left.or(right),
+        };
+
+        self.mutation_backtrace = LabelBacktrace::combine_options(
+            self.mutation_backtrace.take(),
+            other.mutation_backtrace.clone(),
+            kind,
+            Cow::Borrowed(location),
+        );
+    }
+
     fn realize_unified<'b>(&self, unified: &mut super::UnifiedRealization<'a, 'b>) -> Self {
         let mut binding = self.clone();
+
+        if unified.is_remapping() {
+            let borrowed = binding.local_symbol.borrow();
+            let value = borrowed.value().get().realize_unified(unified);
+
+            let new_symbol = Symbol::new_ref(
+                borrowed.declared_name(),
+                borrowed.mutable(),
+                value,
+                borrowed.known_const().cloned(),
+            );
+
+            drop(borrowed);
+
+            binding.local_symbol = new_symbol;
+        }
 
         binding.iteration_cell = binding.iteration_cell.map(|symbol| {
             let (declared_name, mutable, current, known_const) = {
@@ -932,7 +1163,7 @@ impl<'a> CaptureBinding<'a> {
 
             let realized = current.realize_unified(unified);
 
-            if realized.snapshot_aware_eq(&current) {
+            if !unified.is_remapping() && realized.snapshot_aware_eq(&current) {
                 // preserve sharing between closures from the same iteration
                 // when this realization has nothing to substitute
                 symbol
@@ -1009,6 +1240,39 @@ impl fmt::Debug for CaptureBinding<'_> {
             .field("mutation_backtrace", &self.mutation_backtrace)
             .finish_non_exhaustive()
     }
+}
+
+fn merge_symbol_state<'a>(
+    left: &SymbolRef<'a>,
+    right: &SymbolRef<'a>,
+    kind: LabelBacktraceKind,
+    location: &Pinned<'a, Location>,
+) {
+    let (left_value, left_const) = {
+        let symbol = left.borrow();
+
+        (symbol.value().get(), symbol.known_const().cloned())
+    };
+
+    let (right_value, right_const) = {
+        let symbol = right.borrow();
+
+        (symbol.value().get(), symbol.known_const().cloned())
+    };
+
+    if left_value.snapshot_aware_eq(&right_value) && left_const == right_const {
+        return;
+    }
+
+    let merged_value = left_value.merge_with(&right_value, kind, Cow::Borrowed(location));
+
+    let merged_const = if left_const == right_const {
+        left_const
+    } else {
+        None
+    };
+
+    left.borrow_mut().set_value(merged_value, merged_const);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

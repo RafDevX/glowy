@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, iter, sync::Arc};
 
 use parser::Location;
 
@@ -411,19 +411,25 @@ impl<'a> LabelBacktrace<'a> {
         }
     }
 
-    /// Rebinds all [`LabelTag::Synthetic`]s from one function to another.
+    /// Remaps one function's synthetic tags to another function's slots.
     ///
-    /// This applies recursively across the entire hierarchy, affecting only
-    /// synthetic tags associated with the specified initial function.
-    pub(crate) fn rebind_synthetic_func(
+    /// This applies recursively across the entire hierarchy. Parameter and
+    /// invocation slots retain their indices, while capture indices are mapped
+    /// explicitly because closures allocate them independently.
+    pub(crate) fn remap_synthetics(
         &self,
         from_func: &FunctionRef<'a>,
         to_func: &FunctionRef<'a>,
+        capture_slots: &BTreeMap<usize, usize>,
     ) -> Self {
         if self.children().is_empty() {
+            let label = self
+                .label
+                .remap_synthetics(from_func, to_func, capture_slots);
+
             Self::new(
                 *self.kind(),
-                self.label.rebind_synthetic_func(from_func, to_func),
+                label,
                 self.symbol,
                 self.location.clone(),
                 &*self.children,
@@ -433,7 +439,7 @@ impl<'a> LabelBacktrace<'a> {
             let children: Vec<_> = self
                 .children()
                 .iter()
-                .map(|child| child.rebind_synthetic_func(from_func, to_func))
+                .map(|child| child.remap_synthetics(from_func, to_func, capture_slots))
                 .collect();
 
             Self::fold(

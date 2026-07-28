@@ -394,18 +394,18 @@ pub enum AnalysisErrorKind<'a> {
         location: Location,
     },
 
-    /// Unsafe assignment of non-portable function value.
+    /// Unsupported merge of alternative function values.
     ///
     /// This happens in control-flow-split contexts (such as if a function-typed
     /// variable declared outside an `if` construct is then reassigned inside
     /// it) where the analyzer cannot prove that overwriting is safe and so must
-    /// merge the previous value into the new one, but they are not compatible
-    /// and body-derived analysis information cannot safely be ported.
+    /// merge the previous and newly assigned callable summaries, but their
+    /// representations are not compatible.
     ///
-    /// This error indicates that all deferred enforcement checks present in the
-    /// previous function value have been discarded (as they could not safely be
-    /// absorbed by the new function value), which is unsound and thus
-    /// compromises the analysis results.
+    /// This error indicates that the analyzer could not soundly join the
+    /// possible functions' summaries (including outcomes, captured mutations,
+    /// and deferred enforcement checks), which is unsound and thus compromises
+    /// the analysis results.
     ///
     /// As such, the (valid Go) construct must be rejected with prejudice.
     UnsoundFunctionMergingAssignment {

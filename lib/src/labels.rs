@@ -13,7 +13,12 @@
 //! These labels' evolution and propagation history can be easily tracked using
 //! a hierarchy structure, which is here implemented via [`LabelBacktrace`].
 
-use std::{borrow::Cow, cmp, collections::BTreeSet, fmt, iter, mem, ops};
+use std::{
+    borrow::Cow,
+    cmp,
+    collections::{BTreeMap, BTreeSet},
+    fmt, iter, mem, ops,
+};
 
 pub use backtraces::{LabelBacktrace, LabelBacktraceKind};
 pub use tags::{ConcreteLabelTag, LabelTag, SyntheticSlot};
@@ -626,34 +631,47 @@ impl<'a> Label<'a> {
             .any(|tag| tag.is_synthetic_representation(func, slot))
     }
 
-    fn rebind_synthetic_func(
+    fn remap_synthetics(
         &self,
         from_func: &FunctionRef<'a>,
         to_func: &FunctionRef<'a>,
+        capture_slots: &BTreeMap<usize, usize>,
     ) -> Self {
         let Self::Tags(tags) = self else {
             return Self::Bottom;
         };
 
-        let rebound: BTreeSet<_> = tags
+        let remapped: BTreeSet<_> = tags
             .iter()
             .map(|tag| match tag {
                 LabelTag::Synthetic {
                     func,
                     slot,
                     identifier,
-                } if func == from_func => LabelTag::Synthetic {
-                    func: to_func.clone(),
-                    slot: *slot,
-                    identifier: *identifier,
-                },
+                } if func == from_func => {
+                    let slot = if let SyntheticSlot::Capture(index) = slot {
+                        let mapped = capture_slots
+                            .get(index)
+                            .expect("every capture synthetic must have a registered binding");
+
+                        SyntheticSlot::Capture(*mapped)
+                    } else {
+                        *slot
+                    };
+
+                    LabelTag::Synthetic {
+                        func: to_func.clone(),
+                        slot,
+                        identifier: *identifier,
+                    }
+                }
                 LabelTag::Concrete(_) | LabelTag::AxisWildcard(_) | LabelTag::Synthetic { .. } => {
                     tag.clone()
                 }
             })
             .collect();
 
-        Self::Tags(discard_wildcard_specializations(rebound))
+        Self::Tags(discard_wildcard_specializations(remapped))
     }
 
     pub(crate) fn prune_synthetics(&self) -> Self {

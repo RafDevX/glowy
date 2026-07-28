@@ -7,7 +7,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::SinkDescriptor,
     snapshots::SnapshotAware,
-    values::{self, FunctionRef, SelfAwareBacktraceContainer},
+    values::{self, SelfAwareBacktraceContainer},
 };
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -119,33 +119,6 @@ impl<'a> DeferredEnforcementCheck<'a> {
         };
 
         Some(realized)
-    }
-
-    pub fn rebind_synthetic_func(
-        &self,
-        from_func: &FunctionRef<'a>,
-        to_func: &FunctionRef<'a>,
-    ) -> Self {
-        match self {
-            Self::Sink { sink, found, file } => Self::Sink {
-                sink: sink.clone(),
-                found: found.rebind_synthetic_func(from_func, to_func),
-                file,
-            },
-            Self::Assertion {
-                expected_sequence,
-                found,
-                file,
-                location,
-            } => Self::Assertion {
-                expected_sequence: expected_sequence.clone(),
-                found: found
-                    .as_ref()
-                    .map(|bt| bt.rebind_synthetic_func(from_func, to_func)),
-                file,
-                location: location.clone(),
-            },
-        }
     }
 }
 
