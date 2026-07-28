@@ -576,7 +576,7 @@ impl<'a> SymbolTable<'a> {
         // final consideration: many packages have their hosting platform
         // repository name with a `go-`/`-go` tag around what is actually their
         // native package name, so strip that from our native name candidate.
-        // the same logic applies for `lib-`/`-lib`, and probably several others
+        // the same logic applies too for other tags such as e.g. `lib-`/`-lib`,
         // but we only support a few here (it is unlikely that real package
         // names have dash-separated tags because Go privileges one-word names)
         native_name
@@ -586,6 +586,9 @@ impl<'a> SymbolTable<'a> {
             .or_else(|| native_name.strip_suffix("-golang"))
             .or_else(|| native_name.strip_prefix("lib-"))
             .or_else(|| native_name.strip_suffix("-lib"))
+            .or_else(|| native_name.strip_prefix("sdk-go-"))
+            .or_else(|| native_name.strip_suffix("-sdk-go"))
+            .or_else(|| native_name.strip_suffix(".go"))
             .filter(|stripped| !stripped.is_empty())
             .unwrap_or(native_name)
             .to_owned()
