@@ -1,4 +1,4 @@
-use parser::ast::{CallNode, ExprNode, FunctionSignatureNode, SelectionNode};
+use parser::ast::{CallNode, ExprNode, FunctionSignatureNode, SelectionNode, UnaryOpKind};
 
 use crate::{
     context::AnalysisContext,
@@ -13,6 +13,10 @@ use crate::{
 };
 
 pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> CallResolution<'a> {
+    if is_type_parameter_conversion(ctx, &node.func) {
+        return CallResolution::Final(vec![super::visit_type_conversion(ctx, node, None)]);
+    }
+
     // we treat some built-in functions specially, not as function calls but as
     // independent quasi-types of expressions. if they don't look like a real
     // function call (e.g., take a type instead of a value as input, like make)
@@ -126,6 +130,24 @@ pub fn resolve_call<'a>(ctx: &mut AnalysisContext<'a>, node: &CallNode<'a>) -> C
         arg_consts,
         method_receiver_value,
     })
+}
+
+fn is_type_parameter_conversion(ctx: &AnalysisContext<'_>, callee: &ExprNode<'_>) -> bool {
+    let mut current = callee;
+
+    while let ExprNode::UnaryOp {
+        kind: UnaryOpKind::Deref,
+        operand,
+        ..
+    } = current
+    {
+        current = operand;
+    }
+
+    matches!(
+        current,
+        ExprNode::Name(name) if ctx.is_type_param_in_scope(name.content())
+    )
 }
 
 fn try_resolve_special_builtin_call<'a>(
