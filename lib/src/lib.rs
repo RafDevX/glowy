@@ -168,6 +168,17 @@ mod taint;
 mod types;
 mod values;
 
+/// Highest supported Go version.
+///
+/// Glowy assumes that all input is fully compliant with this version of the Go
+/// spec, as identified by a tuple `(major, minor)`, e.g. `(1, 26)` for Go 1.26.
+///
+/// When evaluating build-tag constraints from `//go:build` or legacy
+/// `// +build` directives, all versions up to this one are considered satisfied
+/// while any others are not; for instance, `//go:build !go1.999` will always be
+/// included, since `go1.999` evaluates to `false`.
+const SUPPORTED_GO_VERSION: (u32, u32) = (1, 26);
+
 /// Represents an unknown source-file location.
 ///
 /// This standardizes one unified fake configuration that is used throughout the

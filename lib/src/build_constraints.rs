@@ -154,7 +154,7 @@ impl<'a> ActiveTags<'a> {
         match expr {
             BuildConstraintExprNode::Tag(name) => {
                 !is_conventional_ignore_tag(name)
-                    && (is_go_version_tag(name) || self.contains(name))
+                    && (self.contains(name) || is_satisfied_go_version_tag(name))
             }
             BuildConstraintExprNode::Not(inner) => !self.evaluate_expr(inner),
             BuildConstraintExprNode::And(clauses) => {
@@ -446,18 +446,27 @@ fn is_known_goarch(name: &str) -> bool {
 }
 
 fn is_go_version_tag(name: &str) -> bool {
-    let Some(rest) = name.strip_prefix("go") else {
+    go_version_tag_components(name).is_some()
+}
+
+fn is_satisfied_go_version_tag(name: &str) -> bool {
+    let Some((major, minor)) = go_version_tag_components(name) else {
         return false;
     };
 
-    let Some((major, minor)) = rest.split_once('.') else {
-        return false;
-    };
+    (major, minor) <= crate::SUPPORTED_GO_VERSION
+}
 
-    !major.is_empty()
-        && !minor.is_empty()
-        && major.bytes().all(|b| b.is_ascii_digit())
-        && minor.bytes().all(|b| b.is_ascii_digit())
+fn go_version_tag_components(name: &str) -> Option<(u32, u32)> {
+    let (major, minor) = name.strip_prefix("go")?.split_once('.')?;
+
+    if let Ok(major) = major.parse::<u32>()
+        && let Ok(minor) = minor.parse::<u32>()
+    {
+        Some((major, minor))
+    } else {
+        None
+    }
 }
 
 fn is_conventional_ignore_tag(name: &str) -> bool {
