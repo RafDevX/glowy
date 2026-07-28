@@ -326,7 +326,7 @@ fn parse_nested_composite_literal<'a>(
     let beginning = s.peek().cloned().transpose()?;
 
     let (optional_keys, expected_key_type, expected_element_type) =
-        match expected_element_type.map(TypeNode::strip_pointers) {
+        match expected_element_type.map(TypeNode::strip_pointer) {
             Some(TypeNode::Map { key, element }) => (false, Some(&**key), Some(&**element)),
             Some(TypeNode::Array { element, .. } | TypeNode::Slice { element }) => {
                 (true, None, Some(&**element))

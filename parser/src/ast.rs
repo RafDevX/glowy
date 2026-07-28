@@ -120,9 +120,21 @@ impl<'a> TypeNode<'a> {
 
     #[must_use]
     #[inline]
-    pub fn strip_pointers(&self) -> &Self {
+    pub fn strip_pointer(&self) -> &Self {
         if let Self::Pointer { base } = self {
             base
+        } else {
+            self
+        }
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn strip_pointers(&self) -> &Self {
+        if let Self::Pointer { base } = self {
+            // type nodes are necessarily acyclic (since they correspond to
+            // literal source code tokens), so this is safe
+            base.strip_pointers()
         } else {
             self
         }
