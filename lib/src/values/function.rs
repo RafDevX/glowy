@@ -876,7 +876,15 @@ pub enum FunctionRef<'a> {
     ///
     /// This is a unique identifier because of the embedded location information
     /// offered by [`Pinned`] and [`Span`].
-    Named(Pinned<'a, Span<'a>>),
+    Named {
+        /// The declared function name, bound to its source location.
+        name: Pinned<'a, Span<'a>>,
+        /// Whether this function is the program's primary entrypoint.
+        ///
+        /// This corresponds to whether this is `func main` declared in the root
+        /// package scope of a package called `main`, per the Go spec.
+        is_main: bool,
+    },
     /// An anonymous function literal.
     Anonymous(Pinned<'a, Location>),
     /// A built-in function provided by the language or the Go standard library.
@@ -886,12 +894,19 @@ pub enum FunctionRef<'a> {
 }
 
 impl<'a> FunctionRef<'a> {
+    pub(crate) fn new_named(name: Pinned<'a, Span<'a>>) -> Self {
+        Self::Named {
+            name,
+            is_main: false,
+        }
+    }
+
     /// Returns the function's declared symbol name, if any exists.
     #[must_use]
     #[inline]
     pub fn declared_name(&self) -> Option<&'a str> {
         match self {
-            Self::Named(span) => Some(span.content()),
+            Self::Named { name, .. } => Some(name.content()),
             Self::BuiltIn(name) => Some(name),
             Self::Anonymous(_) | Self::BlackboxInference(_) => None,
         }
@@ -899,17 +914,11 @@ impl<'a> FunctionRef<'a> {
 
     /// Returns whether the function is considered to be the main entrypoint.
     ///
-    /// This indicates whether the analyzer considers a given function to be the
-    /// program's primary entrypoint, which is derived from heuristics and
-    /// assumptions, meaning that it might differ from the Go compiler's views.
+    /// This is recorded from the declaration's package context.
     #[must_use]
     #[inline]
     pub fn is_main(&self) -> bool {
-        if let Self::Named(name) = self {
-            name.content() == "main" && name.file() == "/main.go"
-        } else {
-            false
-        }
+        matches!(self, Self::Named { is_main: true, .. })
     }
 }
 
@@ -917,7 +926,7 @@ impl fmt::Display for FunctionRef<'_> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Named(name) => name.content().fmt(f),
+            Self::Named { name, .. } => name.content().fmt(f),
             Self::Anonymous(pin) => write!(
                 f,
                 "lit@\"{}\"#{}-{}",
@@ -938,9 +947,18 @@ impl Ord for FunctionRef<'_> {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self, other) {
-            (Self::Named(a), Self::Named(b)) => a.cmp(b),
-            (Self::Named(_), _) => cmp::Ordering::Less,
-            (_, Self::Named(_)) => cmp::Ordering::Greater,
+            (
+                Self::Named {
+                    name: a_name,
+                    is_main: a_is_main,
+                },
+                Self::Named {
+                    name: b_name,
+                    is_main: b_is_main,
+                },
+            ) => a_name.cmp(b_name).then(a_is_main.cmp(b_is_main)),
+            (Self::Named { .. }, _) => cmp::Ordering::Less,
+            (_, Self::Named { .. }) => cmp::Ordering::Greater,
             (Self::Anonymous(a), Self::Anonymous(b)) => a.partial_cmp(b).unwrap_or_else(|| {
                 a.file()
                     .cmp(b.file())
@@ -967,7 +985,16 @@ impl PartialOrd for FunctionRef<'_> {
 impl SnapshotAware for FunctionRef<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Named(a), Self::Named(b)) => a == b,
+            (
+                Self::Named {
+                    name: a_name,
+                    is_main: a_is_main,
+                },
+                Self::Named {
+                    name: b_name,
+                    is_main: b_is_main,
+                },
+            ) => a_name == b_name && a_is_main == b_is_main,
             (Self::Anonymous(a), Self::Anonymous(b)) => a == b,
             (Self::BuiltIn(a), Self::BuiltIn(b)) => a == b,
             // UUIDs might differ between analyzer iterations
@@ -976,7 +1003,10 @@ impl SnapshotAware for FunctionRef<'_> {
 
             // not using wildcard to force revisiting impl for any new variants
             (
-                Self::Named(_) | Self::Anonymous(_) | Self::BuiltIn(_) | Self::BlackboxInference(_),
+                Self::Named { .. }
+                | Self::Anonymous(_)
+                | Self::BuiltIn(_)
+                | Self::BlackboxInference(_),
                 _,
             ) => false,
         }

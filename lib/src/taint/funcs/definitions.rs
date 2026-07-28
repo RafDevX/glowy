@@ -38,7 +38,7 @@ pub fn visit_function_def<'a>(
     annotation: Option<&Annotation<'a>>,
 ) -> ValueRef<'a> {
     let value_location = match r#ref {
-        FunctionRef::Named(name) => name.pinned_location(),
+        FunctionRef::Named { name, .. } => name.pinned_location(),
         FunctionRef::Anonymous(location) => location.clone(),
         FunctionRef::BuiltIn(_) | FunctionRef::BlackboxInference(_) => decl_symbol
             .as_ref()
@@ -322,7 +322,7 @@ fn build_function_value<'a>(
     }
 
     // fold in any configured blanket directives associated with this function
-    if let FunctionRef::Named(name) = r#ref
+    if let FunctionRef::Named { name, .. } = r#ref
         && let Some(pkg_path) = ctx.symtab().current_package_path()
         && ctx.current_function().is_none()
     // ^^^ check for root level: technically it should not be possible for

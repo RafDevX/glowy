@@ -168,7 +168,7 @@ fn visit_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDeclSpecNo
     };
 
     let func_value = FunctionValue::new_type_constructor(
-        FunctionRef::Named(name),
+        FunctionRef::new_named(name),
         // used for composite literals and resolved in its declaration context
         Some((node.r#type.clone(), decl_context)),
         target_type,

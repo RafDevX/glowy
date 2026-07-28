@@ -45,12 +45,21 @@ pub struct ResolvedCall<'a> {
     method_receiver_value: Option<ValueRef<'a>>,
 }
 
-pub fn visit_function_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDeclNode<'a>) {
+pub fn visit_function_decl<'a>(
+    ctx: &mut AnalysisContext<'a>,
+    node: &FunctionDeclNode<'a>,
+    is_main: bool,
+) {
     let func_name = ctx.pin(node.name);
+
+    let r#ref = FunctionRef::Named {
+        name: func_name,
+        is_main,
+    };
 
     definitions::visit_function_def(
         ctx,
-        &FunctionRef::Named(func_name),
+        &r#ref,
         Some(func_name),
         &node.type_params,
         &node.signature,
@@ -97,7 +106,7 @@ pub fn visit_init_function<'a>(ctx: &mut AnalysisContext<'a>, node: &FunctionDec
     let location = func_name.pinned_location();
 
     let func = FunctionValue::new(
-        FunctionRef::Named(func_name),
+        FunctionRef::new_named(func_name),
         Some(node.signature.clone()),
         None,
         Vec::new(),

@@ -79,7 +79,7 @@ pub fn visit_source_file<'a>(
         let is_init = func.name.content() == "init" && func.receiver.is_none();
         let is_main = func.name.content() == "main"
             && func.receiver.is_none()
-            && ctx.current_file().is_some_and(|path| path == "/main.go");
+            && node.package_clause.id.content() == "main";
 
         match phase {
             PackageInitializationPhase::TopLevelDeclarations => {
@@ -96,7 +96,7 @@ pub fn visit_source_file<'a>(
             }
             PackageInitializationPhase::Main => {
                 if is_main {
-                    visit_decl(ctx, decl);
+                    funcs::visit_function_decl(ctx, func, true);
                 }
             }
         }
@@ -153,7 +153,9 @@ fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {
                 types::visit_local_type_decl(ctx, specs);
             }
         }
-        DeclNode::Function(func_node) => funcs::visit_function_decl(ctx, func_node),
+        DeclNode::Function(func_node) => {
+            funcs::visit_function_decl(ctx, func_node, false);
+        }
     }
 }
 

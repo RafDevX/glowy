@@ -177,7 +177,7 @@ fn visit_local_type_decl_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &TypeDecl
     };
 
     let func_value = FunctionValue::new_type_constructor(
-        FunctionRef::Named(name),
+        FunctionRef::new_named(name),
         Some((node.r#type.clone(), decl_context)),
         target_type.clone(),
     );

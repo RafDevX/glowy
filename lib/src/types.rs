@@ -273,7 +273,7 @@ impl<'a> TypeInfo<'a> {
             let location = pinned_name.pinned_location();
 
             let mut func = FunctionValue::new(
-                FunctionRef::Named(pinned_name),
+                FunctionRef::new_named(pinned_name),
                 Some(signature.clone()),
                 // the interface's dynamic value may hold a pointer receiver, so
                 // retain the more conservative receiver semantics
