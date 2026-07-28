@@ -137,10 +137,6 @@
     clippy::useless_let_if_seq,
     clippy::while_float,
 )]
-#![expect(
-    clippy::multiple_crate_versions,
-    reason = "Some sub-dependencies require different versions of the same crates"
-)]
 // Documentation lint configuration
 #![warn(missing_docs)]
 #![deny(rustdoc::all)]
