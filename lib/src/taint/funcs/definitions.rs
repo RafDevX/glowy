@@ -86,7 +86,7 @@ pub fn visit_function_def<'a>(
     ctx.symtab_mut().select_next_child_scope(); // push
 
     macro_rules! declare_param {
-        ($id:expr, $slot:expr, $declared_type:expr) => {
+        ($id:expr, $slot:expr, $declared_type:expr, $is_slice:expr) => {
             let synthetic = LabelTag::Synthetic {
                 func: r#ref.clone(),
                 slot: $slot,
@@ -102,8 +102,17 @@ pub fn visit_function_def<'a>(
             .unwrap(); // safe because we know label is not Bottom
 
             let mut param_value = ValueRef::from(param_backtrace);
+
             if let Some(r#type) = $declared_type {
                 param_value.set_declared_type(r#type);
+            }
+
+            if $is_slice {
+                // anonymous slice types have no TypeInfo entry, while variadic
+                // parameters bind a slice despite declaring an element type.
+                // preserve that statically-known shape so full slicing (which
+                // is invalid for strings) does not have to guess
+                param_value.try_upgrade_to_slice();
             }
 
             ctx.declare_new_symbol(Symbol::new_ref(ctx.pin($id), true, param_value, None));
@@ -120,7 +129,7 @@ pub fn visit_function_def<'a>(
             types.resolve(symtab, &receiver.r#type)
         };
 
-        declare_param!(*id, SyntheticSlot::Receiver, receiver_type);
+        declare_param!(*id, SyntheticSlot::Receiver, receiver_type, false);
     }
 
     let mut param_index = 0;
@@ -140,7 +149,16 @@ pub fn visit_function_def<'a>(
         for &id in &param.ids {
             // only ignore if blank identifier
             if id.content() != "_" {
-                declare_param!(id, SyntheticSlot::Param(param_index), param_type.clone());
+                declare_param!(
+                    id,
+                    SyntheticSlot::Param(param_index),
+                    param_type.clone(),
+                    param.variadic
+                        || matches!(param.r#type, TypeNode::Slice { .. })
+                        || param_type
+                            .as_deref()
+                            .is_some_and(TypeInfo::has_slice_underlying)
+                );
             }
 
             param_index += 1;

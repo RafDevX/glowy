@@ -137,6 +137,34 @@ impl<'a> TypeInfo<'a> {
         self.underlying().is_none()
     }
 
+    pub fn has_slice_underlying(&self) -> bool {
+        let mut current = self;
+        let mut visited = HashSet::new();
+
+        loop {
+            if !visited.insert(ptr::from_ref(current)) {
+                // cycles are rejected conservatively
+                return false;
+            }
+
+            match current.underlying() {
+                Some(TypeKind::Slice) => return true,
+                Some(TypeKind::Named(inner)) => current = inner,
+                None
+                | Some(
+                    TypeKind::Opaque
+                    | TypeKind::Struct { .. }
+                    | TypeKind::Map
+                    | TypeKind::Array
+                    | TypeKind::Channel
+                    | TypeKind::Interface
+                    | TypeKind::Function
+                    | TypeKind::Pointer(_),
+                ) => return false,
+            }
+        }
+    }
+
     pub fn may_have_struct_underlying(&self) -> bool {
         let mut current = self;
         let mut visited = HashSet::new();

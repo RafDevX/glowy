@@ -14,7 +14,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::BlanketDirectiveKind,
     taint::funcs,
-    types::{TypeInfo, TypeKind},
+    types::TypeInfo,
     values::{
         ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, SliceBound,
         SliceValue, Value, ValueRef,
@@ -421,7 +421,7 @@ pub fn visit_slicing_with_base<'a>(
 
     let declared_type = base
         .declared_type()
-        .filter(|r#type| matches!(r#type.underlying(), Some(TypeKind::Slice)))
+        .filter(|r#type| r#type.has_slice_underlying())
         .cloned();
 
     if base.is_slice()
