@@ -196,10 +196,20 @@ impl<'a> TypeInfo<'a> {
     }
 
     pub fn strip_pointers(&self) -> &Self {
-        if let Some(TypeKind::Pointer(inner)) = self.underlying() {
-            inner.strip_pointers()
-        } else {
-            self
+        let mut current = self;
+        let mut visited = HashSet::new();
+
+        loop {
+            if !visited.insert(ptr::from_ref(current)) {
+                // no non-pointer base type exists in this recursive chain;
+                // this is a cycle, so proceeding would lead to a stack overflow
+                return current;
+            }
+
+            match current.underlying() {
+                Some(TypeKind::Pointer(inner)) => current = inner,
+                _ => return current,
+            }
         }
     }
 
