@@ -33,7 +33,7 @@ use crate::{
 /// Glowy, particularly during its [`crate::Analyzer::analyze`] procedure.
 /// Error information is presented in a flexible manner so that the application
 /// can decide how to react and choose what details to display.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct AnalysisError<'a> {
     /// Go source file during the analysis of which the error was reported.
@@ -55,7 +55,7 @@ pub struct AnalysisError<'a> {
 /// associated fields then describing contextual information. The
 /// [`AnalysisErrorKind::category`] method provides a generic overview of the
 /// root cause, if a more coarse level of granularity is desired for matching.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AnalysisErrorKind<'a> {
     /// Go source code parsing failure.
@@ -484,7 +484,7 @@ impl<'a> From<ParsingError<'a>> for AnalysisErrorKind<'a> {
 /// proceed (or what merit to assign to a given set of results) depending on
 /// the high-level semantic associated with an error, without needing to delve
 /// into what in specific happened.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AnalysisErrorCategory {
     /// Glowy analyzer not configured correctly.

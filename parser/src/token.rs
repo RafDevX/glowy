@@ -194,7 +194,7 @@ impl<'a> Token<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Annotation<'a> {
     pub directive: &'a str,
     pub tags: Vec<&'a str>,

@@ -73,6 +73,7 @@ static ANALYSIS_POOL: sync::LazyLock<rayon::ThreadPool> = sync::LazyLock::new(||
 ///
 /// # Ok::<(), glowy::AnalyzerFromDirectoryError>(())
 /// ```
+#[derive(Clone)]
 pub struct Analyzer {
     /// Go module path base, such as `example.com/company-name/proj`.
     module_base: FullPackagePath,

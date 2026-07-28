@@ -73,7 +73,7 @@ fn collapse_snippets<'a>(snippets: Vec<StructuredSnippet<'a>>) -> Vec<Structured
 
 // we use an intermediate representation (strongly typed) to ensure all errors
 // have the same fields defined and none is ever forgotten/missed
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredErrorInfo<'a> {
     pub title: Cow<'a, str>,
     pub code: Cow<'a, str>,
@@ -84,7 +84,7 @@ pub struct StructuredErrorInfo<'a> {
 // intermediate representation (vs. Snippet directly) so we can perform some
 // minor manipulation before rendering (Snippet does not expose its data)
 // [we need this to be able to collapse snippets]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredSnippet<'a> {
     path: Cow<'a, str>,
     source: Cow<'a, str>,
@@ -191,7 +191,7 @@ fn calc_context_lines(
 // intermediate representation (vs. Annotation directly) so we can perform some
 // minor manipulation before rendering (Annotation does not expose its data)
 // [we need this to be able to deduplicate annotations, since no PartialEq impl]
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct StructuredAnnotation<'a> {
     kind: annotate_snippets::AnnotationKind,
     location: glowy::Location,
@@ -234,6 +234,7 @@ impl<'a> From<StructuredAnnotation<'a>> for annotate_snippets::Annotation<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct SnippetBuilder<'a> {
     analyzer: &'a glowy::Analyzer,
     home: &'a Path, // default file

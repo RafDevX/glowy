@@ -45,6 +45,7 @@ impl<'a> From<BuildConstraintParsingError<'a>> for ParsingError<'a> {
 /// the implementation of the [`Diagnostics::diagnostics`] trait method.
 /// Consumers can then invoke the same method on any error object implementing
 /// the [`Diagnostics`] trait.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ErrorDiagnosticInfo<'a> {
     /// Unique identifier for this error type.
     ///

@@ -575,7 +575,7 @@ impl From<&str> for BlanketSourcePredicateValue {
 }
 
 /// Represents a failure to parse a string into a [`BlanketDirectiveTarget`].
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlanketDirectiveTargetParseError {
     /// A slash-qualified package path had no `.` separating its member name.

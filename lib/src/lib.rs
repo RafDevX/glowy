@@ -268,6 +268,7 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
     expect(clippy::struct_excessive_bools, reason = "Independent options")
 )]
 #[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct AnalysisConfig {
     /// Whether to output more detailed status information during the analysis.

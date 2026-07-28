@@ -17,6 +17,7 @@ use std::{
 ///
 /// # Ok::<(), std::io::Error>(())
 /// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceFile {
     virtual_path: PathBuf, // relative to module base
     contents: String,

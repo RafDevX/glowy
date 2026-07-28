@@ -4,7 +4,7 @@ use crate::{FullPackagePath, labels::Label, policy::targets::BlanketSourceArgPre
 
 pub type BlanketDirectives = HashMap<FullPackagePath, PackageBlanketDirectives>;
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PackageBlanketDirectives {
     // top-level package symbols: functions (`os.GetEnv`) & bindings (`os.Args`)
     pub symbols: HashMap<String, Vec<BlanketDirective>>,
@@ -53,7 +53,7 @@ impl PackageBlanketDirectives {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlanketDirective {
     kind: BlanketDirectiveKind,
     label: Label<'static>,

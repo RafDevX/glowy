@@ -38,6 +38,7 @@ impl From<CliConfig> for Config {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Mode {
     Single,
     Suite,
