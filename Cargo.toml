@@ -3,6 +3,7 @@ name = "glowy-cli"
 description = "Information flow control analysis for Go"
 documentation = "https://glowy.rso.pt/glowy"
 readme = "README.md"
+include = ["/src/**"]
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

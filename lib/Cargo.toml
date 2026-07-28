@@ -2,6 +2,7 @@
 name = "glowy"
 description = "Information flow control analysis for Go"
 readme = "../README.md"
+include = ["/src/**", "/build.rs", "/base-security-policy.toml"]
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
