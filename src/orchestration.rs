@@ -74,6 +74,11 @@ fn analyze_single<P: AsRef<Path>>(path: P, config: &Config, quiet: bool) -> (usi
             "Is the `glowy.toml` file well-formed TOML structured how Glowy expects it to be?",
             Some(error),
         ),
+        _ => fatal(
+            "Unknown error occurred while bootstrapping the analyzer",
+            "Please use an up-to-date version for more specific diagnostics",
+            None::<&str>,
+        ),
     });
 
     let start = Instant::now();

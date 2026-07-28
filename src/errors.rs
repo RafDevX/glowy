@@ -124,6 +124,7 @@ pub fn get_structured_error_info<'a>(
                 SinkKind::Assignment => ("assignment expression", "provided right-value"),
                 SinkKind::Call | SinkKind::Function => ("function call", "an argument"),
                 SinkKind::Send => ("send statement", "the value being sent"),
+                _ => ("unknown context", "this"),
             };
 
             let variant = if sink.allow {
@@ -537,6 +538,15 @@ pub fn get_structured_error_info<'a>(
                  by one single callable summary, so the construct is rejected instead",
             ),
         },
+
+        // this is necessary because AnalysisErrorKind is marked as
+        // #[non_exhaustive] to guarantee future backwards compatibility
+        _ => StructuredErrorInfo {
+            title: "unknown error".into(),
+            code: "????".into(),
+            snippets: vec![],
+            help: None,
+        },
     }
 }
 
@@ -552,6 +562,7 @@ pub fn error_category_to_level(
         | AnalysisErrorCategory::Suspicious
         | AnalysisErrorCategory::InvalidGo
         | AnalysisErrorCategory::UnsupportedGo => annotate_snippets::Level::WARNING,
+        _ => annotate_snippets::Level::ERROR,
     }
 }
 
@@ -684,6 +695,7 @@ fn label_backtrace_to_snippets<'a>(
                 "the composition of all security factors results in label {}",
                 backtrace.label()
             ),
+            _ => "flows in an unknown way".into(),
         };
 
         (annotate_snippets::AnnotationKind::Context, label)

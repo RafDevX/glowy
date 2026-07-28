@@ -51,6 +51,7 @@ mod tags;
 ///
 /// Label derivation and hierarchy is tracked through [`LabelBacktrace`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[expect(clippy::exhaustive_enums, reason = "Bottom-ness is core to this enum")]
 pub enum Label<'a> {
     /// A non-empty set of [`LabelTag`]s.
     Tags(BTreeSet<LabelTag<'a>>),

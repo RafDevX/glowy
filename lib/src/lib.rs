@@ -45,6 +45,8 @@
     clippy::empty_enum_variants_with_brackets,
     clippy::empty_structs_with_brackets,
     clippy::error_impl_error,
+    clippy::exhaustive_enums,
+    clippy::exhaustive_structs,
     clippy::exit,
     clippy::field_scoped_visibility_modifiers,
     clippy::filetype_is_file,
@@ -253,8 +255,7 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
 ///
 /// Note that the [`Default`] trait is implemented, meaning that it can be used
 /// to automatically populate default configuration values when manually
-/// constructing an instance and the invoker only wishes to partially specify
-/// configuration preferences.
+/// constructing an instance.
 #[cfg_attr(
     not(feature = "toml-config"),
     expect(
@@ -267,6 +268,7 @@ type FullPackagePath = String; // e.g. example.com/org/something/auth
     expect(clippy::struct_excessive_bools, reason = "Independent options")
 )]
 #[cfg_attr(feature = "toml-config", derive(serde::Deserialize), serde(default))]
+#[non_exhaustive]
 pub struct AnalysisConfig {
     /// Whether to output more detailed status information during the analysis.
     ///

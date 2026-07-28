@@ -165,6 +165,7 @@ impl<'a, T: IntoCowStr<'a>> From<T> for ConcreteLabelTag<'a> {
 /// returned to library consumers as part of the reported results for high-level
 /// program analysis, making this enum mostly an internal artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum SyntheticSlot {
     /// Conceptual placeholder for a function argument's label.
     ///
@@ -253,6 +254,7 @@ impl fmt::Display for SyntheticSlot {
 /// first discriminated by kind (the first variant comes first, and so on), and
 /// then lexicographically by its internal value/identifier.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LabelTag<'a> {
     /// A concrete user-facing tag, like `blue`, `violet`, or `dir:north`.
     Concrete(ConcreteLabelTag<'a>),

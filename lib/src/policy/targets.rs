@@ -139,6 +139,7 @@ pub const OPERATOR_TARGET_NAMES: &[(&str, BinaryOpKind)] = &[
 /// or `*T`, per Go's method-set/struct field semantics. As such, no `*` prefix
 /// should be included in `type_name`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct BlanketDirectiveTarget {
     /// Fully-qualified package path.
     ///
@@ -476,6 +477,7 @@ impl fmt::Display for BlanketSourceArgPredicate {
 ///
 /// See [`BlanketSourceArgPredicate`] for more information on usage.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BlanketSourcePredicateValue {
     /// A predicate value without a known type.
     ///
@@ -574,6 +576,7 @@ impl From<&str> for BlanketSourcePredicateValue {
 
 /// Represents a failure to parse a string into a [`BlanketDirectiveTarget`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum BlanketDirectiveTargetParseError {
     /// A slash-qualified package path had no `.` separating its member name.
     NoPackageFunctionSeparator,

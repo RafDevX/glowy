@@ -154,12 +154,11 @@ impl Analyzer {
     /// # Example Usage
     ///
     /// ```
-    /// let config = glowy::AnalysisConfig {
-    ///     // change some fields here
-    ///     // field1: value1,
-    ///     // field2: value2,
-    ///     ..Default::default()
-    /// };
+    /// let mut config = glowy::AnalysisConfig::default();
+    /// config.verbose = true;
+    /// // change some more fields here
+    /// // config.field1 = value1;
+    /// // config.field2 = value2;
     ///
     /// let analyzer = glowy::Analyzer::new_with_config("example.com/company-name/proj", config);
     /// ```
@@ -1314,6 +1313,7 @@ impl Analyzer {
 
 /// Represents an issue arising from a [`Analyzer::from_directory`] invocation.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AnalyzerFromDirectoryError {
     /// Failure to perform a filesystem-level operation.
     ///

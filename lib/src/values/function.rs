@@ -871,6 +871,7 @@ fn merge_receiver_kinds(
 /// a function parameter index or another equivalent function-specific
 /// identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FunctionRef<'a> {
     /// A normal function with a native declared name.
     ///

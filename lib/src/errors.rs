@@ -56,6 +56,7 @@ pub struct AnalysisError<'a> {
 /// [`AnalysisErrorKind::category`] method provides a generic overview of the
 /// root cause, if a more coarse level of granularity is desired for matching.
 #[derive(Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum AnalysisErrorKind<'a> {
     /// Go source code parsing failure.
     ///
@@ -484,6 +485,7 @@ impl<'a> From<ParsingError<'a>> for AnalysisErrorKind<'a> {
 /// the high-level semantic associated with an error, without needing to delve
 /// into what in specific happened.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum AnalysisErrorCategory {
     /// Glowy analyzer not configured correctly.
     Misconfiguration,

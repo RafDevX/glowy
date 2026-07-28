@@ -554,6 +554,7 @@ impl<'a> LabelBacktrace<'a> {
 
 /// The concrete operation that resulted in a label assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum LabelBacktraceKind {
     /// Explicit source code annotation.
     ExplicitAnnotation,
