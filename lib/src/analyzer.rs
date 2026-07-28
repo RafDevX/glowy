@@ -1,9 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    env, fs,
-    io::{self, BufRead},
-    path, time,
+    env, fs, io, path, time,
 };
 #[cfg(feature = "parallelism")]
 use std::{
@@ -378,11 +376,8 @@ impl Analyzer {
     ///
     /// # Errors
     ///
-    /// Any [`std::io::Error`] resulting from opening the file (such as it not
-    /// existing) is returned as-is. The file is only read while no errors
-    /// occur; if there is a read failure, no further attempts are performed and
-    /// the method returns `Ok(None)` since no valid `module` directive was
-    /// found.
+    /// Any [`std::io::Error`] resulting from opening or reading the specified
+    /// file (for example, because the path does not exist) is returned as-is.
     ///
     /// # Example Usage
     ///
@@ -396,16 +391,14 @@ impl Analyzer {
         path: P,
         config: Option<AnalysisConfig>,
     ) -> io::Result<Option<Self>> {
-        let file = fs::File::open(path)?;
-        let reader = io::BufReader::new(file);
-        let lines = reader.lines().map_while(Result::ok);
+        let contents = fs::read_to_string(path)?;
 
         let mut in_block = false;
 
-        for line in lines {
+        for line in contents.lines() {
             let line = line
                 .split_once("//")
-                .map_or(line.as_str(), |(before, _)| before)
+                .map_or(line, |(before, _)| before)
                 .trim();
 
             // we accept either the simplified form `module ModulePath`,
