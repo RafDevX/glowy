@@ -143,7 +143,7 @@
 )]
 // Documentation lint configuration
 #![warn(missing_docs)]
-#![deny(rustdoc::unescaped_backticks)]
+#![deny(rustdoc::all)]
 
 #[cfg(feature = "base-security-policy")]
 use std::collections::HashSet;
