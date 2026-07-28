@@ -139,10 +139,6 @@ fn visit_unknown_composite_literal<'a>(
         // to an Array/Slice/Map/Struct. note that even if the literal is
         // not empty, `T{x, y}` without field names is still a valid struct
         // literal, so we cannot rule out anything at this point.
-        //  UNSOUND: high keys are ignored, since any attempt at resolving
-        // them would in turn also be wrong for struct field names (and we
-        // assume most unknown composites are structs). we only retain key
-        // information if they are constants resolvable without name resolution
         None => Value::UnknownComposite(visit_unresolved_composite_literal(
             ctx,
             values,
@@ -435,10 +431,22 @@ fn visit_unresolved_composite_literal<'a>(
 
                 if constant.is_some() {
                     (None, constant)
-                } else if matches!(key, ExprNode::Name(_)) {
-                    // this may be a struct field designator, which is not an
-                    // evaluated expression and need not resolve as a symbol
-                    (None, None)
+                } else if let ExprNode::Name(name) = key {
+                    // an unresolved composite may be a struct, where this is a
+                    // field designator rather than an evaluated expression, so
+                    // we only visit the name when it resolves successfully
+                    // (there is a chance that a struct field name is identical
+                    // to an in-scope symbol, but the resulting backtrace will
+                    // then necessarily be an overapproximation, unfortunately
+                    // over-tainting but never unsound)
+                    let symbol = ctx.symtab().get_symbol(name.content());
+
+                    let backtrace = symbol.and_then(|symbol| {
+                        super::visit_resolved_unqualified_operand_name(ctx, *name, &symbol)
+                            .backtrace()
+                    });
+
+                    (backtrace, None)
                 } else {
                     (super::get_expr_backtrace(ctx, key), None)
                 }
