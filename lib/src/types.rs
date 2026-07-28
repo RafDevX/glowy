@@ -66,22 +66,20 @@ mod promotion;
 /// name maps to the same [`Rc`] as its target, matching Go's spec semantics.
 ///
 /// A [`TypeInfo`] can be in one of two lifecycle states:
-/// - External Placeholder: an entry interned when analyzed code refers to some
-///   `pkg.T` before (or without ever) visiting the declaration of `T`,
-///   typically because `pkg` is a package that has not been analyzed (either
-///   because we have not gotten to it yet, or more commonly because it
-///   represents an external dependency). In this state [`Self::underlying`]
-///   returns [`None`] and the method set is empty. The purpose is to give a
-///   foreign type a stable identity so downstream dispatch (blanket directives,
-///   `Rc::ptr_eq` comparisons) has something to hold on to.
+/// - Unresolved: an entry interned before its declaration is visited, or a
+///   declared type whose underlying named type is still pending resolution. In
+///   this state [`Self::underlying`] returns [`None`]. Entries whose
+///   declarations are never visited represent external types and give
+///   downstream dispatch (blanket directives, `Rc::ptr_eq` comparisons) a
+///   stable identity.
 /// - Known: the type declaration has been visited and the structure recorded.
 ///   [`Self::underlying`] returns [`Some`].
 ///
 /// Note this means that a [`None`] underlying has different semantics to a
-/// [`Some`] holding [`TypeKind::Opaque`], as the first case means we know
-/// nothing about the type (we have never seen its declaration, so it might
-/// refer to some foreign type), while the latter case means we did see its
-/// declaration but could not resolve its shape.
+/// [`Some`] holding [`TypeKind::Opaque`]. After declaration resolution, the
+/// first case means we never saw the declaration and the entry refers to an
+/// external type; the latter means we saw its declaration but could not resolve
+/// its shape.
 ///
 /// A placeholder can be promoted to Known in place: [`Self::underlying`] is
 /// backed by a [`OnceCell`], so filling it does not require reallocating the
@@ -205,12 +203,32 @@ impl<'a> TypeInfo<'a> {
         }
     }
 
-    fn get_field(&self, name: &str) -> Option<&StructFieldInfo<'a>> {
-        if let TypeKind::Struct { fields } = self.strip_pointers().underlying()? {
-            fields.get(name)
-        } else {
-            None
+    fn underlying_struct_fields(&self) -> Option<&IndexMap<&'a str, StructFieldInfo<'a>>> {
+        let mut current = self;
+        let mut visited = HashSet::new();
+
+        loop {
+            if !visited.insert(ptr::from_ref(current)) {
+                // a recursive pointer chain cannot provide a struct shape
+                return None;
+            }
+
+            match current.underlying()? {
+                TypeKind::Named(inner) | TypeKind::Pointer(inner) => current = inner,
+                TypeKind::Struct { fields } => return Some(fields),
+                TypeKind::Opaque
+                | TypeKind::Map
+                | TypeKind::Slice
+                | TypeKind::Array
+                | TypeKind::Channel
+                | TypeKind::Interface
+                | TypeKind::Function => return None,
+            }
         }
+    }
+
+    fn get_field(&self, name: &str) -> Option<&StructFieldInfo<'a>> {
+        self.underlying_struct_fields()?.get(name)
     }
 
     fn get_method(&self, name: &str) -> Option<SymbolRef<'a>> {
@@ -332,6 +350,24 @@ pub enum TypeKind<'a> {
     Pointer(Rc<TypeInfo<'a>>),
 }
 
+impl<'a> TypeKind<'a> {
+    fn from_resolved_reference(node: &TypeNode<'a>, target: Rc<TypeInfo<'a>>) -> Self {
+        match node {
+            TypeNode::Name(_) => Self::Named(target),
+            TypeNode::Pointer { .. } => Self::Pointer(target),
+            TypeNode::Channel { .. }
+            | TypeNode::Array { .. }
+            | TypeNode::Slice { .. }
+            | TypeNode::Map { .. }
+            | TypeNode::Struct { .. }
+            | TypeNode::Interface { .. }
+            | TypeNode::Function { .. } => {
+                unreachable!("only named and pointer types reference a resolved type")
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct StructFieldInfo<'a> {
     // we need interior mutability (via RefCell) since sometimes a field's
@@ -430,19 +466,37 @@ impl<'a> TypeRegistry<'a> {
         underlying: &TypeNode<'a>,
         current_file: &'a Path,
     ) -> Rc<TypeInfo<'a>> {
-        let underlying_kind = self.build_kind(symtab, underlying, current_file);
+        let underlying_kind = self.try_build_kind(symtab, underlying, current_file);
+        let resolution_pending = underlying_kind.is_none();
 
         let inner = self.types.entry(package.clone()).or_default();
 
-        if let Some(existing) = inner.get(name) {
-            existing.promote(underlying_kind); // in case this was a placeholder
+        let info = if let Some(existing) = inner.get(name) {
+            if let Some(underlying_kind) = underlying_kind {
+                existing.promote(underlying_kind); // in case this was a placeholder
+            }
 
-            return Rc::clone(existing);
+            Rc::clone(existing)
+        } else {
+            let info = Rc::new(match underlying_kind {
+                Some(underlying_kind) => TypeInfo::new_known(package, name, underlying_kind),
+                None => TypeInfo::new_placeholder(package, name),
+            });
+
+            inner.insert(name, Rc::clone(&info));
+
+            info
+        };
+
+        if resolution_pending {
+            let imports = self.current_file_imports(symtab);
+
+            self.deferred.underlying_types.push(DeferredUnderlying {
+                owner: Rc::clone(&info),
+                underlying: underlying.clone(),
+                imports,
+            });
         }
-
-        let info = Rc::new(TypeInfo::new_known(package, name, underlying_kind));
-
-        inner.insert(name, Rc::clone(&info));
 
         info
     }
@@ -647,23 +701,29 @@ impl<'a> TypeRegistry<'a> {
         node: &TypeNode<'a>,
         current_file: &'a Path,
     ) -> TypeKind<'a> {
+        self.try_build_kind(symtab, node, current_file)
+            .unwrap_or(TypeKind::Opaque)
+    }
+
+    fn try_build_kind(
+        &mut self,
+        symtab: &SymbolTable<'a>,
+        node: &TypeNode<'a>,
+        current_file: &'a Path,
+    ) -> Option<TypeKind<'a>> {
         match node {
-            TypeNode::Name(_) => self
+            TypeNode::Name(_) | TypeNode::Pointer { .. } => self
                 .resolve(symtab, node)
-                .map_or(TypeKind::Opaque, TypeKind::Named),
-            TypeNode::Pointer { base } => match self.resolve(symtab, base) {
-                Some(info) => TypeKind::Pointer(info),
-                None => TypeKind::Opaque,
-            },
-            TypeNode::Struct { fields } => TypeKind::Struct {
+                .map(|target| TypeKind::from_resolved_reference(node, target)),
+            TypeNode::Struct { fields } => Some(TypeKind::Struct {
                 fields: self.build_struct_fields(symtab, fields, current_file),
-            },
-            TypeNode::Map { .. } => TypeKind::Map,
-            TypeNode::Slice { .. } => TypeKind::Slice,
-            TypeNode::Array { .. } => TypeKind::Array,
-            TypeNode::Channel { .. } => TypeKind::Channel,
-            TypeNode::Interface { .. } => TypeKind::Interface,
-            TypeNode::Function { .. } => TypeKind::Function,
+            }),
+            TypeNode::Map { .. } => Some(TypeKind::Map),
+            TypeNode::Slice { .. } => Some(TypeKind::Slice),
+            TypeNode::Array { .. } => Some(TypeKind::Array),
+            TypeNode::Channel { .. } => Some(TypeKind::Channel),
+            TypeNode::Interface { .. } => Some(TypeKind::Interface),
+            TypeNode::Function { .. } => Some(TypeKind::Function),
         }
     }
 
@@ -812,6 +872,7 @@ impl<'a> TypeRegistry<'a> {
             let before = self.deferred.outstanding_count();
 
             self.resolve_pending_aliases();
+            self.resolve_pending_underlying_types();
             self.resolve_pending_methods();
             self.resolve_pending_struct_fields();
 
@@ -824,6 +885,12 @@ impl<'a> TypeRegistry<'a> {
 
                 break;
             }
+        }
+
+        // a surviving defined-type target is opaque (normally a predeclared
+        // type); unlike aliases, the defined type itself must remain usable
+        for entry in &self.deferred.underlying_types {
+            entry.owner.promote(TypeKind::Opaque);
         }
 
         // discard any survivors: permanently unresolvable
@@ -851,6 +918,27 @@ impl<'a> TypeRegistry<'a> {
             } else {
                 // we could not resolve the alias, so add it back to the queue
                 self.deferred.aliases.push(entry);
+            }
+        }
+    }
+
+    fn resolve_pending_underlying_types(&mut self) {
+        let pending = mem::take(&mut self.deferred.underlying_types);
+
+        for entry in pending {
+            let resolved = self
+                .resolve_with(
+                    Some(entry.owner.package()),
+                    entry.imports.named(),
+                    entry.imports.wildcard(),
+                    &entry.underlying,
+                )
+                .map(|target| TypeKind::from_resolved_reference(&entry.underlying, target));
+
+            if let Some(underlying) = resolved {
+                entry.owner.promote(underlying);
+            } else {
+                self.deferred.underlying_types.push(entry);
             }
         }
     }
@@ -1009,13 +1097,14 @@ fn root_backtrace_from_field_tag<'a>(
 #[derive(Debug, Default)]
 struct DeferredQueues<'a> {
     aliases: Vec<DeferredAlias<'a>>,
+    underlying_types: Vec<DeferredUnderlying<'a>>,
     methods: Vec<DeferredMethod<'a>>,
     fields: Vec<DeferredStructFields<'a>>,
 }
 
 impl DeferredQueues<'_> {
     fn outstanding_count(&self) -> usize {
-        self.aliases.len() + self.methods.len() + self.fields.len()
+        self.aliases.len() + self.underlying_types.len() + self.methods.len() + self.fields.len()
     }
 }
 
@@ -1024,6 +1113,13 @@ struct DeferredAlias<'a> {
     package: FullPackagePath,
     name: &'a str,
     target: TypeNode<'a>,
+    imports: Rc<FileImportsRecord>,
+}
+
+#[derive(Debug)]
+struct DeferredUnderlying<'a> {
+    owner: Rc<TypeInfo<'a>>,
+    underlying: TypeNode<'a>,
     imports: Rc<FileImportsRecord>,
 }
 

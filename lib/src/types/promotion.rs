@@ -7,7 +7,8 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct PromotedField<'a> {
-    owner: Rc<TypeInfo<'a>>, // where the field is directly declared
+    // the type through which the field was found at the matching depth
+    owner: Rc<TypeInfo<'a>>,
     name: &'a str,
 }
 
@@ -67,7 +68,7 @@ fn search_subtree<'a, P: PromotionProbe<'a>>(
     // embedded interfaces are skipped: their members are resolved by
     // dynamic dispatch, which we don't model
 
-    let Some(TypeKind::Struct { fields }) = root.underlying() else {
+    let Some(fields) = root.underlying_struct_fields() else {
         return PromotionFrontier::None;
     };
 
@@ -175,9 +176,7 @@ impl<'a> PromotionProbe<'a> for FieldProbe {
     type Candidate = PromotedField<'a>;
 
     fn probe(&self, r#type: &Rc<TypeInfo<'a>>, name: &str) -> Option<Self::Candidate> {
-        let TypeKind::Struct { fields } = r#type.strip_pointers().underlying()? else {
-            return None;
-        };
+        let fields = r#type.underlying_struct_fields()?;
 
         // find the `&'a str` key so the returned `PromotedField` can borrow it
         // with the same lifetime as everything else on the type registry
