@@ -1,8 +1,8 @@
-use std::{borrow::Cow, cmp};
+use std::{borrow::Cow, cmp, hash};
 
 use crate::{Annotation, Location, Span};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceFileNode<'a> {
     pub package_clause: PackageClauseNode<'a>,
     pub imports: Vec<ImportNode<'a>>,
@@ -10,24 +10,24 @@ pub struct SourceFileNode<'a> {
     pub build_constraint: Option<BuildConstraintNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PackageClauseNode<'a> {
     pub id: Span<'a>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ImportNode<'a> {
     pub specs: Vec<ImportSpecNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ImportSpecNode<'a> {
     pub identifier: Option<Span<'a>>,
     pub path: String,
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DeclNode<'a> {
     Const {
         specs: Vec<BindingDeclSpecNode<'a>>,
@@ -54,14 +54,14 @@ impl<'a> From<FunctionDeclNode<'a>> for DeclNode<'a> {
 }
 
 // binding = const or var, since specs look the same for both
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BindingDeclSpecNode<'a> {
     pub ids: Vec<Span<'a>>,
     pub exprs: Vec<ExprNode<'a>>,
     pub r#type: Option<TypeNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeDeclSpecNode<'a> {
     pub alias: bool, // otherwise, typedef
     pub id: Span<'a>,
@@ -69,13 +69,13 @@ pub struct TypeDeclSpecNode<'a> {
     pub r#type: TypeNode<'a>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeParam<'a> {
     pub ids: Vec<Span<'a>>,
     pub constraint: Vec<InterfaceTypeTermNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TypeNode<'a> {
     Name(TypeNameNode<'a>),
     Channel {
@@ -148,7 +148,7 @@ impl<'a> From<TypeNameNode<'a>> for TypeNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeNameNode<'a> {
     pub package: Option<Span<'a>>, // for qualified type names
     pub id: Span<'a>,
@@ -157,13 +157,13 @@ pub struct TypeNameNode<'a> {
     pub args: Vec<TypeNode<'a>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChannelDirection {
     Send,
     Receive,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FieldDeclNode<'a> {
     Explicit(ExplicitFieldDeclNode<'a>),
     Embedded(EmbeddedFieldDeclNode<'a>),
@@ -183,7 +183,7 @@ impl<'a> From<EmbeddedFieldDeclNode<'a>> for FieldDeclNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExplicitFieldDeclNode<'a> {
     pub ids: Vec<Option<Span<'a>>>, // None if just padding ("_" blank field)
     pub r#type: TypeNode<'a>,
@@ -191,7 +191,7 @@ pub struct ExplicitFieldDeclNode<'a> {
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EmbeddedFieldDeclNode<'a> {
     pub pointer: bool, // whether prefixed by `*`
     pub r#type: TypeNameNode<'a>,
@@ -200,7 +200,7 @@ pub struct EmbeddedFieldDeclNode<'a> {
 }
 
 /// This represents both function declarations and method declarations.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionDeclNode<'a> {
     pub receiver: Option<FunctionParamDeclNode<'a>>, // if method
     pub name: Span<'a>,
@@ -211,7 +211,7 @@ pub struct FunctionDeclNode<'a> {
     pub annotation: Option<Box<Annotation<'a>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionSignatureNode<'a> {
     pub params: Vec<FunctionParamDeclNode<'a>>,
     pub result: FunctionResultNode<'a>,
@@ -228,7 +228,7 @@ impl FunctionSignatureNode<'_> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FunctionResultNode<'a> {
     None,
     Single(TypeNode<'a>),
@@ -254,14 +254,14 @@ impl FunctionResultNode<'_> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionParamDeclNode<'a> {
     pub ids: Vec<Span<'a>>,
     pub variadic: bool, // whether type is ...T
     pub r#type: TypeNode<'a>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InterfaceElementNode<'a> {
     Method {
         name: Span<'a>,
@@ -270,13 +270,13 @@ pub enum InterfaceElementNode<'a> {
     TypeUnion(Vec<InterfaceTypeTermNode<'a>>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InterfaceTypeTermNode<'a> {
     Simple(TypeNode<'a>),
     Underlying(TypeNode<'a>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ExprNode<'a> {
     Name(Span<'a>),
     // ^ note: qualified operand names supported only via selection -- even
@@ -353,7 +353,7 @@ impl ExprNode<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnaryOpKind {
     Identity,   // +x is 0 + x
     Negation,   // -x is 0 - x
@@ -364,7 +364,7 @@ pub enum UnaryOpKind {
     Receive,    // <-x
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BinaryOpKind {
     Eq,         // x == y
     NotEq,      // x != y
@@ -474,7 +474,7 @@ impl<'a> From<AmbiguousBracketAccessNode<'a>> for ExprNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LiteralNode<'a> {
     Int {
         value: u64,
@@ -559,7 +559,14 @@ impl PartialOrd for OrderedF64 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl hash::Hash for OrderedF64 {
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StructLiteralFieldsNode<'a> {
     Keyed(Vec<(Span<'a>, CompositeLiteralElementNode<'a>)>),
     Exhaustive(Vec<CompositeLiteralElementNode<'a>>), // no keys; ordered fields
@@ -570,7 +577,7 @@ pub type CompositeLiteralElementListNode<'a> = Vec<(
     CompositeLiteralElementNode<'a>,         // value
 )>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CompositeLiteralElementNode<'a> {
     Expr(ExprNode<'a>),
     Nested {
@@ -590,7 +597,7 @@ impl CompositeLiteralElementNode<'_> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CallNode<'a> {
     pub func: Box<ExprNode<'a>>,
     pub args: Vec<ExprNode<'a>>,
@@ -602,7 +609,7 @@ pub struct CallNode<'a> {
 // technically this should be a CallNode per the spec, but since the first
 // argument is a type, and since this function has special implications, we just
 // treat it as another kind of expression (not a function call)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MakeNode<'a> {
     pub r#type: TypeNode<'a>,
     pub n: Option<Box<ExprNode<'a>>>,
@@ -613,13 +620,13 @@ pub struct MakeNode<'a> {
 // technically this should be a CallNode per the spec, but since the first
 // argument can be a type, and since this function has special implications, we
 // just treat it as another kind of expression (not a function call)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NewNode<'a> {
     pub arg: NewArgNode<'a>,
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NewArgNode<'a> {
     Type(TypeNode<'a>),
     Expr(Box<ExprNode<'a>>),
@@ -634,14 +641,14 @@ pub enum NewArgNode<'a> {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SelectionNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub selector: Span<'a>,
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexingNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub index: Box<ExprNode<'a>>,
@@ -666,7 +673,7 @@ impl<'a> From<AmbiguousBracketAccessNode<'a>> for IndexingNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SlicingNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub low: Option<Box<ExprNode<'a>>>,
@@ -675,21 +682,21 @@ pub struct SlicingNode<'a> {
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ConversionNode<'a> {
     pub r#type: TypeNode<'a>,
     pub expr: Box<ExprNode<'a>>,
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeAssertionNode<'a> {
     pub expr: Box<ExprNode<'a>>,
     pub r#type: TypeNode<'a>,
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeInstantiationNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub type_args: Vec<TypeNode<'a>>,
@@ -714,7 +721,7 @@ impl<'a> From<AmbiguousBracketAccessNode<'a>> for TypeInstantiationNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AmbiguousBracketAccessNode<'a> {
     pub base: Box<ExprNode<'a>>,
     pub index_if_indexing: Box<ExprNode<'a>>,
@@ -723,13 +730,13 @@ pub struct AmbiguousBracketAccessNode<'a> {
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BlockNode<'a> {
     pub stmts: Vec<StatementNode<'a>>,
     pub location: Location, // for better error messages
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StatementNode<'a> {
     // simple
     Empty {
@@ -898,7 +905,7 @@ impl<'a> From<BlockNode<'a>> for StatementNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SendNode<'a> {
     pub channel: ExprNode<'a>,
     pub expr: ExprNode<'a>,
@@ -906,7 +913,7 @@ pub struct SendNode<'a> {
     pub annotation: Option<Box<Annotation<'a>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AssignmentNode<'a> {
     pub kind: AssignmentKind,
     pub lhs: Vec<ExprNode<'a>>,
@@ -915,7 +922,7 @@ pub struct AssignmentNode<'a> {
     pub annotation: Option<Box<Annotation<'a>>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AssignmentKind {
     Simple,     //   =
     Sum,        //  +=
@@ -931,7 +938,7 @@ pub enum AssignmentKind {
     BitClear,   // &^=
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ShortVarDeclNode<'a> {
     pub ids: Vec<Span<'a>>,
     pub exprs: Vec<ExprNode<'a>>,
@@ -939,7 +946,7 @@ pub struct ShortVarDeclNode<'a> {
     pub annotation: Option<Box<Annotation<'a>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IfNode<'a> {
     pub stmt: Option<Box<StatementNode<'a>>>, // run before cond is evaluated
     pub cond: ExprNode<'a>,
@@ -948,13 +955,13 @@ pub struct IfNode<'a> {
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ElseNode<'a> {
     If(Box<IfNode<'a>>),
     Block(BlockNode<'a>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ForNode<'a> {
     pub header: ForHeaderNode<'a>,
     pub header_location: Location,
@@ -962,20 +969,20 @@ pub struct ForNode<'a> {
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ForHeaderNode<'a> {
     Clause(ForClauseNode<'a>),
     Range(ForRangeNode<'a>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ForClauseNode<'a> {
     pub init: Option<Box<StatementNode<'a>>>,
     pub cond: Option<ExprNode<'a>>, // if omitted, same as "true"
     pub post: Option<Box<StatementNode<'a>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ForRangeNode<'a> {
     Decl {
         lhs: Vec<Span<'a>>,
@@ -990,19 +997,19 @@ pub enum ForRangeNode<'a> {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SelectNode<'a> {
     pub clauses: Vec<SelectClauseNode<'a>>,
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SelectClauseNode<'a> {
     pub case: Option<StatementNode<'a>>, // None means `default`
     pub body: Vec<StatementNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SwitchNode<'a> {
     Expr(ExprSwitchNode<'a>),
     Type(TypeSwitchNode<'a>),
@@ -1022,7 +1029,7 @@ impl<'a> From<TypeSwitchNode<'a>> for SwitchNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExprSwitchNode<'a> {
     pub stmt: Option<Box<StatementNode<'a>>>, // run before expr is executed
     pub expr: Option<ExprNode<'a>>,
@@ -1030,13 +1037,13 @@ pub struct ExprSwitchNode<'a> {
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExprSwitchCaseClause<'a> {
     pub exprs: Vec<ExprNode<'a>>, // empty means "default"
     pub body: Vec<StatementNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeSwitchNode<'a> {
     pub stmt: Option<Box<StatementNode<'a>>>, // run before expr is executed
     pub decl: Option<Span<'a>>,               // identifier for short var decl
@@ -1045,19 +1052,19 @@ pub struct TypeSwitchNode<'a> {
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeSwitchCaseClause<'a> {
     pub types: Vec<Option<TypeNode<'a>>>, // empty means "default"; None = "nil"
     pub body: Vec<StatementNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BuildConstraintNode<'a> {
     pub expr: BuildConstraintExprNode<'a>,
     pub location: Location,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BuildConstraintExprNode<'a> {
     Tag(&'a str),
     Not(Box<Self>),
