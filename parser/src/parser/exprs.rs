@@ -357,6 +357,10 @@ fn parse_conversion<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ConversionNode<'
 
     let expr = Box::new(parse_expression(s, true)?);
 
+    if matches!(s.peek(), Some(Ok(of_kind!(TokenKind::Comma)))) {
+        s.next();
+    }
+
     expect(s, TokenKind::ParenR, Some("explicit conversion"))?;
 
     let location = s.location_since(&beginning.unwrap());
