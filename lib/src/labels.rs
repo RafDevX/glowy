@@ -165,9 +165,9 @@ impl<'a> Label<'a> {
     ///
     /// label.accept_wildcards();
     ///
-    /// let mut tags = label.tags();
-    /// assert_eq!(tags.next(), Some(&LabelTag::from("not-bound"))); // concrete
-    /// assert_eq!(tags.next(), Some(&LabelTag::AxisWildcard("dir".into())));
+    /// let mut tags = label.into_iter();
+    /// assert_eq!(tags.next(), Some(LabelTag::from("not-bound"))); // concrete
+    /// assert_eq!(tags.next(), Some(LabelTag::AxisWildcard("dir".into())));
     /// assert_eq!(tags.next(), None);
     /// ```
     #[inline]
@@ -717,6 +717,22 @@ impl<'a> FromIterator<LabelTag<'a>> for Label<'a> {
         } else {
             Self::Tags(tags)
         }
+    }
+}
+
+impl<'a> IntoIterator for Label<'a> {
+    type IntoIter = <BTreeSet<Self::Item> as IntoIterator>::IntoIter;
+    type Item = LabelTag<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        let set = if let Self::Tags(tags) = self {
+            tags
+        } else {
+            BTreeSet::new()
+        };
+
+        set.into_iter()
     }
 }
 
