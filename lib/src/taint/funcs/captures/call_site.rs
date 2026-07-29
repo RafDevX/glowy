@@ -65,17 +65,16 @@ impl<'a> CallSiteConcretes<'a> {
         // capture against each parameter position
 
         let params = if let Some(signature) = func.signature() {
-            signature
-                .params
-                .iter()
+            funcs::collect_parameter_slots(signature)
+                .into_iter()
                 .enumerate()
-                .map(|(index, param)| {
+                .map(|(index, (id, variadic, r#type))| {
                     call_application::calculate_concrete_backtrace(
                         ctx,
                         index,
-                        param.ids.first(),
-                        param.variadic,
-                        &param.r#type,
+                        id,
+                        variadic,
+                        r#type,
                         args,
                         Cow::Borrowed(location),
                     )
