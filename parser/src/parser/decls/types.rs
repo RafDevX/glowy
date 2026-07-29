@@ -61,6 +61,13 @@ pub fn parse_type_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, DeclNode<'a>>
         s.next(); // advance
 
         loop {
+            // need to check for ) again after ; as well as right at the start
+            // of the loop (spec allows empty type declaration)
+            if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
+                s.next(); // advance
+                break;
+            }
+
             specs.push(parse_type_spec(s)?);
 
             if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
@@ -69,12 +76,6 @@ pub fn parse_type_decl<'a>(s: &mut TokenStream<'a>) -> PResult<'a, DeclNode<'a>>
             }
 
             expect(s, TokenKind::SemiColon, Some("type declaration specs list"))?;
-
-            // need to check for ) again after ;
-            if let Some(Ok(of_kind!(TokenKind::ParenR))) = s.peek() {
-                s.next(); // advance
-                break;
-            }
         }
     } else {
         // one spec
