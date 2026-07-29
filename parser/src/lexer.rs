@@ -16,7 +16,7 @@ use crate::{
     token::{Annotation, Token, TokenKind},
 };
 
-const BUILD_CONSTRAINT_PREFIX: &str = "//go:build ";
+const BUILD_CONSTRAINT_MARKER: &str = "//go:build";
 
 static ANNOTATION_REGEX: LazyLock<Regex> = {
     LazyLock::new(|| {
@@ -381,84 +381,19 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        // cloned so we can peek freely
-        let mut it = self.src.clone();
+        let view = self.src.as_str();
+        let line_end = view.find('\n').unwrap_or(view.len());
+        let line = &view[..line_end];
 
-        // try to parse a build constraint, but we can only commit if everything
-        // actually pans out at the end (including blank line after this)
+        let Some(expression_range) = build_constraint_expression_range(line) else {
+            return;
+        };
 
-        for ch in BUILD_CONSTRAINT_PREFIX.chars() {
-            if it.next() != Some(ch) {
-                return;
-            }
-        }
+        let offset = self.offset + expression_range.start;
 
-        let mut constraint = String::new();
+        self.build_constraint = Some(Span::new(&line[expression_range], offset, self.line));
 
-        for ch in it.by_ref() {
-            if ch == '\n' {
-                break;
-            }
-
-            constraint.push(ch);
-        }
-
-        // `//go:build` only actually counts as a build constraint if followed
-        // by a terminating empty line (with additional line comments between
-        // them, optionally), so we need to check that before accepting this
-
-        let mut extra_comment_chars = 0;
-        loop {
-            match it.next() {
-                Some('\n') => {
-                    // empty line means that this is accepted as a build
-                    // constraint and we can commit all we've been doing
-                    break;
-                }
-                Some('/') if it.next() == Some('/') => {
-                    // line comments are allowed after the build constraint,
-                    // e.g. `// +build` appended for legacy reasons mirroring
-                    // the `//go:build` constraint
-
-                    extra_comment_chars += 2;
-
-                    for ch in it.by_ref() {
-                        extra_comment_chars += 1;
-
-                        if ch == '\n' {
-                            // end of line comment
-                            break;
-                        }
-                    }
-                }
-                _ => {
-                    // build constraint is not accepted; rollback
-                    return;
-                }
-            }
-        }
-
-        // at this point we know it was an actual build constraint
-
-        self.read_n(BUILD_CONSTRAINT_PREFIX.len());
-
-        let trim_start = constraint.len() - constraint.trim_start().len();
-        if trim_start > 0 {
-            self.read_n(trim_start);
-        }
-
-        let span_len = constraint.trim().len();
-        let span = self.read_n(span_len);
-
-        let trim_end = constraint.trim_start().len() - span_len;
-        if trim_end > 0 {
-            self.read_n(trim_end);
-        }
-
-        self.read_n(extra_comment_chars);
-        self.read_n(2); // for the 2 \n
-
-        self.build_constraint = Some(span);
+        self.read_n(line.chars().count());
     }
 
     fn try_extract_legacy_build_constraints(&mut self) {
@@ -504,7 +439,7 @@ impl<'a> Lexer<'a> {
 
             // a modern `//go:build` directive is authoritative, so we just
             // advance to it for the regular extractor to handle it
-            if comment.starts_with(BUILD_CONSTRAINT_PREFIX) {
+            if build_constraint_expression_range(comment).is_some() {
                 let consumed_chars = view[..(cursor + comment_offset)].chars().count();
 
                 self.read_n(consumed_chars);
@@ -1206,6 +1141,27 @@ fn is_unicode_digit(ch: char) -> bool {
 
 fn is_whitespace(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '\r' | '\n')
+}
+
+fn build_constraint_expression_range(line: &str) -> Option<Range<usize>> {
+    let after_marker = line.strip_prefix(BUILD_CONSTRAINT_MARKER)?;
+
+    if after_marker
+        .chars()
+        .next()
+        .is_some_and(|ch| !ch.is_whitespace())
+    {
+        return None;
+    }
+
+    let expression = after_marker.trim();
+    let start = BUILD_CONSTRAINT_MARKER.len()
+        + (
+            // skip whitespace between `//go:build` and the expression
+            after_marker.len() - after_marker.trim_start().len()
+        );
+
+    Some(start..(start + expression.len()))
 }
 
 #[derive(Clone)]
