@@ -165,7 +165,7 @@ fn try_organize_struct_literal_fields(
                 let location = value.location();
                 let fake_bound = location.len().min(FAKE_SPAN_CONTENT.len());
                 let fake_content = &FAKE_SPAN_CONTENT[..fake_bound];
-                let fake_span = Span::new(fake_content, location.start, 0);
+                let fake_span = Span::new(fake_content, location.start);
                 let fake_token = Token::new(TokenKind::Struct, fake_span);
 
                 return Err(ParsingError::UnexpectedConstruct {
@@ -195,7 +195,7 @@ fn try_organize_struct_literal_fields(
                 let location = key_expr.location();
                 let fake_bound = location.len().min(FAKE_SPAN_CONTENT.len());
                 let fake_content = &FAKE_SPAN_CONTENT[..fake_bound];
-                let fake_span = Span::new(fake_content, location.start, 0);
+                let fake_span = Span::new(fake_content, location.start);
                 let fake_token = Token::new(TokenKind::Struct, fake_span);
 
                 return Err(ParsingError::UnexpectedConstruct {

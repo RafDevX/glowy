@@ -174,7 +174,6 @@ pub struct Lexer<'a> {
     src: Chars<'a>, // cannot use Peekable<Chars> as it doesn't support .as_str()
 
     offset: usize, // 0-indexed, from start of src (*not* start of line)
-    line: usize,   // 1-indexed
 
     last_token_kind: Option<TokenKind>,
     queue: VecDeque<Token<'a>>,
@@ -195,7 +194,6 @@ impl<'a> Lexer<'a> {
             src: src.chars(),
 
             offset: 0,
-            line: 1,
 
             last_token_kind: None,
             queue: VecDeque::new(),
@@ -228,28 +226,25 @@ impl<'a> Lexer<'a> {
 
     fn read_char(&mut self) -> Option<char> {
         let view = self.src.as_str();
-        let (original_offset, original_line) = (self.offset, self.line);
+        let original_offset = self.offset;
 
         if let Some(ch) = self.src.next() {
             self.offset += ch.len_utf8();
 
-            if ch == '\n' {
-                self.line += 1;
-
-                if self.enable_implicit_semicolon
-                    && self
-                        .last_token_kind
-                        .as_ref()
-                        .is_some_and(TokenKind::allows_implicit_semicolon)
-                    && self
-                        .queue
-                        .back()
-                        .is_none_or(|token| token.kind != TokenKind::SemiColon)
-                {
-                    // newline is guaranteed single-byte, no panic
-                    let span = Span::new(&view[..1], original_offset, original_line);
-                    self.queue.push_back(Token::new(TokenKind::SemiColon, span));
-                }
+            if ch == '\n'
+                && self.enable_implicit_semicolon
+                && self
+                    .last_token_kind
+                    .as_ref()
+                    .is_some_and(TokenKind::allows_implicit_semicolon)
+                && self
+                    .queue
+                    .back()
+                    .is_none_or(|token| token.kind != TokenKind::SemiColon)
+            {
+                // newline is guaranteed single-byte, no panic
+                let span = Span::new(&view[..1], original_offset);
+                self.queue.push_back(Token::new(TokenKind::SemiColon, span));
             }
 
             Some(ch)
@@ -259,13 +254,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_span(&mut self) -> Option<Span<'a>> {
-        let (original_offset, original_line) = (self.offset, self.line);
+        let original_offset = self.offset;
 
         let view = self.src.as_str();
 
         if let Some(ch) = self.read_char() {
             let n = ch.len_utf8();
-            Some(Span::new(&view[..n], original_offset, original_line))
+            Some(Span::new(&view[..n], original_offset))
         } else {
             None
         }
@@ -275,7 +270,7 @@ impl<'a> Lexer<'a> {
     where
         F: FnMut(char, &mut S, &mut Self) -> bool,
     {
-        let (original_offset, original_line) = (self.offset, self.line);
+        let original_offset = self.offset;
 
         let view = self.src.as_str();
         let mut len = 0;
@@ -288,7 +283,7 @@ impl<'a> Lexer<'a> {
             self.read_char(); // advance iterator
         }
 
-        let span = Span::new(&view[..len], original_offset, original_line);
+        let span = Span::new(&view[..len], original_offset);
 
         (span, state)
     }
@@ -391,7 +386,7 @@ impl<'a> Lexer<'a> {
 
         let offset = self.offset + expression_range.start;
 
-        self.build_constraint = Some(Span::new(&line[expression_range], offset, self.line));
+        self.build_constraint = Some(Span::new(&line[expression_range], offset));
 
         self.read_n(line.chars().count());
     }
@@ -417,7 +412,6 @@ impl<'a> Lexer<'a> {
         let mut location_start = None;
         let mut location_end = 0;
         let mut cursor = 0;
-        let mut line_number = self.line;
 
         let consumed_bytes = loop {
             let remaining = &view[cursor..];
@@ -452,7 +446,7 @@ impl<'a> Lexer<'a> {
             }
 
             if let Some(expression_range) = legacy_build_constraint_expression_range(comment) {
-                let line = Span::new(comment, self.offset + cursor + comment_offset, line_number);
+                let line = Span::new(comment, self.offset + cursor + comment_offset);
                 let line_location = line.location();
 
                 location_start.get_or_insert(line_location.start);
@@ -462,7 +456,6 @@ impl<'a> Lexer<'a> {
             }
 
             cursor += line_end + 1;
-            line_number += 1;
         };
 
         let consumed_chars = view[..consumed_bytes].chars().count();
@@ -1106,7 +1099,7 @@ impl<'a> Iterator for Lexer<'a> {
                 {
                     let token = Token::new(
                         TokenKind::SemiColon,
-                        Span::new(self.src.as_str(), self.offset, self.line),
+                        Span::new(self.src.as_str(), self.offset),
                     );
 
                     self.last_token_kind = Some(TokenKind::SemiColon);
@@ -1255,9 +1248,9 @@ mod tests {
     fn package() {
         assert_eq!(
             vec![
-                Token::new(TokenKind::Package, Span::new("package", 2, 1)),
-                Token::new(TokenKind::Ident, Span::new("hello", 16, 3)),
-                Token::new(TokenKind::SemiColon, Span::new("", 21, 3)),
+                Token::new(TokenKind::Package, Span::new("package", 2)),
+                Token::new(TokenKind::Ident, Span::new("hello", 16)),
+                Token::new(TokenKind::SemiColon, Span::new("", 21)),
             ],
             lex("  package    \t\n\nhello").unwrap(),
         );
@@ -1267,15 +1260,15 @@ mod tests {
     fn int_lits() {
         assert_eq!(
             vec![
-                Token::new(TokenKind::Int(3), Span::new("3", 2, 1)),
-                Token::new(TokenKind::Int(50), Span::new("50", 4, 1)),
-                Token::new(TokenKind::Int(29), Span::new("0b11101", 7, 1)),
-                Token::new(TokenKind::Int(505), Span::new("0o771", 15, 1)),
-                Token::new(TokenKind::Int(3909), Span::new("0xf45", 21, 1)),
-                Token::new(TokenKind::SemiColon, Span::new("\n", 26, 1)),
-                Token::new(TokenKind::Int(123), Span::new("0123", 28, 2)),
-                Token::new(TokenKind::Int(0), Span::new("0", 33, 2)),
-                Token::new(TokenKind::SemiColon, Span::new("", 34, 2)),
+                Token::new(TokenKind::Int(3), Span::new("3", 2)),
+                Token::new(TokenKind::Int(50), Span::new("50", 4)),
+                Token::new(TokenKind::Int(29), Span::new("0b11101", 7)),
+                Token::new(TokenKind::Int(505), Span::new("0o771", 15)),
+                Token::new(TokenKind::Int(3909), Span::new("0xf45", 21)),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 26)),
+                Token::new(TokenKind::Int(123), Span::new("0123", 28)),
+                Token::new(TokenKind::Int(0), Span::new("0", 33)),
+                Token::new(TokenKind::SemiColon, Span::new("", 34)),
             ],
             lex("\t 3 50 0b11101 0o771 0xf45\n 0123 0").unwrap()
         );
@@ -1285,28 +1278,28 @@ mod tests {
     fn float_lits() {
         assert_eq!(
             vec![
-                Token::new(TokenKind::Float(0.0), Span::new("0.", 2, 1)),
-                Token::new(TokenKind::Float(72.4), Span::new("72.40", 5, 1)),
-                Token::new(TokenKind::Float(72.4), Span::new("072.40", 11, 1)),
+                Token::new(TokenKind::Float(0.0), Span::new("0.", 2)),
+                Token::new(TokenKind::Float(72.4), Span::new("72.40", 5)),
+                Token::new(TokenKind::Float(72.4), Span::new("072.40", 11)),
                 #[allow(clippy::approx_constant)]
-                Token::new(TokenKind::Float(2.71828), Span::new("2.71828", 18, 1)),
-                Token::new(TokenKind::Float(1.0), Span::new("1.e+0", 26, 1)),
-                Token::new(TokenKind::SemiColon, Span::new("\n", 31, 1)),
-                Token::new(TokenKind::Float(6.6742e-11), Span::new("6.6742e-11", 33, 2)),
-                Token::new(TokenKind::Float(1_000_000.0), Span::new("1E6", 44, 2)),
-                Token::new(TokenKind::Float(0.25), Span::new(".25", 48, 2)),
-                Token::new(TokenKind::Float(12345.0), Span::new(".12345E+5", 52, 2)),
-                Token::new(TokenKind::Float(15.0), Span::new("15.", 62, 2)),
-                Token::new(TokenKind::Float(15.0), Span::new("0.15e+02", 66, 2)),
-                Token::new(TokenKind::Float(0.25), Span::new("0x1p-2", 76, 2)),
-                Token::new(TokenKind::Float(2048.0), Span::new("0x2.p10", 83, 2)),
-                Token::new(TokenKind::Float(1.9375), Span::new("0x1.Fp+0", 91, 2)),
-                Token::new(TokenKind::Float(0.5), Span::new("0X.8p-0", 100, 2)),
+                Token::new(TokenKind::Float(2.71828), Span::new("2.71828", 18)),
+                Token::new(TokenKind::Float(1.0), Span::new("1.e+0", 26)),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 31)),
+                Token::new(TokenKind::Float(6.6742e-11), Span::new("6.6742e-11", 33)),
+                Token::new(TokenKind::Float(1_000_000.0), Span::new("1E6", 44)),
+                Token::new(TokenKind::Float(0.25), Span::new(".25", 48)),
+                Token::new(TokenKind::Float(12345.0), Span::new(".12345E+5", 52)),
+                Token::new(TokenKind::Float(15.0), Span::new("15.", 62)),
+                Token::new(TokenKind::Float(15.0), Span::new("0.15e+02", 66)),
+                Token::new(TokenKind::Float(0.25), Span::new("0x1p-2", 76)),
+                Token::new(TokenKind::Float(2048.0), Span::new("0x2.p10", 83)),
+                Token::new(TokenKind::Float(1.9375), Span::new("0x1.Fp+0", 91)),
+                Token::new(TokenKind::Float(0.5), Span::new("0X.8p-0", 100)),
                 Token::new(
                     TokenKind::Float(0.124_984_741_210_937_5),
-                    Span::new("0X1FFFP-16", 108, 2)
+                    Span::new("0X1FFFP-16", 108)
                 ),
-                Token::new(TokenKind::SemiColon, Span::new("", 118, 2)),
+                Token::new(TokenKind::SemiColon, Span::new("", 118)),
             ],
             lex(concat!(
                 "\t 0. 72.40 072.40 2.71828 1.e+0\n 6.6742e-11 1E6 .25 .12345E+5 15. 0.15e+02",
@@ -1320,21 +1313,21 @@ mod tests {
     fn underscores() {
         assert_eq!(
             vec![
-                Token::new(TokenKind::Int(42), Span::new("4_2", 2, 1)),
-                Token::new(TokenKind::Int(600), Span::new("0_600", 6, 1)),
-                Token::new(TokenKind::Int(195_951_310), Span::new("0xBad_Face", 12, 1)),
+                Token::new(TokenKind::Int(42), Span::new("4_2", 2)),
+                Token::new(TokenKind::Int(600), Span::new("0_600", 6)),
+                Token::new(TokenKind::Int(195_951_310), Span::new("0xBad_Face", 12)),
                 Token::new(
                     TokenKind::Int(170_141_183_460_469),
-                    Span::new("170_141183_460469", 23, 1)
+                    Span::new("170_141183_460469", 23)
                 ),
-                Token::new(TokenKind::SemiColon, Span::new("\n", 40, 1)),
-                Token::new(TokenKind::Float(15.0), Span::new("1_5.", 41, 2)),
-                Token::new(TokenKind::Float(15.0), Span::new("0.15e+0_2", 46, 2)),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 40)),
+                Token::new(TokenKind::Float(15.0), Span::new("1_5.", 41)),
+                Token::new(TokenKind::Float(15.0), Span::new("0.15e+0_2", 46)),
                 Token::new(
                     TokenKind::Float(0.124_984_741_210_937_5),
-                    Span::new("0X_1FFFP-16", 56, 2)
+                    Span::new("0X_1FFFP-16", 56)
                 ),
-                Token::new(TokenKind::SemiColon, Span::new("", 67, 2)),
+                Token::new(TokenKind::SemiColon, Span::new("", 67)),
             ],
             lex(concat!(
                 "\t 4_2 0_600 0xBad_Face 170_141183_460469\n",
@@ -1348,26 +1341,26 @@ mod tests {
     fn rune_lits() {
         assert_eq!(
             vec![
-                Token::new(TokenKind::Rune('a'), Span::new("'a'", 2, 1)),
-                Token::new(TokenKind::Rune('\u{0007}'), Span::new("'\\a'", 6, 1)),
-                Token::new(TokenKind::Rune('\n'), Span::new("'\\n'", 11, 1)),
-                Token::new(TokenKind::SemiColon, Span::new("\n", 15, 1)),
-                Token::new(TokenKind::Rune('\''), Span::new("'\\''", 17, 2)),
-                Token::new(TokenKind::Rune('ä'), Span::new("'ä'", 22, 2)),
-                Token::new(TokenKind::Rune('本'), Span::new("'本'", 27, 2)),
-                Token::new(TokenKind::Rune('\t'), Span::new("'\\t'", 33, 2)),
-                Token::new(TokenKind::Rune('\t'), Span::new("'\t'", 38, 2)),
-                Token::new(TokenKind::Rune('\0'), Span::new("'\\000'", 42, 2)),
-                Token::new(TokenKind::Rune('\x07'), Span::new("'\\007'", 49, 2)),
-                Token::new(TokenKind::Rune('\u{ff}'), Span::new("'\\377'", 56, 2)),
-                Token::new(TokenKind::Rune('\u{07}'), Span::new("'\\x07'", 63, 2)),
-                Token::new(TokenKind::Rune('\u{ff}'), Span::new("'\\xff'", 70, 2)),
-                Token::new(TokenKind::Rune('\u{12e4}'), Span::new("'\\u12e4'", 77, 2)),
+                Token::new(TokenKind::Rune('a'), Span::new("'a'", 2)),
+                Token::new(TokenKind::Rune('\u{0007}'), Span::new("'\\a'", 6)),
+                Token::new(TokenKind::Rune('\n'), Span::new("'\\n'", 11)),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 15)),
+                Token::new(TokenKind::Rune('\''), Span::new("'\\''", 17)),
+                Token::new(TokenKind::Rune('ä'), Span::new("'ä'", 22)),
+                Token::new(TokenKind::Rune('本'), Span::new("'本'", 27)),
+                Token::new(TokenKind::Rune('\t'), Span::new("'\\t'", 33)),
+                Token::new(TokenKind::Rune('\t'), Span::new("'\t'", 38)),
+                Token::new(TokenKind::Rune('\0'), Span::new("'\\000'", 42)),
+                Token::new(TokenKind::Rune('\x07'), Span::new("'\\007'", 49)),
+                Token::new(TokenKind::Rune('\u{ff}'), Span::new("'\\377'", 56)),
+                Token::new(TokenKind::Rune('\u{07}'), Span::new("'\\x07'", 63)),
+                Token::new(TokenKind::Rune('\u{ff}'), Span::new("'\\xff'", 70)),
+                Token::new(TokenKind::Rune('\u{12e4}'), Span::new("'\\u12e4'", 77)),
                 Token::new(
                     TokenKind::Rune('\u{101234}'),
-                    Span::new("'\\U00101234'", 86, 2)
+                    Span::new("'\\U00101234'", 86)
                 ),
-                Token::new(TokenKind::SemiColon, Span::new("", 100, 2)),
+                Token::new(TokenKind::SemiColon, Span::new("", 100)),
             ],
             lex(
                 "\t 'a' '\\a' '\\n'\n '\\'' 'ä' '本' '\\t' '\t' '\\000' '\\007' '\\377' '\\x07' \
@@ -1377,55 +1370,38 @@ mod tests {
         );
 
         assert_eq!(
-            Err(LexingError::MultipleCharactersInRune(Span::new("a", 2, 1))),
+            Err(LexingError::MultipleCharactersInRune(Span::new("a", 2))),
             lex("'aa'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "k", 2, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("k", 2))),
             lex("'\\k'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "'", 4, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("'", 4))),
             lex("'\\xa'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "'", 3, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("'", 3))),
             lex("'\\0'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "0", 4, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("0", 4))),
             lex("'\\400'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "F", 6, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("F", 6))),
             lex("'\\uDFFF'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "0", 10, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("0", 10))),
             lex("'\\U00110000'")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "\"", 2, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("\"", 2))),
             lex("'\\\"'")
         );
-        assert_eq!(
-            Err(LexingError::EmptyRune(Span::new("''", 0, 1))),
-            lex("''")
-        );
+        assert_eq!(Err(LexingError::EmptyRune(Span::new("''", 0))), lex("''"));
         assert_eq!(Err(LexingError::UnclosedString), lex("'"));
     }
 
@@ -1439,34 +1415,31 @@ mod tests {
 
         assert_eq!(
             vec![
-                Token::new(TokenKind::String(s!("abc")), Span::new("`abc`", 4, 1)),
+                Token::new(TokenKind::String(s!("abc")), Span::new("`abc`", 4)),
                 Token::new(
                     TokenKind::String(s!("\\n\n\\n")),
-                    Span::new("`\\n\n\\n`", 10, 1)
+                    Span::new("`\\n\n\\n`", 10)
                 ),
-                Token::new(TokenKind::String(s!("\n")), Span::new("\"\\n\"", 18, 2)),
-                Token::new(TokenKind::String(s!("\"")), Span::new("\"\\\"\"", 23, 2)),
-                Token::new(TokenKind::SemiColon, Span::new("\n", 27, 2)),
+                Token::new(TokenKind::String(s!("\n")), Span::new("\"\\n\"", 18)),
+                Token::new(TokenKind::String(s!("\"")), Span::new("\"\\\"\"", 23)),
+                Token::new(TokenKind::SemiColon, Span::new("\n", 27)),
                 Token::new(
                     TokenKind::String(s!("Hello, world!\n")),
-                    Span::new("\"Hello, world!\\n\"", 29, 3)
+                    Span::new("\"Hello, world!\\n\"", 29)
                 ),
-                Token::new(
-                    TokenKind::String(s!("日本語")),
-                    Span::new("\"日本語\"", 47, 3)
-                ),
+                Token::new(TokenKind::String(s!("日本語")), Span::new("\"日本語\"", 47)),
                 Token::new(
                     TokenKind::String(s!("\u{65e5}本\u{008a9e}")),
-                    Span::new("\"\\u65e5本\\U00008a9e\"", 59, 3)
+                    Span::new("\"\\u65e5本\\U00008a9e\"", 59)
                 ),
                 Token::new(
                     TokenKind::String(s!("\u{ff}\u{00FF}")),
-                    Span::new("\"\\xff\\u00FF\"", 81, 3)
+                    Span::new("\"\\xff\\u00FF\"", 81)
                 ),
-                Token::new(TokenKind::String(s!("a\nb")), Span::new("`a\n\rb`", 94, 3)),
-                Token::new(TokenKind::String(s!("")), Span::new("\"\"", 101, 4)),
-                Token::new(TokenKind::String(s!("")), Span::new("``", 104, 4)),
-                Token::new(TokenKind::SemiColon, Span::new("", 108, 4)),
+                Token::new(TokenKind::String(s!("a\nb")), Span::new("`a\n\rb`", 94)),
+                Token::new(TokenKind::String(s!("")), Span::new("\"\"", 101)),
+                Token::new(TokenKind::String(s!("")), Span::new("``", 104)),
+                Token::new(TokenKind::SemiColon, Span::new("", 108)),
             ],
             lex(
                 "  \t `abc` `\\n\n\\n` \"\\n\" \"\\\"\"\n \"Hello, world!\\n\" \"日本語\" \
@@ -1476,29 +1449,23 @@ mod tests {
         );
 
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "0", 6, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("0", 6))),
             lex("\"\\uD800\"")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "0", 10, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("0", 10))),
             lex("\"\\U00110000\"")
         );
         assert_eq!(
-            Err(LexingError::LineBreakInString(Span::new("\n", 2, 1))),
+            Err(LexingError::LineBreakInString(Span::new("\n", 2))),
             lex("\"a\nb\"")
         );
         assert_eq!(
-            Err(LexingError::LineBreakInString(Span::new("\n", 2, 1))),
+            Err(LexingError::LineBreakInString(Span::new("\n", 2))),
             lex("\"a\nb\"")
         );
         assert_eq!(
-            Err(LexingError::InvalidStringEscapeSequence(Span::new(
-                "'", 2, 1
-            ))),
+            Err(LexingError::InvalidStringEscapeSequence(Span::new("'", 2))),
             lex("\"\\'\"")
         );
         assert_eq!(Err(LexingError::UnclosedString), lex("\"aa"));
@@ -1508,15 +1475,15 @@ mod tests {
     fn greedy() {
         assert_eq!(
             vec![
-                Token::new(TokenKind::Gt, Span::new(">", 0, 1)),
-                Token::new(TokenKind::Excl, Span::new("!", 2, 1)),
-                Token::new(TokenKind::DoubleEq, Span::new("==", 4, 1)),
-                Token::new(TokenKind::NotEq, Span::new("!=", 7, 1)),
-                Token::new(TokenKind::AmpCaret, Span::new("&^", 10, 1)),
-                Token::new(TokenKind::AmpCaretAssign, Span::new("&^=", 13, 1)),
-                Token::new(TokenKind::Comma, Span::new(",", 17, 1)),
-                Token::new(TokenKind::DoubleGt, Span::new(">>", 19, 1)),
-                Token::new(TokenKind::Gt, Span::new(">", 21, 1))
+                Token::new(TokenKind::Gt, Span::new(">", 0)),
+                Token::new(TokenKind::Excl, Span::new("!", 2)),
+                Token::new(TokenKind::DoubleEq, Span::new("==", 4)),
+                Token::new(TokenKind::NotEq, Span::new("!=", 7)),
+                Token::new(TokenKind::AmpCaret, Span::new("&^", 10)),
+                Token::new(TokenKind::AmpCaretAssign, Span::new("&^=", 13)),
+                Token::new(TokenKind::Comma, Span::new(",", 17)),
+                Token::new(TokenKind::DoubleGt, Span::new(">>", 19)),
+                Token::new(TokenKind::Gt, Span::new(">", 21))
             ],
             lex("> ! == != &^ &^= , >>>").unwrap()
         );

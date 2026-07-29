@@ -171,7 +171,7 @@ mod tests {
                         kind: BinaryOpKind::Product,
                         left: Box::new(ExprNode::UnaryOp {
                             kind: UnaryOpKind::Negation,
-                            operand: Box::new(ExprNode::Name(Span::new("a", 6, 1))),
+                            operand: Box::new(ExprNode::Name(Span::new("a", 6))),
                             location: 5..7
                         }),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
@@ -184,7 +184,7 @@ mod tests {
                 }),
                 right: Box::new(ExprNode::BinaryOp {
                     kind: BinaryOpKind::LogicalAnd,
-                    left: Box::new(ExprNode::Name(Span::new("b", 15, 1))),
+                    left: Box::new(ExprNode::Name(Span::new("b", 15))),
                     right: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Eq,
                         left: Box::new(ExprNode::BinaryOp {
@@ -219,7 +219,7 @@ mod tests {
                                     value: 2,
                                     location: 37..38
                                 })),
-                                right: Box::new(ExprNode::Name(Span::new("abc", 42, 1))),
+                                right: Box::new(ExprNode::Name(Span::new("abc", 42))),
                                 location: 37..45
                             }),
                             location: 31..45
@@ -252,8 +252,8 @@ mod tests {
                     right: Box::new(ExprNode::UnaryOp {
                         kind: UnaryOpKind::Address,
                         operand: Box::new(ExprNode::Selection(SelectionNode {
-                            base: Box::new(ExprNode::Name(Span::new("ab", 13, 2))),
-                            selector: Span::new("cd", 16, 2),
+                            base: Box::new(ExprNode::Name(Span::new("ab", 13))),
+                            selector: Span::new("cd", 16),
                             location: 13..18
                         })),
                         location: 11..18

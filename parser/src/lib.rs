@@ -49,19 +49,14 @@ pub type Location = Range<usize>;
 pub struct Span<'a> {
     content: &'a str,
     offset: usize,
-    line: usize,
 }
 
 impl<'a> Span<'a> {
     /// Constructs a new localized source file snippet reference.
     #[must_use]
     #[inline]
-    pub fn new(content: &'a str, offset: usize, line: usize) -> Self {
-        Self {
-            content,
-            offset,
-            line,
-        }
+    pub fn new(content: &'a str, offset: usize) -> Self {
+        Self { content, offset }
     }
 
     /// Returns a reference to the underlying source code snippet.
@@ -81,16 +76,7 @@ impl<'a> Span<'a> {
     #[must_use]
     #[inline]
     pub fn subspan(&self, range: Range<usize>) -> Self {
-        let line_delta = self.content[..range.start]
-            .chars()
-            .filter(|ch| *ch == '\n')
-            .count();
-
-        Self::new(
-            &self.content[range.clone()],
-            self.offset + range.start,
-            self.line + line_delta,
-        )
+        Self::new(&self.content[range.clone()], self.offset + range.start)
     }
 }
 

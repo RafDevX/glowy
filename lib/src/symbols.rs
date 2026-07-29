@@ -1098,7 +1098,7 @@ impl<'a> Symbol<'a> {
     ) -> SymbolRef<'a> {
         Self::new_ref(
             // vv not very pretty, but it should never matter anyway
-            Pinned::new(Path::new("/main.go"), Span::new(name, 0, 1)),
+            Pinned::new(Path::new("/main.go"), Span::new(name, 0)),
             false,
             value,
             known_const,

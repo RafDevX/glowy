@@ -458,8 +458,8 @@ mod tests {
                     func: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
                         left: Box::new(ExprNode::Selection(SelectionNode {
-                            base: Box::new(ExprNode::Name(Span::new("abc", 1, 1))),
-                            selector: Span::new("def", 5, 1),
+                            base: Box::new(ExprNode::Name(Span::new("abc", 1))),
+                            selector: Span::new("def", 5),
                             location: 1..8
                         })),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
@@ -519,8 +519,8 @@ mod tests {
                     base: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
                         left: Box::new(ExprNode::Selection(SelectionNode {
-                            base: Box::new(ExprNode::Name(Span::new("abc", 1, 1))),
-                            selector: Span::new("def", 5, 1),
+                            base: Box::new(ExprNode::Name(Span::new("abc", 1))),
+                            selector: Span::new("def", 5),
                             location: 1..8
                         })),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
@@ -531,7 +531,7 @@ mod tests {
                     }),
                     index: Box::new(ExprNode::BinaryOp {
                         kind: BinaryOpKind::Sum,
-                        left: Box::new(ExprNode::Name(Span::new("k", 15, 1))),
+                        left: Box::new(ExprNode::Name(Span::new("k", 15))),
                         right: Box::new(ExprNode::Literal(LiteralNode::Int {
                             value: 2,
                             location: 19..20
@@ -556,7 +556,7 @@ mod tests {
                 arg: NewArgNode::Type(TypeNode::Slice {
                     element: Box::new(TypeNode::Name(TypeNameNode {
                         package: None,
-                        id: Span::new("int", 6, 1),
+                        id: Span::new("int", 6),
                         args: vec![],
                     })),
                 }),
@@ -572,7 +572,7 @@ mod tests {
             ExprNode::New(NewNode {
                 arg: NewArgNode::Expr(Box::new(ExprNode::BinaryOp {
                     kind: BinaryOpKind::Sum,
-                    left: Box::new(ExprNode::Name(Span::new("x", 4, 1))),
+                    left: Box::new(ExprNode::Name(Span::new("x", 4))),
                     right: Box::new(ExprNode::Literal(LiteralNode::Int {
                         value: 1,
                         location: 8..9,
@@ -592,10 +592,10 @@ mod tests {
                 arg: NewArgNode::Ambiguous {
                     if_type: TypeNode::Name(TypeNameNode {
                         package: None,
-                        id: Span::new("T", 4, 1),
+                        id: Span::new("T", 4),
                         args: vec![],
                     }),
-                    if_expr: Box::new(ExprNode::Name(Span::new("T", 4, 1))),
+                    if_expr: Box::new(ExprNode::Name(Span::new("T", 4))),
                 },
                 location: 0..6,
             }),

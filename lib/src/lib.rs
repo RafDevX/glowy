@@ -252,7 +252,7 @@ pub static FAKE_LOCATION: LazyLock<Pinned<Location>> = LazyLock::new(|| {
 pub static FAKE_SPAN: LazyLock<Pinned<Span<'static>>> = LazyLock::new(|| {
     Pinned::new(
         "/main.go", // should exist in most cases
-        Span::new("unknown", 0, 1),
+        Span::new("unknown", 0),
     )
 });
 

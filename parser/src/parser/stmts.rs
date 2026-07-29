@@ -394,7 +394,7 @@ mod tests {
     fn labeled_empty_statement_before_block_end() {
         assert_eq!(
             vec![StatementNode::Labeled {
-                label: Span::new("end", 3, 2),
+                label: Span::new("end", 3),
                 inner: Box::new(StatementNode::Empty { location: 8..8 }),
             }],
             parse("{\n end:\n}").unwrap()
@@ -425,12 +425,12 @@ mod tests {
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
                     lhs: vec![
-                        ExprNode::Name(Span::new("a", 88, 5)),
-                        ExprNode::Name(Span::new("b", 91, 5))
+                        ExprNode::Name(Span::new("a", 88)),
+                        ExprNode::Name(Span::new("b", 91))
                     ],
                     rhs: vec![
-                        ExprNode::Name(Span::new("c", 95, 5)),
-                        ExprNode::Name(Span::new("d", 98, 5))
+                        ExprNode::Name(Span::new("c", 95)),
+                        ExprNode::Name(Span::new("d", 98))
                     ],
                     location: 88..99,
                     annotation: None,
@@ -446,8 +446,8 @@ mod tests {
                             })),
                             location: 121..123,
                         },
-                        ExprNode::Name(Span::new("x", 125, 6)),
-                        ExprNode::Name(Span::new("k", 129, 6))
+                        ExprNode::Name(Span::new("x", 125)),
+                        ExprNode::Name(Span::new("k", 129))
                     ],
                     rhs: vec![
                         ExprNode::BinaryOp {
@@ -474,29 +474,29 @@ mod tests {
                             })),
                             location: 141..146,
                         },
-                        ExprNode::Name(Span::new("x", 148, 6))
+                        ExprNode::Name(Span::new("x", 148))
                     ],
                     location: 121..149,
                     annotation: None,
                 }),
                 StatementNode::ShortVarDecl(ShortVarDeclNode {
                     ids: vec![
-                        Span::new("k", 171, 7),
-                        Span::new("r", 174, 7),
-                        Span::new("v", 177, 7)
+                        Span::new("k", 171),
+                        Span::new("r", 174),
+                        Span::new("v", 177)
                     ],
                     exprs: vec![
-                        ExprNode::Name(Span::new("m", 182, 7)),
-                        ExprNode::Name(Span::new("n", 185, 7)),
-                        ExprNode::Name(Span::new("o", 188, 7))
+                        ExprNode::Name(Span::new("m", 182)),
+                        ExprNode::Name(Span::new("n", 185)),
+                        ExprNode::Name(Span::new("o", 188))
                     ],
                     location: 171..189,
                     annotation: None,
                 }),
                 StatementNode::Assignment(AssignmentNode {
                     kind: AssignmentKind::Simple,
-                    lhs: vec![ExprNode::Name(Span::new("a", 263, 10))],
-                    rhs: vec![ExprNode::Name(Span::new("b", 267, 10))],
+                    lhs: vec![ExprNode::Name(Span::new("a", 263))],
+                    rhs: vec![ExprNode::Name(Span::new("b", 267))],
                     location: 263..268,
                     annotation: Some(Box::new(Annotation {
                         directive: "directive",
@@ -505,8 +505,8 @@ mod tests {
                     })),
                 }),
                 StatementNode::ShortVarDecl(ShortVarDeclNode {
-                    ids: vec![Span::new("c", 290, 11)],
-                    exprs: vec![ExprNode::Name(Span::new("d", 295, 11))],
+                    ids: vec![Span::new("c", 290)],
+                    exprs: vec![ExprNode::Name(Span::new("d", 295))],
                     location: 290..296,
                     annotation: None
                 })
