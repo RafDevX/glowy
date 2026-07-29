@@ -458,15 +458,17 @@ fn is_satisfied_go_version_tag(name: &str) -> bool {
 }
 
 fn go_version_tag_components(name: &str) -> Option<(u32, u32)> {
-    let (major, minor) = name.strip_prefix("go")?.split_once('.')?;
+    // the Go toolchain only recognizes specifically `go1.XX`, other numbers are
+    // not accepted (i.e., are not treated specially)
+    let minor = name.strip_prefix("go1.")?;
 
-    if let Ok(major) = major.parse::<u32>()
-        && let Ok(minor) = minor.parse::<u32>()
+    if !matches!(minor.as_bytes().first(), Some(b'1'..=b'9'))
+        || !minor.bytes().all(|byte| byte.is_ascii_digit())
     {
-        Some((major, minor))
-    } else {
-        None
+        return None;
     }
+
+    Some((1, minor.parse().ok()?))
 }
 
 fn is_conventional_ignore_tag(name: &str) -> bool {
