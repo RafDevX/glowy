@@ -35,14 +35,22 @@ pub use goto::GotoConvergenceState;
 
 #[derive(Clone, Copy)]
 pub enum PackageInitializationPhase {
-    TopLevelDeclarations,
+    PackageBindings,
+    FunctionDeclarations,
     InitFunctions,
     Main,
 }
 
 impl PackageInitializationPhase {
-    pub const ORDERED_PHASES: &[Self] =
-        &[Self::TopLevelDeclarations, Self::InitFunctions, Self::Main];
+    // Named function bodies must see every package binding after initialization,
+    // regardless of whether its declaration appears before that binding in
+    // source order.
+    pub const ORDERED_PHASES: &[Self] = &[
+        Self::PackageBindings,
+        Self::FunctionDeclarations,
+        Self::InitFunctions,
+        Self::Main,
+    ];
 }
 
 pub fn visit_source_file<'a>(
@@ -69,7 +77,7 @@ pub fn visit_source_file<'a>(
 
     for decl in &node.top_level_decls {
         let DeclNode::Function(func) = decl else {
-            if matches!(phase, PackageInitializationPhase::TopLevelDeclarations) {
+            if matches!(phase, PackageInitializationPhase::PackageBindings) {
                 visit_decl(ctx, decl);
             }
 
@@ -82,7 +90,8 @@ pub fn visit_source_file<'a>(
             && node.package_clause.id.content() == "main";
 
         match phase {
-            PackageInitializationPhase::TopLevelDeclarations => {
+            PackageInitializationPhase::PackageBindings => {}
+            PackageInitializationPhase::FunctionDeclarations => {
                 if !is_init && !is_main {
                     visit_decl(ctx, decl);
                 }
