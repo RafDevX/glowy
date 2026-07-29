@@ -46,15 +46,19 @@ impl<'a> CallCaptureConcretes<'a> {
     }
 }
 
+#[expect(clippy::option_option, reason = "Represent receiver absent vs Bottom")]
 struct CallSiteConcretes<'a> {
     params: Vec<Option<LabelBacktrace<'a>>>,
+    receiver: Option<Option<LabelBacktrace<'a>>>,
     branch: Option<LabelBacktrace<'a>>,
 }
 
 impl<'a> CallSiteConcretes<'a> {
+    #[expect(clippy::option_option, reason = "Represent receiver absent vs Bottom")]
     fn new(
         ctx: &AnalysisContext<'a>,
         func: &FunctionValue<'a>,
+        receiver: Option<Option<&LabelBacktrace<'a>>>,
         args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
         location: &Pinned<'a, Location>,
     ) -> Self {
@@ -84,9 +88,15 @@ impl<'a> CallSiteConcretes<'a> {
             Vec::new()
         };
 
+        let receiver = receiver.map(Option::<&_>::cloned);
+
         let branch = funcs::calc_effective_call_site_branch_backtrace_for(ctx, func, location);
 
-        Self { params, branch }
+        Self {
+            params,
+            receiver,
+            branch,
+        }
     }
 
     fn realize_backtrace_for_params(
@@ -110,13 +120,15 @@ impl<'a> CallSiteConcretes<'a> {
     }
 }
 
+#[expect(clippy::option_option, reason = "Represent receiver absent vs Bottom")]
 pub fn apply_capture_mutations_and_derive_concretes<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
+    receiver: Option<Option<&LabelBacktrace<'a>>>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
 ) -> CallCaptureConcretes<'a> {
-    let call_site = CallSiteConcretes::new(ctx, func, args, location);
+    let call_site = CallSiteConcretes::new(ctx, func, receiver, args, location);
 
     let has_direct_capture_mutations = func
         .captures()
@@ -210,13 +222,15 @@ fn merge_capture_backtraces<'a>(
     )
 }
 
+#[expect(clippy::option_option, reason = "Represent receiver absent vs Bottom")]
 pub fn apply_capture_write_backs<'a>(
     ctx: &mut AnalysisContext<'a>,
     func: &FunctionValue<'a>,
+    receiver: Option<Option<&LabelBacktrace<'a>>>,
     args: &[(ValueRef<'a>, Option<&LabelBacktrace<'a>>)],
     location: &Pinned<'a, Location>,
 ) {
-    let call_site_concretes = CallSiteConcretes::new(ctx, func, args, location);
+    let call_site_concretes = CallSiteConcretes::new(ctx, func, receiver, args, location);
 
     let capture_backtraces = derive_best_backtraces_for_captures(ctx, func, &call_site_concretes);
 
@@ -297,6 +311,12 @@ fn apply_capture_write_backs_with<'a>(
         let substitutions_after: Vec<_> = capture_backtraces
             .range((binding.index() + 1)..) // continue from where we left off
             .map(|(index, concrete)| (SyntheticSlot::Capture(*index), concrete.as_ref()))
+            .chain(
+                call_site_concretes
+                    .receiver
+                    .as_ref()
+                    .map(|concrete| (SyntheticSlot::Receiver, concrete.as_ref())),
+            )
             .chain(iter::once((
                 SyntheticSlot::CallSiteBranch,
                 call_site_concretes.branch.as_ref(),

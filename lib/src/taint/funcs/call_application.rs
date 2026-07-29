@@ -165,6 +165,7 @@ pub fn apply_call<'a>(
             captures::call_site::apply_capture_mutations_and_derive_concretes(
                 ctx,
                 func,
+                receiver.as_ref().map(Option::as_ref),
                 &with_backtraces_ref,
                 &call_location,
             ),
@@ -200,6 +201,7 @@ pub fn apply_call<'a>(
             captures::call_site::apply_capture_write_backs(
                 ctx,
                 func,
+                receiver.as_ref().map(Option::as_ref),
                 &with_backtraces_ref,
                 &call_location,
             );
@@ -600,6 +602,7 @@ impl<'a> IterableFunctionCall<'a> {
         captures::call_site::apply_capture_mutations_and_derive_concretes(
             ctx,
             &capture_realized,
+            func.has_receiver().then_some(None),
             &args_with_backtraces,
             location,
         );
@@ -649,6 +652,7 @@ impl<'a> IterableFunctionCall<'a> {
         captures::call_site::apply_capture_mutations_and_derive_concretes(
             ctx,
             &feedback_realized,
+            func.has_receiver().then_some(None),
             &args_with_backtraces,
             location,
         );
