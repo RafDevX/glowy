@@ -216,7 +216,7 @@ pub enum SyntheticSlot {
 }
 
 impl SyntheticSlot {
-    pub(super) fn label_backtrace_kind(&self) -> LabelBacktraceKind {
+    pub(super) fn realized_backtrace_kind(&self) -> LabelBacktraceKind {
         match self {
             Self::Param(_) => LabelBacktraceKind::FunctionArgument,
             Self::Receiver => LabelBacktraceKind::MethodReceiver,

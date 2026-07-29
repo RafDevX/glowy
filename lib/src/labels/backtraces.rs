@@ -4,7 +4,7 @@ use parser::Location;
 
 use crate::{
     Pinned,
-    labels::{FunctionRef, Label, SyntheticSlot},
+    labels::{FunctionRef, Label, LabelTag, SyntheticSlot},
 };
 
 /// Represents the propagation history leading up to a label attribution.
@@ -349,12 +349,16 @@ impl<'a> LabelBacktrace<'a> {
         // branch can legitimately be realized with itself while summarizing a
         // recursive call; those placeholders must survive until the outermost
         // call site and so cannot be filtered out here
-        let concrete_without_recursive_capture = if matches!(from_slot, SyntheticSlot::Capture(_))
-            && let Some(concrete) = concrete
-            && concrete
+        let is_recursive_substitution = concrete.is_some_and(|concrete| {
+            concrete
                 .label()
                 .tags()
                 .any(|tag| tag.is_synthetic_representation(from_func, from_slot))
+        });
+
+        let concrete_without_recursive_capture = if matches!(from_slot, SyntheticSlot::Capture(_))
+            && let Some(concrete) = concrete
+            && is_recursive_substitution
         {
             Some(concrete.realize(from_func, from_slot, None))
         } else {
@@ -367,6 +371,39 @@ impl<'a> LabelBacktrace<'a> {
             .as_ref()
             .map_or(concrete, Option::as_ref);
 
+        let label_without_slot: Label = self
+            .label()
+            .tags()
+            .filter(|tag| !tag.is_synthetic_representation(from_func, from_slot))
+            .cloned()
+            .collect();
+
+        let realized_label = concrete
+            .map(|backtrace| backtrace.label() + &label_without_slot)
+            .unwrap_or(label_without_slot);
+
+        if realized_label == *self.label() {
+            // recursive calls commonly substitute a parameter with a value
+            // containing that same parameter synthetic. if the aggregate label
+            // is unchanged, descending into the provenance tree only unfolds
+            // the recursive equation without adding any information. retain
+            // the compact fixed-point representation and continue with the
+            // remaining, potentially meaningful substitutions
+            return self.realize_all(from_func, remaining);
+        }
+
+        if is_recursive_substitution && !matches!(from_slot, SyntheticSlot::Capture(_)) {
+            // parameter, receiver, and branch synthetics must remain available
+            // to the eventual outermost call, unlike capture recursion above.
+            // rebuilding the fully expanded provenance tree here would unfold
+            // the recursive equation once per convergence pass, so instead we
+            // preserve the same label equation as a shallow tree of tag roots
+            return self
+                .flatten_to_label(realized_label)
+                .expect("recursive substitutions include the non-Bottom concrete backtrace label")
+                .realize_all(from_func, remaining);
+        }
+
         if matches!(
             self.kind,
             LabelBacktraceKind::FunctionParameter | LabelBacktraceKind::ClosureCapture
@@ -377,7 +414,7 @@ impl<'a> LabelBacktrace<'a> {
                 // then we are a root synthetic that needs to be realized
 
                 let realized = Self::new(
-                    from_slot.label_backtrace_kind(),
+                    from_slot.realized_backtrace_kind(),
                     concrete.map_or(&Label::Bottom, Self::label).clone(),
                     self.symbol(),
                     self.location().clone(),
@@ -409,6 +446,46 @@ impl<'a> LabelBacktrace<'a> {
                 self.location().clone(),
             )
         }
+    }
+
+    /// Replaces the provenance hierarchy with one root per tag.
+    ///
+    /// This preserves the aggregate label and enough synthetic provenance for
+    /// later realization without retaining paths that recursively refer back
+    /// to the same substitution.
+    ///
+    /// Returns [`None`] if `label` is [`Label::Bottom`].
+    fn flatten_to_label(&self, label: Label<'a>) -> Option<Self> {
+        let roots: Vec<_> = label
+            .tags()
+            .cloned()
+            .map(|tag| {
+                let kind = match &tag {
+                    // we cannot use SyntheticSlot::realized_backtrace_kind
+                    // because these have not yet been realized
+                    LabelTag::Synthetic { slot, .. } => match slot {
+                        SyntheticSlot::Param(_) | SyntheticSlot::Receiver => {
+                            LabelBacktraceKind::FunctionParameter
+                        }
+                        SyntheticSlot::Capture(_) => LabelBacktraceKind::ClosureCapture,
+                        SyntheticSlot::CallSiteBranch | SyntheticSlot::YieldFeedback => {
+                            LabelBacktraceKind::Branch
+                        }
+                    },
+                    LabelTag::Concrete(_) | LabelTag::AxisWildcard(_) => self.kind,
+                };
+
+                Self::new_root(
+                    kind,
+                    Label::from_single(tag),
+                    self.symbol,
+                    self.location.clone(),
+                )
+                .unwrap() // a single-tag Label cannot be Bottom
+            })
+            .collect();
+
+        Self::new(self.kind, label, self.symbol, self.location.clone(), &roots)
     }
 
     /// Remaps one function's synthetic tags to another function's slots.
