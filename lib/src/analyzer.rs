@@ -1146,6 +1146,10 @@ impl Analyzer {
         errors
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Tight coupling, so it would become more confusing if split up"
+    )]
     fn analyze_permutation<'a>(
         &'a self,
         admitted_asts: &[(&'a path::Path, &SourceFileNode<'a>)],
@@ -1249,6 +1253,7 @@ impl Analyzer {
 
             let snapshot = context.symtab().snapshot_per_package();
 
+            let mut single_changed_package: Option<Option<FullPackagePath>> = None;
             let changed_package_count = snapshot
                 .iter()
                 .filter(|&(pkg, current)| {
@@ -1259,6 +1264,15 @@ impl Analyzer {
 
                     // keep only packages that changed since the last iteration
                     prev.get(pkg) != Some(current)
+                })
+                .inspect(|&(pkg, _)| {
+                    if single_changed_package.is_none() {
+                        // this is the first one we see
+                        single_changed_package = Some(Some(pkg.clone()));
+                    } else {
+                        // this is not the first one, so there's no "single"
+                        single_changed_package = Some(None);
+                    }
                 })
                 .count();
 
@@ -1272,9 +1286,15 @@ impl Analyzer {
             iteration_index += 1;
 
             if self.verbose {
+                let single = if let Some(Some(single_changed)) = single_changed_package {
+                    Cow::Owned(format!(" ({single_changed})"))
+                } else {
+                    Cow::Borrowed("")
+                };
+
                 println!(
                     "{verbose_prefix}Finished convergence iteration #{iteration_index} (Stage 2) \
-                     in {:.2?} - {changed_package_count} package(s) changed",
+                     in {:.2?} - {changed_package_count} package(s) changed{single}",
                     iteration_started.elapsed(),
                 );
             }
