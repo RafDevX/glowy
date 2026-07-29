@@ -1,11 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     hash,
     rc::Rc,
 };
 
 use crate::{
-    labels::LabelBacktrace,
+    labels::{Label, LabelBacktrace, LabelTag},
     values::{SimpleConstValue, ValueRef},
 };
 
@@ -123,7 +123,40 @@ impl SnapshotAware for LabelBacktrace<'_> {
         // in the future it might be worth considering comparing other fields,
         // but never `children` (avoiding `children` is why we have to do all
         // this, since otherwise it'd lead to an infinite loop)
-        self.label() == other.label()
+        self.label().snapshot_aware_eq(other.label())
+    }
+}
+
+impl SnapshotAware for Label<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Bottom, Self::Bottom) => true,
+            (Self::Tags(left), Self::Tags(right)) => left.snapshot_aware_eq(right),
+            (Self::Tags(_), Self::Bottom) | (Self::Bottom, Self::Tags(_)) => false,
+        }
+    }
+}
+
+impl SnapshotAware for LabelTag<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Concrete(left), Self::Concrete(right)) => left == right,
+            (Self::AxisWildcard(left), Self::AxisWildcard(right)) => left == right,
+            (
+                Self::Synthetic {
+                    func: left_func,
+                    slot: left_slot,
+                    ..
+                },
+                Self::Synthetic {
+                    func: right_func,
+                    slot: right_slot,
+                    ..
+                },
+            ) => left_func.snapshot_aware_eq(right_func) && left_slot == right_slot,
+            // ^^^ identifier is ignored, per PartialEq
+            (Self::Concrete(_) | Self::AxisWildcard(_) | Self::Synthetic { .. }, _) => false,
+        }
     }
 }
 
@@ -180,6 +213,33 @@ impl<K: Eq, V: SnapshotAware> SnapshotAware for BTreeMap<K, V> {
                     left_key == right_key && left_value.snapshot_aware_eq(right_value)
                 },
             )
+    }
+}
+
+// this looks weird because snapshot_aware_eq does not necessarily match eq from
+// PartialEq, so BTreeSet's native ordering cannot be relied upon; we have to
+// treat it as an unordered collection, while ensuring each element is matched
+// once and only once (using SnapshotAware semantics)
+impl<T: SnapshotAware> SnapshotAware for BTreeSet<T> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        let mut unmatched: Vec<_> = other.iter().collect();
+
+        self.iter().all(|value| {
+            let Some(index) = unmatched
+                .iter()
+                .position(|candidate| value.snapshot_aware_eq(*candidate))
+            else {
+                return false;
+            };
+
+            unmatched.swap_remove(index);
+
+            true
+        })
     }
 }
 

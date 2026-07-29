@@ -823,13 +823,8 @@ impl SnapshotAware for SliceValue<'_> {
                 .backtrace
                 .snapshot_aware_eq(&other.maximum.backtrace)
             && self.access.snapshot_aware_eq(&other.access)
-            && self.revocation == other.revocation
-            && self.backings.len() == other.backings.len()
-            && self
-                .backings
-                .iter()
-                .zip(&other.backings)
-                .all(|(left, right)| left.snapshot_aware_eq(right))
+            && self.revocation.snapshot_aware_eq(&other.revocation)
+            && self.backings.snapshot_aware_eq(&other.backings)
     }
 }
 

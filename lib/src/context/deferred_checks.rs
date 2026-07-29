@@ -42,7 +42,7 @@ impl<'a> DeferredEnforcementCheck<'a> {
                     found: other_found,
                     file: other_file,
                 },
-            ) if sink == other_sink && file == other_file => {
+            ) if sink.snapshot_aware_eq(other_sink) && file == other_file => {
                 if other_found.label().is_subset_of(found.label()) {
                     // no need to union, since found >= other_found:
                     // (a) for allow sinks, a whitelist that allows found would
@@ -75,11 +75,10 @@ impl<'a> DeferredEnforcementCheck<'a> {
                     file: other_file,
                     location: other_location,
                 },
-            ) if expected_sequence == other_expected
+            ) if expected_sequence.snapshot_aware_eq(other_expected)
                 && file == other_file
                 && location == other_location
-                && found.as_ref().map(LabelBacktrace::label)
-                    == other_found.as_ref().map(LabelBacktrace::label) =>
+                && found.snapshot_aware_eq(other_found) =>
             {
                 // assertions are equality based and thus only be merged if
                 // their labels match exactly, but should still be merged
@@ -142,6 +141,7 @@ impl SnapshotAware for DeferredEnforcementCheck<'_> {
                     && found_a.snapshot_aware_eq(found_b)
                     && file_a == file_b
             }
+            #[expect(clippy::suspicious_operation_groupings, reason = "False positive")]
             (
                 Self::Assertion {
                     expected_sequence: expected_sequence_a,
@@ -156,7 +156,7 @@ impl SnapshotAware for DeferredEnforcementCheck<'_> {
                     location: location_b,
                 },
             ) => {
-                expected_sequence_a == expected_sequence_b
+                expected_sequence_a.snapshot_aware_eq(expected_sequence_b)
                     && found_a.snapshot_aware_eq(found_b)
                     && file_a == file_b
                     && location_a == location_b

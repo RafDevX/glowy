@@ -812,9 +812,9 @@ impl SnapshotAware for FunctionValue<'_> {
             && self.declared_underlying_type == other.declared_underlying_type
             && self.outcome.snapshot_aware_eq(&other.outcome)
             && self.backtrace.snapshot_aware_eq(&other.backtrace)
-            && self.sources == other.sources
-            && self.revocations == other.revocations
-            && self.sinks == other.sinks
+            && self.sources.snapshot_aware_eq(&other.sources)
+            && self.revocations.snapshot_aware_eq(&other.revocations)
+            && self.sinks.snapshot_aware_eq(&other.sinks)
             // propagation order is irrelevant, so we do not use Vec's impl of
             // SnapshotAwareEr: `defer_check` guarantees that each source-level
             // check is registered at most once
@@ -1360,6 +1360,14 @@ impl<'a> InherentSourceOrRevocation<'a> {
     }
 }
 
+impl SnapshotAware for InherentSourceOrRevocation<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.label.snapshot_aware_eq(&other.label)
+            && self.result_selector == other.result_selector
+            && self.predicate == other.predicate
+    }
+}
+
 // we cannot use SinkDescriptor directly because inherent sinks are floating,
 // i.e., they have no associated location until triggered at a call site
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1398,5 +1406,13 @@ impl<'a> InherentSink<'a> {
 
     pub fn applies_to_arg(&self, index: usize) -> bool {
         self.arg_index.is_none_or(|target| target == index)
+    }
+}
+
+impl SnapshotAware for InherentSink<'_> {
+    fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        self.allow == other.allow
+            && self.label.snapshot_aware_eq(&other.label)
+            && self.arg_index == other.arg_index
     }
 }

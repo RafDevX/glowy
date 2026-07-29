@@ -576,7 +576,6 @@ impl<K: Eq + Hash> SnapshotAware for CompositeValue<'_, K> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
         self.r#dyn.snapshot_aware_eq(&other.r#dyn)
             && self.keys.snapshot_aware_eq(&other.keys)
-            && self.r#const.len() == other.r#const.len()
             && self.r#const.snapshot_aware_eq(&other.r#const)
             && self.dyn_overrides == other.dyn_overrides
             && self.known_len == other.known_len

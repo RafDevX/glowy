@@ -127,7 +127,10 @@ impl<'a> SinkDescriptor<'a> {
 
 impl SnapshotAware for SinkDescriptor<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
-        self == other
+        self.kind == other.kind
+            && self.allow == other.allow
+            && self.label.snapshot_aware_eq(&other.label)
+            && self.location == other.location
     }
 }
 
