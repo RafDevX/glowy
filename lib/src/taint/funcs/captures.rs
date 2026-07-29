@@ -51,16 +51,28 @@ pub fn register_captures<'a>(
 
                 (symbol, true)
             }
-            CapturedSymbol::Qualified { qualifier, name } => {
-                if ctx.symtab().get_symbol(qualifier).is_some() {
-                    // not actually a real import qualifier, just field access
-                    continue;
-                }
+            CapturedSymbol::Selection { base, selector } => {
+                let symbol = if let Some(base_symbol) = ctx.symtab().get_symbol(base) {
+                    let base_value = base_symbol.borrow().value().get();
 
-                let QualifiedSymbolResolutionResult::Success(symbol) =
-                    ctx.symtab().get_qualified_symbol(qualifier, name)
-                else {
-                    continue;
+                    let Some(base_type) = base_value.declared_type() else {
+                        continue;
+                    };
+
+                    let Some(method) = base_type.lookup_promoted_method(selector) else {
+                        // this is a field selection, not a method reference
+                        continue;
+                    };
+
+                    method
+                } else {
+                    let QualifiedSymbolResolutionResult::Success(symbol) =
+                        ctx.symtab().get_qualified_symbol(base, selector)
+                    else {
+                        continue;
+                    };
+
+                    symbol
                 };
 
                 (symbol, false)

@@ -19,7 +19,7 @@ use crate::taint::mutation::LeftValue;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapturedSymbol<'a> {
     Unqualified(&'a str),
-    Qualified { qualifier: &'a str, name: &'a str },
+    Selection { base: &'a str, selector: &'a str },
 }
 
 type CapturedSymbols<'a> = HashSet<CapturedSymbol<'a>>;
@@ -676,12 +676,10 @@ impl<'a> SymbolCaptureCollector<'a> for SelectionNode<'a> {
         captured: &mut CapturedSymbols<'a>,
         declared: &mut HashSet<&'a str>,
     ) {
-        if let ExprNode::Name(qualifier) = &*self.base
-            && !declared.contains(qualifier.content())
-        {
-            captured.insert(CapturedSymbol::Qualified {
-                qualifier: qualifier.content(),
-                name: self.selector.content(),
+        if let ExprNode::Name(base) = &*self.base {
+            captured.insert(CapturedSymbol::Selection {
+                base: base.content(),
+                selector: self.selector.content(),
             });
         }
 
