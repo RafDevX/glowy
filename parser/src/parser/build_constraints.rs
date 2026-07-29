@@ -175,7 +175,7 @@ fn tokenize_build_constraint(
             ')' => single!(BuildConstraintToken::ParenR),
             '&' => double!('&', BuildConstraintToken::And),
             '|' => double!('|', BuildConstraintToken::Or),
-            first if is_tag_start_char(first) => {
+            first if is_tag_char(first) => {
                 chars.next(); // advance
 
                 let end = loop {
@@ -207,12 +207,8 @@ fn tokenize_build_constraint(
     Ok(tokens)
 }
 
-fn is_tag_start_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_'
-}
-
 fn is_tag_char(ch: char) -> bool {
-    is_tag_start_char(ch) || ch == '.'
+    ch.is_letter() || ch.is_number_decimal() || matches!(ch, '_' | '.')
 }
 
 fn collapse_and(mut clauses: Vec<BuildConstraintExprNode<'_>>) -> BuildConstraintExprNode<'_> {
@@ -391,7 +387,7 @@ fn parse_legacy_build_constraint_term(
     if let Some((position, ch)) = tag_span
         .content()
         .char_indices()
-        .find(|(_, ch)| !is_legacy_tag_char(*ch))
+        .find(|(_, ch)| !is_tag_char(*ch))
     {
         return Err(BuildConstraintParsingError::IllegalChar {
             found: tag_span.subspan(position..(position + ch.len_utf8())),
@@ -405,10 +401,6 @@ fn parse_legacy_build_constraint_term(
     } else {
         Ok(tag)
     }
-}
-
-fn is_legacy_tag_char(ch: char) -> bool {
-    ch.is_letter() || ch.is_number_decimal() || matches!(ch, '_' | '.')
 }
 
 #[cfg(test)]
