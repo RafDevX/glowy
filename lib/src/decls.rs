@@ -79,7 +79,7 @@ fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a
         return;
     }
 
-    let _ = ctx.register_import_spec(qualifier, node.path.clone(), true);
+    let _: Option<bool> = ctx.register_import_spec(qualifier, node.path.clone(), true);
 }
 
 fn visit_decl<'a>(ctx: &mut AnalysisContext<'a>, node: &DeclNode<'a>) {

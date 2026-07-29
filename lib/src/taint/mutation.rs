@@ -644,7 +644,7 @@ impl<'a> LeftValue<'a> for SlicingNode<'a> {
             // backing storage (for example, `copy(make([]int, 1)[:], src)`).
             let target = exprs::visit_single_expr(ctx, &self.clone().into());
 
-            let _ = mutator(ctx, target);
+            let _: MutationResult<'a> = mutator(ctx, target);
 
             return;
         }
@@ -728,7 +728,7 @@ impl<'a> LeftValue<'a> for TypeAssertionNode<'a> {
             // for example `factory().([]byte)[0] = x`.
             let target = exprs::visit_single_expr(ctx, &self.clone().into());
 
-            let _ = mutator(ctx, target);
+            let _: MutationResult<'a> = mutator(ctx, target);
 
             return;
         }
@@ -873,7 +873,7 @@ impl<'a> LeftValue<'a> for SelectionNode<'a> {
                 return;
             }
 
-            let _ = mutate_selected_field(ctx, self, target, mutator);
+            let _: MutationResult<'a> = mutate_selected_field(ctx, self, target, mutator);
 
             return;
         }

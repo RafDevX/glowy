@@ -192,7 +192,7 @@ impl<'a> TypeInfo<'a> {
     fn promote(&self, underlying: TypeKind<'a>) {
         // we ignore the Result because this set would only fail if there was a
         // duplicate type declaration, but we assume the input program compiles
-        let _ = self.underlying.set(underlying);
+        let _: Result<_, _> = self.underlying.set(underlying);
     }
 
     pub fn strip_pointers(&self) -> &Self {
