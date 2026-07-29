@@ -85,22 +85,8 @@ impl<'a> Label<'a> {
     /// ```
     #[must_use]
     #[inline]
-    pub fn from_tags<I, S>(tags: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        I::IntoIter: ExactSizeIterator,
-        S: IntoCowStr<'a>,
-    {
-        let iter = tags.into_iter();
-
-        // ExactSizeIterator::is_empty exists but is unstable since 2016...
-        if iter.len() == 0 {
-            Self::Bottom
-        } else {
-            let set: BTreeSet<_> = iter.map(LabelTag::from).collect();
-
-            Self::Tags(set)
-        }
+    pub fn from_tags(tags: impl IntoIterator<Item = impl IntoCowStr<'a>>) -> Self {
+        tags.into_iter().map(LabelTag::from).collect()
     }
 
     /// Constructs an ordered sequence of [`Label`]s given a slice of strings.
@@ -499,19 +485,12 @@ impl<'a> Label<'a> {
             return Self::Bottom;
         };
 
-        let restricted: BTreeSet<_> = tags
-            .iter()
+        // no risk of wildcard specializations being introduced, since the
+        // restriction is always necessarily a subset of self
+        tags.iter()
             .filter(|tag| tag.axis().is_none_or(|axis| axes.contains(axis)))
             .cloned()
-            .collect();
-
-        if restricted.is_empty() {
-            Self::Bottom
-        } else {
-            // no risk of wildcard specializations being introduced, since the
-            // restriction is always necessarily a subset of self
-            Self::Tags(restricted)
-        }
+            .collect()
     }
 
     /// Returns whether this [`Label`] is a [`Label::Bottom`].
@@ -524,7 +503,7 @@ impl<'a> Label<'a> {
     /// # use glowy::labels::Label;
     /// #
     /// assert!(Label::Bottom.is_bottom());
-    /// assert!(Label::from_tags::<&[&str], _>(&[]).is_bottom());
+    /// assert!(Label::from_tags(&[] as &[&str]).is_bottom());
     /// assert!(!Label::from_tags(&["alice"]).is_bottom());
     /// assert!(!Label::from_tags(&["alice", "bob"]).is_bottom());
     /// ```
@@ -680,17 +659,10 @@ impl<'a> Label<'a> {
             return Self::Bottom;
         };
 
-        let tags: BTreeSet<_> = tags
-            .iter()
+        tags.iter()
             .filter(|tag| !matches!(tag, LabelTag::Synthetic { .. }))
             .cloned()
-            .collect();
-
-        if tags.is_empty() {
-            Self::Bottom
-        } else {
-            Self::Tags(tags)
-        }
+            .collect()
     }
 }
 
@@ -731,6 +703,19 @@ impl fmt::Display for Label<'_> {
                 write!(f, "}}")
             }
             Label::Bottom => write!(f, "{{}}"),
+        }
+    }
+}
+
+impl<'a> FromIterator<LabelTag<'a>> for Label<'a> {
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = LabelTag<'a>>>(iter: T) -> Self {
+        let tags = BTreeSet::from_iter(iter);
+
+        if tags.is_empty() {
+            Self::Bottom
+        } else {
+            Self::Tags(tags)
         }
     }
 }
