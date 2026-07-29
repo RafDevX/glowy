@@ -299,9 +299,11 @@ impl Analyzer {
     /// The specified directory is traversed recursively and all files with a
     /// `.go` extension are collected, except those below `vendor`/`testdata`
     /// directories, as well as those with a `_test.go` suffix (unless the
-    /// [`AnalysisConfig::include_tests`] option is enabled). Only real files
-    /// and directories are considered: symlinks, for example, are ignored,
-    /// since they could lead to cycles.
+    /// [`AnalysisConfig::include_tests`] option is enabled). Sub-directories
+    /// with names prefixed with `.` (e.g., `.git`) or `_` (e.g., `_tools`) are
+    /// also always ignored, per Go convention. Only real files and directories
+    /// are considered: symlinks, for example, are ignored, since they could
+    /// lead to cycles.
     ///
     /// If a subdirectory of the provided module directory is found to contain a
     /// nested `go.mod`, then that subdirectory is considered a separate
