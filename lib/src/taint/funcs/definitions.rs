@@ -61,6 +61,9 @@ pub fn visit_function_def<'a>(
         None,
     );
 
+    // from previous convergence iteration
+    let mut previous_func = None;
+
     if let Some(name) = decl_symbol {
         if let Some(existing) = ctx.symtab().get_symbol_by_declaration(name) {
             // this was already declared by a previous analysis iteration/phase,
@@ -69,6 +72,42 @@ pub fn visit_function_def<'a>(
             // structures holding an Rc, such as TypeInfo::methods) can observe
             // the body through the same handle, otherwise e.g. typed dispatch
             // would keep dereferencing the stale Bottom-valued symbol
+
+            let existing_value = existing.borrow().value().get();
+
+            // capture relays can form synthetic-only cycles whose summaries
+            // alternate instead of converging, so we seed those summaries with
+            // the previous pass, but never retain concrete state that Go
+            // assignment semantics may legitimately overwrite
+            if let Some(func) = existing_value.as_function()
+                && type_params.is_empty()
+                // ExactSizeIterator::is_empty exists but unstable since 2016...
+                && func.captures().len() != 0
+                && existing_value
+                    .backtrace()
+                    .iter()
+                    .chain(func.captures().flat_map(|(_, binding)| {
+                        binding
+                            .hybrid_fallback()
+                            .flatten()
+                            .into_iter()
+                            .chain(binding.mutation_backtrace())
+                    }))
+                    .map(LabelBacktrace::label)
+                    .flat_map(Label::tags)
+                    .all(|tag| matches!(tag, LabelTag::Synthetic { .. }))
+                && func.captures().all(|(declaration, _)| {
+                    ctx.symtab()
+                        .get_symbol_by_declaration(declaration)
+                        .and_then(|symbol| symbol.borrow().value().get().backtrace())
+                        .iter()
+                        .map(LabelBacktrace::label)
+                        .flat_map(Label::tags)
+                        .all(|tag| matches!(tag, LabelTag::Synthetic { .. }))
+                })
+            {
+                previous_func = Some(func.clone());
+            }
 
             existing.borrow_mut().set_value(value.clone(), None);
         } else {
@@ -178,7 +217,32 @@ pub fn visit_function_def<'a>(
 
     bind_named_result_locals(ctx, &signature.result);
 
-    captures::register_captures(ctx, r#ref, signature, receiver, body, &mut value);
+    let previous_captures = previous_func
+        .iter()
+        .flat_map(FunctionValue::captures)
+        .map(|(declaration, _)| declaration)
+        .collect::<Vec<_>>();
+
+    captures::register_captures(
+        ctx,
+        r#ref,
+        signature,
+        receiver,
+        body,
+        &previous_captures,
+        &mut value,
+    );
+
+    if let Some(previous_func) = &previous_func
+        && let Some(mut current_func) = value.as_function_mut()
+    {
+        // failure only skips this convergence seed; it is not an unsound merge
+        let _: bool = current_func.try_merge_summary_from(
+            previous_func,
+            LabelBacktraceKind::Expression,
+            &value_location,
+        );
+    }
 
     // it is necessary for sinks and other enforcement mechanisms inside this
     // function body to take into account the external branch backtrace at the

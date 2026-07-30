@@ -25,6 +25,7 @@ pub fn register_captures<'a>(
     signature: &FunctionSignatureNode<'a>,
     receiver: Option<&FunctionParamDeclNode<'a>>,
     body: &BlockNode<'a>,
+    previous_captures: &[Pinned<'a, Span<'a>>],
     value: &mut ValueRef<'a>,
 ) {
     if r#ref.is_main() {
@@ -41,6 +42,14 @@ pub fn register_captures<'a>(
     referenced.sort_unstable();
 
     let mut captures: BTreeMap<_, (_, bool)> = BTreeMap::new();
+
+    // recreate retained bindings so their local symbols still begin this pass
+    // with fresh capture synthetics
+    for &declaration in previous_captures {
+        if let Some(symbol) = ctx.symtab().get_symbol_by_declaration(declaration) {
+            insert_capture(&mut captures, declaration, symbol, false);
+        }
+    }
 
     for captured in referenced {
         let (symbol, bind_in_function_scope) = match captured {
