@@ -256,7 +256,13 @@ impl<'a> Mergeable<'a> for Value<'a> {
             (Self::UnknownComposite(a), Self::UnknownComposite(b)) => {
                 Self::UnknownComposite(recurs!(a, b))
             }
-            // intentionally not handling (Fn, Fn)
+            (Self::Function(a), Self::Function(b)) if a.snapshot_aware_eq(b) => {
+                // an idempotent join must retain an already-stable function
+                // shape; genuinely different functions still fall through to
+                // the conservative Simple merge below
+                Self::Function(a.clone())
+            }
+            // intentionally not handling unconditional (Fn, Fn); see above
             // ---
             // any ChannelValue must remain a ChannelValue after merging with
             // anything else (e.g. a `ch <- v` send stmt folds `v`'s overall
