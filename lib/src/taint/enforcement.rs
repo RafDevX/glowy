@@ -121,23 +121,40 @@ pub fn try_trigger_deferred_check<'a>(
     };
     let label = bt.map_or(&Label::Bottom, LabelBacktrace::label);
 
-    if label.has_any_synthetic() {
+    if matches!(check, DeferredEnforcementCheck::Assertion { .. }) && label.has_any_synthetic() {
         return false;
     }
 
     ctx.record_saw_enforcement_check();
 
     match check {
-        DeferredEnforcementCheck::Sink { sink, .. } if sink.accepts(label) => {} // all good
-        DeferredEnforcementCheck::Sink { sink, found, file } => {
+        DeferredEnforcementCheck::Sink { sink, found, file }
+            if let pruned = label.prune_synthetics()
+                && !sink.accepts(&pruned) =>
+        {
+            // synthetic tags can add more concrete taint when realized, but
+            // they cannot remove a sink violation already demonstrated by
+            // concrete tags. report that definite violation now instead of
+            // deferring it further
+
+            ctx.record_saw_enforcement_check();
+
+            // since synthetics may still be present, we don't want to include
+            // them in the consumer-facing error, especially since we know
+            // they're irrelevant for this failure (only concretes matter)
+            let backtrace = found.restrict_to_label(&pruned).unwrap();
+            // ^ unwrap is safe, since Bottom is always accepted (there must be
+            // at least one concrete present, causing this insecure flow)
+
             ctx.report_error_at(
                 file,
                 AnalysisErrorKind::InsecureFlow {
                     sink: sink.clone(),
-                    backtrace: found.clone(),
+                    backtrace,
                 },
             );
         }
+        DeferredEnforcementCheck::Sink { .. } => {} // all good
         DeferredEnforcementCheck::Assertion {
             expected_sequence,
             found,
