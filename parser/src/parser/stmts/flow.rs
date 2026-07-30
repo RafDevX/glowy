@@ -129,40 +129,51 @@ pub fn parse_for_statement<'a>(s: &mut TokenStream<'a>) -> PResult<'a, ForNode<'
             // we assume it's the simplest for, unless we find proof otherwise
             let mut kind = ForKind::SingleCondition;
 
-            // if we find a "range" token, it confirms this kind
-            let mut range_kind_hint = None;
+            // parse a possible init statement before scanning for delimiters
+            let mut init_probe = s.clone();
+            let starts_with_init = parse_control_header_statement(&mut init_probe).is_ok()
+                && matches!(init_probe.peek(), Some(Ok(of_kind!(TokenKind::SemiColon))));
 
-            // no point in using BacktrackingContext if we'll never commit
-            for future in s.clone() {
-                match future?.kind {
-                    TokenKind::CurlyL => break, // was actually SingleCondition
-                    TokenKind::SemiColon => {
-                        // can no longer be a single condition; must have init
-                        kind = ForKind::ClauseWithInit;
-                        break;
-                    }
-                    TokenKind::ColonAssign if range_kind_hint.is_none() => {
-                        // it might be a `for a := range expr`, but it might
-                        // also just be a normal `for i := 0; i < 5; i++`, so
-                        // we need to also find a "range" keyword to confirm
-                        range_kind_hint = Some(ForKind::RangeDecl);
-                    }
-                    TokenKind::Assign if range_kind_hint.is_none() => {
-                        range_kind_hint = Some(ForKind::RangeAssignment);
-                    }
-                    TokenKind::Range => {
-                        if let Some(hint) = range_kind_hint {
-                            // confirmed
-                            kind = hint;
+            if starts_with_init {
+                kind = ForKind::ClauseWithInit;
+            } else {
+                // if we find a "range" token, it confirms this kind
+                let mut range_kind_hint = None;
+
+                // no point in using BacktrackingContext if we'll never commit
+                for future in s.clone() {
+                    match future?.kind {
+                        // it really actually was SingleCondition
+                        TokenKind::CurlyL => break,
+                        TokenKind::SemiColon => {
+                            // can no longer be SingleCondition; must have init
+                            kind = ForKind::ClauseWithInit;
+                            break;
                         }
-                        // else: range without preceding := or = must be wrong,
-                        // but we'll let it error further down the line within
-                        // non-for-range parsing so we have more surrounding
-                        // context information for the error
+                        TokenKind::ColonAssign if range_kind_hint.is_none() => {
+                            // it might be a `for a := range expr`, but it might
+                            // also just be a normal `for i := 0; i < 5; i++`;
+                            // we need to also find a "range" keyword to confirm
+                            range_kind_hint = Some(ForKind::RangeDecl);
+                        }
+                        TokenKind::Assign if range_kind_hint.is_none() => {
+                            // same as above
+                            range_kind_hint = Some(ForKind::RangeAssignment);
+                        }
+                        TokenKind::Range => {
+                            if let Some(hint) = range_kind_hint {
+                                // confirmed
+                                kind = hint;
+                            }
+                            // else: range without preceding := or = must be
+                            // wrong, but we'll let it error further down the
+                            // line within non-for-range parsing so we have more
+                            // surrounding context information for the error
 
-                        break;
+                            break;
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
 
