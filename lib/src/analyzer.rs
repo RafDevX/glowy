@@ -36,7 +36,18 @@ use crate::{
 const PARALLELIZE_PARSING_FROM: usize = 1 << 30; // 1 GiB
 
 #[cfg(feature = "parallelism")]
+static ENV_PARALLELISM_LIMIT: sync::LazyLock<Option<usize>> = sync::LazyLock::new(|| {
+    env::var("GLOWY_MAX_THREADS")
+        .ok()
+        .as_deref()
+        .map(str::parse)
+        .and_then(Result::ok)
+});
+
+#[cfg(feature = "parallelism")]
 static ANALYSIS_POOL: sync::LazyLock<rayon::ThreadPool> = sync::LazyLock::new(|| {
+    let env_limit = ENV_PARALLELISM_LIMIT.unwrap_or(usize::MAX);
+
     // we try to leave two CPU cores free so other processes can run and the
     // system does not get too overwhelmed (all cores at 100% can go wrong).
     // note that this value is presently not configurable just because it would
@@ -47,7 +58,8 @@ static ANALYSIS_POOL: sync::LazyLock<rayon::ThreadPool> = sync::LazyLock::new(||
         .map(num::NonZero::get)
         .unwrap_or_default()
         .saturating_sub(2) // usually this means #cores - 2
-        .max(2); // at least 2, or else there's no point to parallelism
+        .max(2) // at least 2, or else there's no point to parallelism
+        .min(env_limit); // cannot exceed configured limit
 
     rayon::ThreadPoolBuilder::new()
         .thread_name(|i| format!("glowy-analysis-{i}"))
@@ -946,65 +958,69 @@ impl Analyzer {
             }
         }
 
-        let all_errors: IndexSet<_> =
-            if cfg!(feature = "parallelism") && build_permutations.len() > 1 {
-                // this looks a bit strange, but it means we can avoid all the
-                // rayon parallelism overhead when there is only one singular
-                // permutation to process, even if the `parallelism` cargo
-                // feature is enabled, since it'd be a waste
+        #[cfg(feature = "parallelism")]
+        let env_allows_parallelism = ENV_PARALLELISM_LIMIT.is_some_and(|limit| limit > 1);
+        #[cfg(not(feature = "parallelism"))]
+        let env_allows_parallelism = false;
 
-                #[cfg(feature = "parallelism")]
-                {
-                    // using `.enumerate()` to get indexes would lead to
-                    // (largely) useless verbose status messages, since reported
-                    // permutation N conveys no information about how many are
-                    // done and how many are left unless N is taken in order of
-                    // processing (which rayon would not, since it would take
-                    // indexes almost at random, via recursive division).
-                    // thus, we build our own indexes from inside rayon to keep
-                    // them sequential (even if some of them will be executing
-                    // in parallel, new tasks will always have a greater index).
-                    // the trade off is that we can no longer rely on index to
-                    // deterministically identify a permutation, but that should
-                    // not be a major concern since there is always an initial
-                    // verbose line mapping index to a specific build constraint
-                    let counter = AtomicUsize::new(0);
+        let all_errors: IndexSet<_> = if env_allows_parallelism && build_permutations.len() > 1 {
+            // this looks a bit strange, but it means we can avoid all the
+            // rayon parallelism overhead when there is only one singular
+            // permutation to process, even if the `parallelism` cargo
+            // feature is enabled, since it'd be a waste
 
-                    ANALYSIS_POOL.install(|| {
-                        build_permutations
-                            .par_iter()
-                            .flat_map_iter(|permutation| {
-                                let index = counter.fetch_add(1, Ordering::SeqCst);
+            #[cfg(feature = "parallelism")]
+            {
+                // using `.enumerate()` to get indexes would lead to
+                // (largely) useless verbose status messages, since reported
+                // permutation N conveys no information about how many are
+                // done and how many are left unless N is taken in order of
+                // processing (which rayon would not, since it would take
+                // indexes almost at random, via recursive division).
+                // thus, we build our own indexes from inside rayon to keep
+                // them sequential (even if some of them will be executing
+                // in parallel, new tasks will always have a greater index).
+                // the trade off is that we can no longer rely on index to
+                // deterministically identify a permutation, but that should
+                // not be a major concern since there is always an initial
+                // verbose line mapping index to a specific build constraint
+                let counter = AtomicUsize::new(0);
 
-                                self.process_permutation(
-                                    permutation,
-                                    index,
-                                    width,
-                                    build_permutations.len(),
-                                    &parsed,
-                                )
-                            })
-                            .collect()
-                    })
-                }
+                ANALYSIS_POOL.install(|| {
+                    build_permutations
+                        .par_iter()
+                        .flat_map_iter(|permutation| {
+                            let index = counter.fetch_add(1, Ordering::SeqCst);
 
-                #[cfg(not(feature = "parallelism"))]
-                IndexSet::new()
-            } else {
-                build_permutations
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(index, permutation)| {
-                        self.process_permutation(
-                            permutation,
-                            index,
-                            width,
-                            build_permutations.len(),
-                            &parsed,
-                        )
-                    })
-                    .collect()
-            };
+                            self.process_permutation(
+                                permutation,
+                                index,
+                                width,
+                                build_permutations.len(),
+                                &parsed,
+                            )
+                        })
+                        .collect()
+                })
+            }
+
+            #[cfg(not(feature = "parallelism"))]
+            IndexSet::new()
+        } else {
+            build_permutations
+                .iter()
+                .enumerate()
+                .flat_map(|(index, permutation)| {
+                    self.process_permutation(
+                        permutation,
+                        index,
+                        width,
+                        build_permutations.len(),
+                        &parsed,
+                    )
+                })
+                .collect()
+        };
 
         if self.verbose {
             println!(
