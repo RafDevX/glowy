@@ -279,7 +279,7 @@ impl<'a> SymbolTable<'a> {
     }
 
     pub fn current_lexical_scope(&self) -> LexicalScope<'a> {
-        LexicalScope(Rc::clone(&self.current_scope))
+        LexicalScope(Rc::downgrade(&self.current_scope))
     }
 
     pub fn get_symbol_from_lexical_scope(
@@ -288,7 +288,7 @@ impl<'a> SymbolTable<'a> {
         imports: &FileImportsRecord,
         name: &str,
     ) -> Option<SymbolRef<'a>> {
-        Self::get_symbol_from_scope_chain(self, Some(Rc::clone(&scope.0)), imports.wildcard(), name)
+        Self::get_symbol_from_scope_chain(self, scope.0.upgrade(), imports.wildcard(), name)
     }
 
     pub fn get_symbol_in_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
@@ -800,13 +800,17 @@ impl<'a> PackageScopeEnvelope<'a> {
 type ScopeRef<'a> = Rc<RefCell<Scope<'a>>>;
 type WeakScopeRef<'a> = Weak<RefCell<Scope<'a>>>;
 
-// for opaque, external reference
+// for opaque, external references. note that we must use a Weak ref because
+// type-constructor values retain their declaration's lexical scope for later
+// name resolution, while that scope owns the constructor symbol, forming a
+// cycle; if an Rc was used instead of Weak, dropping the symtab would cause
+// a memory leak, since the entire scope tree would remain alive post-analysis
 #[derive(Clone)]
-pub struct LexicalScope<'a>(ScopeRef<'a>);
+pub struct LexicalScope<'a>(WeakScopeRef<'a>);
 
 impl PartialEq for LexicalScope<'_> {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
+        Weak::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -815,7 +819,7 @@ impl Eq for LexicalScope<'_> {}
 impl fmt::Debug for LexicalScope<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("LexicalScope")
-            .field(&Rc::as_ptr(&self.0))
+            .field(&Weak::as_ptr(&self.0))
             .finish()
     }
 }
