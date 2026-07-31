@@ -45,6 +45,8 @@ present document.
 - Closures returned from the same factory invocation may not preserve their
   shared capture-cell relationships (e.g.,
   `read, write := cell(); write(secret); use(read())`).
+- Recursive call cycles that transitively relay captured package values through
+  function summaries are not supported and never converge.
 - Distinct function and closure invocations are not fully
   call-context-sensitive, so state belonging to separate factory calls may be
   conflated.
