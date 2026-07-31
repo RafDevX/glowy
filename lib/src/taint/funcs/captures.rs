@@ -142,30 +142,36 @@ pub fn register_captures<'a>(
             .value()
             .get();
 
-        let local_symbol = func.register_capture_with(outer_decl, iteration_cell, |index| {
-            let synthetic = LabelTag::Synthetic {
-                func: r#ref.clone(),
-                slot: SyntheticSlot::Capture(index),
-                identifier: Some(*outer_decl.inner()),
-            };
+        let local_symbol = func.register_capture_with(
+            outer_decl,
+            bind_in_function_scope,
+            iteration_cell,
+            |index| {
+                let synthetic = LabelTag::Synthetic {
+                    func: r#ref.clone(),
+                    slot: SyntheticSlot::Capture(index),
+                    identifier: Some(*outer_decl.inner()),
+                };
 
-            let capture_backtrace = LabelBacktrace::new_root(
-                LabelBacktraceKind::ClosureCapture,
-                Label::from_single(synthetic),
-                Some(outer_decl.content()),
-                value_location.clone(),
-            )
-            .unwrap(); // safe because we know label is not Bottom
+                let capture_backtrace = LabelBacktrace::new_root(
+                    LabelBacktraceKind::ClosureCapture,
+                    Label::from_single(synthetic),
+                    Some(outer_decl.content()),
+                    value_location.clone(),
+                )
+                .unwrap(); // safe because we know label is not Bottom
 
-            // mirror he outer's top-level shape so that shape-discriminating
-            // operations inside the function body (e.g., `m[k] = v`, `ch <- v`)
-            // see the correct shape and employ the appropriate abstraction,
-            // instead of coercing into an arbitrary default, but retain the
-            // synthetic as the sole backtrace
-            let local_value = captured_value.copy_shape(capture_backtrace);
+                // mirror the outer's top-level shape so that
+                // shape-discriminating operations inside the function body
+                // (e.g., `m[k] = v`, `ch <- v`) see the correct shape and
+                // employ the appropriate abstraction, instead of coercing into
+                // an arbitrary default, but also retain the synthetic as the
+                // sole backtrace
+                let local_value = captured_value.copy_shape(capture_backtrace);
 
-            Symbol::new_ref(outer_decl, true, local_value, None)
-        });
+                Symbol::new_ref(outer_decl, true, local_value, None)
+            },
+        );
 
         if bind_in_function_scope {
             ctx.symtab_mut().declare_synthetic_symbol(local_symbol);

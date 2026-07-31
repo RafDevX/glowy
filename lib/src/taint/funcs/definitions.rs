@@ -83,6 +83,10 @@ pub fn visit_function_def<'a>(
                 && type_params.is_empty()
                 // ExactSizeIterator::is_empty exists but unstable since 2016...
                 && func.captures().len() != 0
+                && func.captures().all(|(_, binding)| {
+                    // not lexically bound == relayed capture
+                    !binding.is_lexically_bound()
+                })
                 && existing_value
                     .backtrace()
                     .iter()
@@ -100,10 +104,12 @@ pub fn visit_function_def<'a>(
                     ctx.symtab()
                         .get_symbol_by_declaration(declaration)
                         .and_then(|symbol| symbol.borrow().value().get().backtrace())
-                        .iter()
-                        .map(LabelBacktrace::label)
-                        .flat_map(Label::tags)
-                        .all(|tag| matches!(tag, LabelTag::Synthetic { .. }))
+                        .is_some_and(|backtrace| {
+                            backtrace
+                                .label()
+                                .tags()
+                                .all(|tag| matches!(tag, LabelTag::Synthetic { .. }))
+                        })
                 })
             {
                 previous_func = Some(func.clone());

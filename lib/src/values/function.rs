@@ -577,6 +577,7 @@ impl<'a> FunctionValue<'a> {
     pub fn register_capture_with(
         &mut self,
         outer_decl: Pinned<'a, Span<'a>>,
+        lexically_bound: bool,
         iteration_cell: Option<SymbolRef<'a>>,
         make_local_symbol: impl FnOnce(usize) -> SymbolRef<'a>,
     ) -> SymbolRef<'a> {
@@ -586,6 +587,7 @@ impl<'a> FunctionValue<'a> {
             CaptureBinding::new(
                 capture_index,
                 make_local_symbol(capture_index),
+                lexically_bound,
                 iteration_cell,
             )
         });
@@ -1145,6 +1147,9 @@ pub struct CaptureBinding<'a> {
     // synthetic local symbol installed in the function scope for this capture
     // (with a placeholder synthetic tag as its label)
     local_symbol: SymbolRef<'a>,
+    // whether the function body references this capture directly, as opposed
+    // to inheriting it from another function whose effects it relays
+    lexically_bound: bool,
     // range variables declared with `:=` denote distinct storage on each
     // iteration, so this state represents the particular abstract iteration
     // environment captured by this closure
@@ -1173,11 +1178,13 @@ impl<'a> CaptureBinding<'a> {
     fn new(
         index: usize,
         local_symbol: SymbolRef<'a>,
+        lexically_bound: bool,
         iteration_cell: Option<SymbolRef<'a>>,
     ) -> Self {
         Self {
             index,
             local_symbol,
+            lexically_bound,
             iteration_cell,
             hybrid_fallback: None,
             mutation_backtrace: None,
@@ -1190,6 +1197,10 @@ impl<'a> CaptureBinding<'a> {
 
     pub fn local_symbol(&self) -> SymbolRef<'a> {
         Rc::clone(&self.local_symbol)
+    }
+
+    pub fn is_lexically_bound(&self) -> bool {
+        self.lexically_bound
     }
 
     pub fn iteration_cell(&self) -> Option<&SymbolRef<'a>> {
@@ -1240,6 +1251,8 @@ impl<'a> CaptureBinding<'a> {
         kind: LabelBacktraceKind,
         location: &Pinned<'a, Location>,
     ) {
+        self.lexically_bound |= other.lexically_bound;
+
         merge_symbol_state(&self.local_symbol, &other.local_symbol, kind, location);
 
         if let (Some(left), Some(right)) = (&self.iteration_cell, &other.iteration_cell)
@@ -1344,6 +1357,7 @@ impl SnapshotAware for CaptureBinding<'_> {
         // the enclosing symbol-table snapshot. iteration_cell is not registered
         // there, so its state must be compared explicitly
         self.index == other.index
+            && self.lexically_bound == other.lexically_bound
             && self.iteration_cell_eq_by(other, SnapshotAware::snapshot_aware_eq)
             && self
                 .hybrid_fallback
@@ -1358,6 +1372,7 @@ impl PartialEq for CaptureBinding<'_> {
     fn eq(&self, other: &Self) -> bool {
         // local_symbol is implementation state, not capture metadata
         self.index == other.index
+            && self.lexically_bound == other.lexically_bound
             && self.iteration_cell_eq_by(other, PartialEq::eq)
             && self.hybrid_fallback == other.hybrid_fallback
             && self.mutation_backtrace == other.mutation_backtrace
@@ -1371,6 +1386,7 @@ impl fmt::Debug for CaptureBinding<'_> {
         // omit local_symbol (implementation state, not capture metadata)
         f.debug_struct("CaptureBinding")
             .field("index", &self.index)
+            .field("lexically_bound", &self.lexically_bound)
             .field("has_iteration_cell", &self.iteration_cell.is_some())
             .field("hybrid_fallback", &self.hybrid_fallback)
             .field("mutation_backtrace", &self.mutation_backtrace)
