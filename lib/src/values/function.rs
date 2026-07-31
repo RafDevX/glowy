@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     cmp,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt,
     rc::Rc,
 };
@@ -28,6 +28,10 @@ use crate::{
         ValueRef,
     },
 };
+
+thread_local! {
+    static SNAPSHOT_COMPARISON_CACHE: RefCell<HashSet<FunctionRefCachePair>> = RefCell::default();
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FunctionValue<'a> {
@@ -330,6 +334,30 @@ impl<'a> FunctionValue<'a> {
         }
 
         self.deferred_checks.push(check);
+    }
+
+    pub fn merge_same_ref(
+        &self,
+        other: &Self,
+        merge_kind: LabelBacktraceKind,
+        location: Cow<Pinned<'a, Location>>,
+    ) -> Option<Self> {
+        // we use normal equality (vs. snapshot_aware_eq) because we only merge
+        // functions if they are literally the same one, even if some fields are
+        // not the same since they can depend on contextual backtraces and state
+        if self.r#ref != other.r#ref {
+            return None;
+        }
+
+        let mut merged = self.clone();
+        merged.backtrace = LabelBacktrace::combine_options(
+            merged.backtrace,
+            other.backtrace.clone(),
+            merge_kind,
+            location,
+        );
+
+        Some(merged)
     }
 
     #[must_use = "if false, invoker should report a soundness limitation"]
@@ -804,6 +832,23 @@ impl<'a> Upgrade<'a> for FunctionValue<'a> {
 
 impl SnapshotAware for FunctionValue<'_> {
     fn snapshot_aware_eq(&self, other: &Self) -> bool {
+        let pair = (self.r#ref.cache_key(), other.r#ref.cache_key());
+
+        let should_compare = SNAPSHOT_COMPARISON_CACHE.with(|active| {
+            // returns true if pair is new to the active set
+            active.borrow_mut().insert(pair)
+        });
+
+        if !should_compare {
+            // FunctionValues may recursively contain the same function, so
+            // reaching an active semantic pair establishes no new inequality
+            return true;
+        }
+
+        // removes `pair` from comparison.active when Drop'd, so that the cache
+        // can be automatically cleared when active is empty
+        let _guard = SnapshotComparisonCacheGuard(pair);
+
         self.r#ref.snapshot_aware_eq(&other.r#ref)
             && self.signature == other.signature
             && self.receiver_kind == other.receiver_kind
@@ -921,6 +966,27 @@ impl<'a> FunctionRef<'a> {
     pub fn is_main(&self) -> bool {
         matches!(self, Self::Named { is_main: true, .. })
     }
+
+    fn cache_key(&self) -> FunctionRefCacheKey {
+        match self {
+            Self::Named { name, is_main } => FunctionRefCacheKey::Named {
+                file: name.file().as_os_str().as_encoded_bytes().as_ptr(),
+                start: name.inner().location().start,
+                end: name.inner().location().end,
+                is_main: *is_main,
+            },
+            Self::Anonymous(location) => FunctionRefCacheKey::Anonymous {
+                file: location.file().as_os_str().as_encoded_bytes().as_ptr(),
+                start: location.inner().start,
+                end: location.inner().end,
+            },
+            Self::BuiltIn(name) => FunctionRefCacheKey::BuiltIn {
+                name: name.as_ptr(),
+                len: name.len(),
+            },
+            Self::BlackboxInference(uuid) => FunctionRefCacheKey::Blackbox(*uuid),
+        }
+    }
 }
 
 impl fmt::Display for FunctionRef<'_> {
@@ -1011,6 +1077,39 @@ impl SnapshotAware for FunctionRef<'_> {
                 _,
             ) => false,
         }
+    }
+}
+
+// we can't store FunctionRef directly in a static because it's bound to 'a
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum FunctionRefCacheKey {
+    Named {
+        file: *const u8,
+        start: usize,
+        end: usize,
+        is_main: bool,
+    },
+    Anonymous {
+        file: *const u8,
+        start: usize,
+        end: usize,
+    },
+    BuiltIn {
+        name: *const u8,
+        len: usize,
+    },
+    Blackbox(Uuid),
+}
+
+type FunctionRefCachePair = (FunctionRefCacheKey, FunctionRefCacheKey);
+
+struct SnapshotComparisonCacheGuard(FunctionRefCachePair);
+
+impl Drop for SnapshotComparisonCacheGuard {
+    fn drop(&mut self) {
+        SNAPSHOT_COMPARISON_CACHE.with(|active| {
+            active.borrow_mut().remove(&self.0);
+        });
     }
 }
 

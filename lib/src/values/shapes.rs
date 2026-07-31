@@ -256,11 +256,14 @@ impl<'a> Mergeable<'a> for Value<'a> {
             (Self::UnknownComposite(a), Self::UnknownComposite(b)) => {
                 Self::UnknownComposite(recurs!(a, b))
             }
-            (Self::Function(a), Self::Function(b)) if a.snapshot_aware_eq(b) => {
-                // an idempotent join must retain an already-stable function
-                // shape; genuinely different functions still fall through to
-                // the conservative Simple merge below
-                Self::Function(a.clone())
+            (Self::Function(a), Self::Function(b))
+                if let Some(merged) = a.merge_same_ref(b, with_kind, at_location.clone()) =>
+            {
+                // different flows may carry the same function ref with
+                // different reference-level labels, so preserve its value and
+                // join those labels instead of degrading it into an inferred
+                // function on the next shape coercion
+                Self::Function(Box::new(merged))
             }
             // intentionally not handling unconditional (Fn, Fn); see above
             // ---
