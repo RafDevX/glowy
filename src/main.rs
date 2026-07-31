@@ -1,5 +1,7 @@
 // Clippy lint configuration
 #![warn(clippy::all, clippy::pedantic)]
+// Forbid unsafe code
+#![deny(unsafe_code)]
 
 use std::{fmt, fs, path::PathBuf, process};
 

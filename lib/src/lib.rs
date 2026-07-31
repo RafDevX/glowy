@@ -161,6 +161,8 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::all)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// Forbid unsafe code
+#![deny(unsafe_code)]
 
 #[cfg(feature = "base-security-policy")]
 use std::collections::HashSet;

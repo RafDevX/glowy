@@ -1,6 +1,8 @@
 // Clippy lint configuration
 #![warn(clippy::all, clippy::pedantic, clippy::missing_inline_in_public_items)]
 #![allow(clippy::option_option, clippy::missing_errors_doc)]
+// Forbid unsafe code
+#![deny(unsafe_code)]
 
 use std::ops::Range;
 
