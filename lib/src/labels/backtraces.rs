@@ -321,6 +321,29 @@ impl<'a> LabelBacktrace<'a> {
         from_func: &FunctionRef<'a>,
         substitutions: &[(SyntheticSlot, Option<&Self>)],
     ) -> Option<Self> {
+        self.realize_all_inner(from_func, substitutions, false)
+    }
+
+    /// Realizes placeholders in a finalized enforcement backtrace.
+    ///
+    /// Recursive summaries normally use aggregate roots to stay compact while
+    /// labels converge, but at enforcement time, non-recursive calls must
+    /// descend into those roots so no placeholder from the invoked function
+    /// escapes into its caller.
+    pub(crate) fn realize_all_for_enforcement(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&Self>)],
+    ) -> Option<Self> {
+        self.realize_all_inner(from_func, substitutions, true)
+    }
+
+    fn realize_all_inner(
+        &self,
+        from_func: &FunctionRef<'a>,
+        substitutions: &[(SyntheticSlot, Option<&Self>)],
+        realize_aggregates: bool,
+    ) -> Option<Self> {
         let Some(first_relevant) = substitutions.iter().position(|(slot, _)| {
             self.label()
                 .contains_synthetic_representation(from_func, *slot)
@@ -389,7 +412,7 @@ impl<'a> LabelBacktrace<'a> {
             // the recursive equation without adding any information. retain
             // the compact fixed-point representation and continue with the
             // remaining, potentially meaningful substitutions
-            return self.realize_all(from_func, remaining);
+            return self.realize_all_inner(from_func, remaining, realize_aggregates);
         }
 
         if is_recursive_substitution && !matches!(from_slot, SyntheticSlot::Capture(_)) {
@@ -401,42 +424,54 @@ impl<'a> LabelBacktrace<'a> {
             return self
                 .flatten_to_label(realized_label)
                 .expect("recursive substitutions include the non-Bottom concrete backtrace label")
-                .realize_all(from_func, remaining);
+                .realize_all_inner(from_func, remaining, realize_aggregates);
         }
 
-        if matches!(
+        let param_or_capture = matches!(
             self.kind,
             LabelBacktraceKind::FunctionParameter | LabelBacktraceKind::ClosureCapture
-        ) {
-            if self.label().as_single().is_some() {
-                // note that since we already checked above with
-                // is_synthetic_representation, if the label has a single tag,
-                // then we are a root synthetic that needs to be realized
+        );
 
-                let realized = Self::new(
-                    from_slot.realized_backtrace_kind(),
-                    concrete.map_or(&Label::Bottom, Self::label).clone(),
-                    self.symbol(),
-                    self.location().clone(),
-                    concrete,
-                );
+        if param_or_capture && self.label().as_single().is_some() {
+            // note that since we already checked above with
+            // is_synthetic_representation, if the label has a single tag,
+            // then we are a root synthetic that needs to be realized
 
-                realized?.realize_all(from_func, remaining)
-            } else {
-                Some(self.clone())
-            }
+            let realized = Self::new(
+                from_slot.realized_backtrace_kind(),
+                concrete.map_or(&Label::Bottom, Self::label).clone(),
+                self.symbol(),
+                self.location().clone(),
+                concrete,
+            );
+
+            realized?.realize_all_inner(from_func, remaining, realize_aggregates)
+        } else if param_or_capture && (is_recursive_substitution || !realize_aggregates) {
+            // `flatten_to_label` represents a recursive equation as a
+            // multi-root aggregate. keep that aggregate compact while
+            // summarizing the recursive call itself; an outer, concrete call
+            // can descend into the roots and discharge each placeholder
+            Some(self.clone())
         } else if matches!(self.kind, LabelBacktraceKind::Branch)
             && self.children.is_empty() // root
             && self.label().as_single().is_some()
         {
             // this is the function's synthetic implicit branch backtrace, which
             // needs to be realized into the actual call-site branch backtrace
-            concrete.cloned()?.realize_all(from_func, remaining)
+            concrete
+                .cloned()?
+                .realize_all_inner(from_func, remaining, realize_aggregates)
         } else {
             let children: Vec<_> = self
                 .children()
                 .iter()
-                .filter_map(|child| child.realize_all(from_func, &substitutions[first_relevant..]))
+                .filter_map(|child| {
+                    child.realize_all_inner(
+                        from_func,
+                        &substitutions[first_relevant..],
+                        realize_aggregates,
+                    )
+                })
                 .collect();
 
             Self::fold(

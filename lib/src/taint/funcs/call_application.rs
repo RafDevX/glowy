@@ -540,7 +540,15 @@ fn handle_deferred_checks<'a>(
         )
         .collect();
 
-    let mut realization = UnifiedRealization::multiple(func.r#ref(), &substitutions);
+    let mut realization = if ctx.stage().has_stable_labels() {
+        // normal realization produces and preserves flattened aggregate roots
+        // to keep recursive synthetics compact, but now everything is stable so
+        // we can expand them here if this is a non-recursive call boundary;
+        // i.e., genuinely recursive substitutions remain compact
+        UnifiedRealization::enforcement(func.r#ref(), &substitutions)
+    } else {
+        UnifiedRealization::multiple(func.r#ref(), &substitutions)
+    };
 
     let deferred_checks: Vec<_> = func
         .deferred_checks()

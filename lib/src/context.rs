@@ -717,7 +717,7 @@ impl AnalysisStage {
         )
     }
 
-    /// Returns whether the present stage if the first stage of analysis.
+    /// Returns whether the present stage is the first stage of analysis.
     ///
     /// If a value of false is returned, the invoker may assume that all input
     /// files have already been reviewed at least once (meaning that, for
@@ -725,6 +725,15 @@ impl AnalysisStage {
     /// complete).
     pub fn is_first(&self) -> bool {
         matches!(self, Self::RecordDeclarations)
+    }
+
+    /// Returns whether the present stage guarantees stable labels.
+    ///
+    /// If a value of true is returned, the invoker may assume that all labels
+    /// within the analysis context (e.g., in the symbol table) have converged,
+    /// and will not change.
+    pub fn has_stable_labels(&self) -> bool {
+        matches!(self, Self::EnforceSecurityPolicies)
     }
 }
 

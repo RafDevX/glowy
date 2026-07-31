@@ -19,6 +19,10 @@ enum RealizationKind<'a, 'b> {
         from_func: &'b FunctionRef<'a>,
         substitutions: &'b [(SyntheticSlot, Option<&'b LabelBacktrace<'a>>)],
     },
+    Enforcement {
+        from_func: &'b FunctionRef<'a>,
+        substitutions: &'b [(SyntheticSlot, Option<&'b LabelBacktrace<'a>>)],
+    },
     Remapping {
         from_func: &'b FunctionRef<'a>,
         to_func: &'b FunctionRef<'a>,
@@ -60,6 +64,19 @@ impl<'a, 'b> UnifiedRealization<'a, 'b> {
         }
     }
 
+    pub fn enforcement(
+        from_func: &'b FunctionRef<'a>,
+        substitutions: &'b [(SyntheticSlot, Option<&'b LabelBacktrace<'a>>)],
+    ) -> Self {
+        Self {
+            kind: RealizationKind::Enforcement {
+                from_func,
+                substitutions,
+            },
+            value_cache: HashMap::new(),
+        }
+    }
+
     pub(super) fn remap(
         from_func: &'b FunctionRef<'a>,
         to_func: &'b FunctionRef<'a>,
@@ -90,6 +107,10 @@ impl<'a, 'b> UnifiedRealization<'a, 'b> {
                 from_func,
                 substitutions,
             } => backtrace.realize_all(from_func, substitutions),
+            RealizationKind::Enforcement {
+                from_func,
+                substitutions,
+            } => backtrace.realize_all_for_enforcement(from_func, substitutions),
             RealizationKind::Remapping {
                 from_func,
                 to_func,
