@@ -1,6 +1,6 @@
 use colored::{ColoredString, Colorize};
 
-pub fn build_header(title: impl ToString) -> String {
+pub fn build_header(title: &impl ToString) -> String {
     let title = title.to_string();
 
     let width = ansi_ignoring_len(&title) + 2 * 6;

@@ -8,6 +8,7 @@ use crate::diagnostics::{
     SnippetBuilder, StructuredAnnotation, StructuredErrorInfo, StructuredSnippet,
 };
 
+#[expect(clippy::too_many_lines, reason = "Exhaustive error kind matching")]
 pub fn get_structured_error_info<'a>(
     kind: &'a AnalysisErrorKind<'a>,
     builder: &SnippetBuilder<'a>,
@@ -556,16 +557,17 @@ pub fn error_category_to_level(
 ) -> annotate_snippets::Level<'static> {
     match category {
         _ if strict => annotate_snippets::Level::ERROR,
-        AnalysisErrorCategory::Misconfiguration
-        | AnalysisErrorCategory::SecurityPolicyViolation => annotate_snippets::Level::ERROR,
         AnalysisErrorCategory::UnrecognizedFeature
         | AnalysisErrorCategory::Suspicious
         | AnalysisErrorCategory::InvalidGo
         | AnalysisErrorCategory::UnsupportedGo => annotate_snippets::Level::WARNING,
-        _ => annotate_snippets::Level::ERROR,
+        AnalysisErrorCategory::Misconfiguration
+        | AnalysisErrorCategory::SecurityPolicyViolation
+        | _ => annotate_snippets::Level::ERROR,
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "Exhaustive backtrace kind matching")]
 fn label_backtrace_to_snippets<'a>(
     backtrace: &'a LabelBacktrace<'a>,
     expected: &Label<'a>,

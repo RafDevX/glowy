@@ -1,3 +1,6 @@
+// Clippy lint configuration
+#![warn(clippy::all, clippy::pedantic)]
+
 use std::{fmt, fs, path::PathBuf, process};
 
 use clap::Parser;
@@ -37,6 +40,7 @@ fn main() {
 
 #[derive(clap::Parser)]
 #[command(version, about, subcommand_negates_reqs = true)]
+#[expect(clippy::struct_excessive_bools, reason = "Independent fields")]
 struct CliConfig {
     /// Path to a directory containing a Go module, including a `go.mod` file.
     #[arg(required = true)] // positional

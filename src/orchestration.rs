@@ -92,13 +92,13 @@ fn analyze_single<P: AsRef<Path>>(path: P, config: &Config, quiet: bool) -> (usi
         println!(
             "{} {} {}\n",
             "@@@ Analysis duration:".bright_magenta().bold(),
-            format!("{:?}", elapsed).blue().bold(),
+            format!("{elapsed:?}").blue().bold(),
             "@@@".bright_magenta().bold()
-        )
+        );
     }
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             if !quiet {
                 println!("Analysis succeeded with no errors found!");
             }
@@ -159,7 +159,8 @@ fn analyze_multi(mut modules: Vec<PathBuf>, config: &Config) -> (usize, usize) {
                 "Module @".blue(),
                 module.to_string_lossy().purple()
             );
-            println!("{}", presentation::build_header(title));
+
+            println!("{}", presentation::build_header(&title));
         }
 
         results.push((
@@ -172,7 +173,7 @@ fn analyze_multi(mut modules: Vec<PathBuf>, config: &Config) -> (usize, usize) {
         }
     }
 
-    println!("{}", presentation::build_header("SUMMARY".cyan()));
+    println!("{}", presentation::build_header(&"SUMMARY".cyan()));
 
     if config.time_analysis {
         let elapsed = start.elapsed();
@@ -182,10 +183,10 @@ fn analyze_multi(mut modules: Vec<PathBuf>, config: &Config) -> (usize, usize) {
             "@@@@@@@@@@ TOTAL ANALYSIS DURATION:"
                 .bright_magenta()
                 .bold(),
-            format!("{:?}", elapsed).blue().bold(),
+            format!("{elapsed:?}").blue().bold(),
             "(all modules)".bright_magenta().italic(),
             "@@@@@@@@@@".bright_magenta().bold()
-        )
+        );
     }
 
     let mut n_failed = 0;
