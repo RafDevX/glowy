@@ -257,12 +257,16 @@ impl<'a> Mergeable<'a> for Value<'a> {
                 Self::UnknownComposite(recurs!(a, b))
             }
             (Self::Function(a), Self::Function(b))
-                if let Some(merged) = a.merge_same_ref(b, with_kind, at_location.clone()) =>
+                if let Some(merged) = a.merge_compatible(
+                    b,
+                    with_kind,
+                    // prevent cloning an Owned; at_location used again below
+                    Cow::Borrowed(at_location.as_ref()),
+                ) =>
             {
-                // different flows may carry the same function ref with
-                // different reference-level labels, so preserve its value and
-                // join those labels instead of degrading it into an inferred
-                // function on the next shape coercion
+                // preserve compatible callable alternatives as one canonical
+                // function instead of repeatedly collapsing and re-upgrading
+                // the value as more control-flow paths are merged
                 Self::Function(Box::new(merged))
             }
             // intentionally not handling unconditional (Fn, Fn); see above

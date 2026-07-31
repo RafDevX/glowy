@@ -336,20 +336,26 @@ impl<'a> FunctionValue<'a> {
         self.deferred_checks.push(check);
     }
 
-    pub fn merge_same_ref(
+    pub fn merge_compatible(
         &self,
         other: &Self,
         merge_kind: LabelBacktraceKind,
         location: Cow<Pinned<'a, Location>>,
     ) -> Option<Self> {
-        // we use normal equality (vs. snapshot_aware_eq) because we only merge
-        // functions if they are literally the same one, even if some fields are
-        // not the same since they can depend on contextual backtraces and state
-        if self.r#ref != other.r#ref {
+        // functions with the same identity only need their reference-level
+        // labels joined. distinct alternatives must first prove that their
+        // callable summaries can be represented by one canonical function
+        let mut merged = self.clone();
+
+        // note that we use normal equality (vs. snapshot_aware_eq) because we
+        // want to check specifically if the two functions have literally the
+        // same identity, even if some fields are not the same since they can
+        // depend on contextual backtraces and state
+        if self.r#ref != other.r#ref && !merged.try_merge_summary_from(other, merge_kind, &location)
+        {
             return None;
         }
 
-        let mut merged = self.clone();
         merged.backtrace = LabelBacktrace::combine_options(
             merged.backtrace,
             other.backtrace.clone(),
