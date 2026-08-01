@@ -427,6 +427,15 @@ fn parse_inner_primary_expression<'a>(s: &mut TokenStream<'a>) -> PResult<'a, Ex
             }
             .into()
         }
+        Some(token @ of_kind!(TokenKind::Imaginary(value))) => {
+            s.next(); // advance
+
+            LiteralNode::Imaginary {
+                value: OrderedF64(value),
+                location: token.span.location(),
+            }
+            .into()
+        }
         Some(token @ of_kind!(TokenKind::Rune(value))) => {
             s.next(); // advance
 

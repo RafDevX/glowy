@@ -492,6 +492,7 @@ impl<'a> Lexer<'a> {
             seen_exp: bool,    // the e in 2e6, or the p in 0x2p4
             exp_has_digits: bool,
             last_was_digit: bool,
+            imaginary: bool,
             err: Option<LexingError<'a>>,
         }
 
@@ -503,6 +504,7 @@ impl<'a> Lexer<'a> {
                 seen_exp: false,
                 exp_has_digits: false,
                 last_was_digit: false,
+                imaginary: false,
                 err: None,
             },
             |ch, state, lexer| {
@@ -517,6 +519,24 @@ impl<'a> Lexer<'a> {
 
                         return false;
                     }};
+                }
+
+                if state.imaginary {
+                    return false;
+                }
+
+                if ch == 'i' {
+                    let number_is_complete = (state.seen_digits
+                        || matches!(state.mode, NumberLexMode::Set))
+                        && (!state.seen_exp || state.exp_has_digits)
+                        && state.last_was_digit;
+
+                    if number_is_complete {
+                        state.imaginary = true;
+                        return true;
+                    }
+
+                    invalid!(state, lexer);
                 }
 
                 if ch == '_' {
@@ -556,6 +576,7 @@ impl<'a> Lexer<'a> {
                                 NumberLexMode::Decimal
                             }
                             'e' => {
+                                state.seen_digits = true; // first 0 counts as real
                                 state.seen_exp = true;
 
                                 NumberLexMode::Decimal
@@ -621,12 +642,14 @@ impl<'a> Lexer<'a> {
             return Err(LexingError::NumberTrailingUnderscore(span));
         }
 
+        let number = span.content().strip_suffix('i').unwrap_or(span.content());
+
         let (radix, start) = match state.mode {
             NumberLexMode::Unknown => unreachable!("invoker did not peek first! ran out of tokens"),
-            NumberLexMode::Set | NumberLexMode::Decimal => (10, span.content),
-            NumberLexMode::Binary => (2, &span.content[2..]),
-            NumberLexMode::Octal => (8, &span.content[2..]),
-            NumberLexMode::Hex => (16, &span.content[2..]),
+            NumberLexMode::Set | NumberLexMode::Decimal => (10, number),
+            NumberLexMode::Binary => (2, &number[2..]),
+            NumberLexMode::Octal => (8, &number[2..]),
+            NumberLexMode::Hex => (16, &number[2..]),
         };
 
         let num_str = start.replace('_', "");
@@ -652,14 +675,33 @@ impl<'a> Lexer<'a> {
             };
 
             match result {
-                Ok(float) => Ok(Token::new(TokenKind::Float(float), span)),
+                Ok(float) => {
+                    let kind = if state.imaginary {
+                        TokenKind::Imaginary(float)
+                    } else {
+                        TokenKind::Float(float)
+                    };
+
+                    Ok(Token::new(kind, span))
+                }
                 Err(err) => Err(LexingError::FloatParseFailure(span, err)),
             }
         } else {
             // int
 
             match u64::from_str_radix(&num_str, radix) {
-                Ok(int) => Ok(Token::new(TokenKind::Int(int), span)),
+                Ok(int) => {
+                    let kind = if state.imaginary {
+                        #[allow(clippy::cast_precision_loss)]
+                        let value = int as f64;
+
+                        TokenKind::Imaginary(value)
+                    } else {
+                        TokenKind::Int(int)
+                    };
+
+                    Ok(Token::new(kind, span))
+                }
                 Err(err) => Err(LexingError::IntParseFailure(span, err)),
             }
         }

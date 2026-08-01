@@ -326,6 +326,7 @@ impl ExprNode<'_> {
             ExprNode::Literal(
                 LiteralNode::Int { location, .. }
                 | LiteralNode::Float { location, .. }
+                | LiteralNode::Imaginary { location, .. }
                 | LiteralNode::Rune { location, .. }
                 | LiteralNode::String { location, .. }
                 | LiteralNode::Function { location, .. }
@@ -481,6 +482,10 @@ pub enum LiteralNode<'a> {
         location: Location,
     },
     Float {
+        value: OrderedF64,
+        location: Location,
+    },
+    Imaginary {
         value: OrderedF64,
         location: Location,
     },

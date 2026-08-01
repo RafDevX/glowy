@@ -75,8 +75,7 @@ present document.
 - Calls to shadowed `make` and `new` are still interpreted as if invoking the
   respectively-named built-ins.
 - Numeric literals use `u64`/`f64` rather than Go's arbitrary-precision constant
-  model, so very large literals are not supported, and imaginary literals are
-  not tokenized at all (e.g., `const z = 2i`).
+  model, so very large literals are not supported.
 
 ## Evaluation and Control Flow
 

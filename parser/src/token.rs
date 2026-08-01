@@ -62,6 +62,7 @@ pub enum TokenKind {
 
     Int(u64),       // 3
     Float(f64),     // 3.14
+    Imaginary(f64), // 3.2i
     Rune(char),     // 'a'
     String(String), // "hello world"
 
@@ -102,6 +103,7 @@ impl TokenKind {
             Self::Ident
                 | Self::Int(_)
                 | Self::Float(_)
+                | Self::Imaginary(_)
                 | Self::Rune(_)
                 | Self::String(_)
                 | Self::Break
@@ -124,7 +126,8 @@ impl PartialEq for TokenKind {
         match (self, other) {
             (Self::Int(left), Self::Int(right)) => left == right,
             // bit comparison preserves semantics like 0.0 != -0.0
-            (Self::Float(left), Self::Float(right)) => left.to_bits() == right.to_bits(),
+            (Self::Float(left), Self::Float(right))
+            | (Self::Imaginary(left), Self::Imaginary(right)) => left.to_bits() == right.to_bits(),
             (Self::Rune(left), Self::Rune(right)) => left == right,
             (Self::String(left), Self::String(right)) => left == right,
             _ => mem::discriminant(self) == mem::discriminant(other),
@@ -141,7 +144,7 @@ impl hash::Hash for TokenKind {
 
         match self {
             Self::Int(inner) => inner.hash(state),
-            Self::Float(inner) => inner.to_bits().hash(state),
+            Self::Float(inner) | Self::Imaginary(inner) => inner.to_bits().hash(state),
             Self::Rune(inner) => inner.hash(state),
             Self::String(inner) => inner.hash(state),
             _ => {}

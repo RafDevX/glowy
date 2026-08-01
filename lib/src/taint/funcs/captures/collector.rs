@@ -546,6 +546,7 @@ impl<'a> SymbolCaptureCollector<'a> for LiteralNode<'a> {
         let sub: &dyn SymbolCaptureCollector = match self {
             LiteralNode::Int { .. }
             | LiteralNode::Float { .. }
+            | LiteralNode::Imaginary { .. }
             | LiteralNode::Rune { .. }
             | LiteralNode::String { .. } => return,
             LiteralNode::Function {

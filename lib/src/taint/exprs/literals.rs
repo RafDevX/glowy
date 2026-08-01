@@ -24,6 +24,7 @@ pub fn visit_literal<'a>(ctx: &mut AnalysisContext<'a>, node: &LiteralNode<'a>) 
     match node {
         LiteralNode::Int { location, .. }
         | LiteralNode::Float { location, .. }
+        | LiteralNode::Imaginary { location, .. }
         | LiteralNode::Rune { location, .. }
         | LiteralNode::String { location, .. } => {
             ValueRef::new_bottom(ctx.pin(location.clone()), None)
