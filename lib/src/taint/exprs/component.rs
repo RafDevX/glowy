@@ -89,6 +89,7 @@ pub fn visit_selection_with_base<'a>(
             // `lookup_promoted_field` already gates on the underlying being a
             // struct (either directly or via an embedded chain)
             let value = read_typed_field(base, selector, field.resolved_type(), location.clone());
+            value.try_upgrade_to_declared_type(field.declared_type_node());
 
             return nest_field_backtraces(
                 value,

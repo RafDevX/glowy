@@ -261,6 +261,21 @@ impl<'a> ValueRef<'a> {
         Rc::as_ptr(&self.value).cast()
     }
 
+    pub fn try_upgrade_to_declared_type(&self, r#type: &TypeNode<'a>) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "We explicitly want to detect only these variants"
+        )]
+        match r#type {
+            TypeNode::Channel { .. } => self.try_upgrade_to_channel(),
+            TypeNode::Array { .. } => self.try_upgrade_to_array(),
+            TypeNode::Slice { .. } => self.try_upgrade_to_slice(),
+            TypeNode::Map { .. } => self.try_upgrade_to_map(),
+            TypeNode::Struct { .. } => self.try_upgrade_to_struct(),
+            _ => {}
+        }
+    }
+
     pub fn try_upgrade_to_channel(&self) {
         self.try_upgrade_to(Value::Channel);
     }
