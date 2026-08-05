@@ -983,6 +983,7 @@ enum FieldShapeHint {
     Array,
     Slice,
     Struct,
+    Map,
 }
 
 impl FieldShapeHint {
@@ -1005,11 +1006,11 @@ impl FieldShapeHint {
             TypeKind::Array => Some(Self::Array),
             TypeKind::Slice => Some(Self::Slice),
             TypeKind::Struct { .. } => Some(Self::Struct),
-            // Map/Function upgrades need more context than what is present here
-            // and Opaque/Interface cannot be mapped to a specific shape, so it
-            // is not possible for us to provide a hint
-            TypeKind::Map
-            | TypeKind::Function
+            TypeKind::Map { .. } => Some(Self::Map),
+            // Function upgrades need more context than what is present here and
+            // Opaque/Interface cannot be mapped to a specific shape, so it is
+            // not possible for us to provide a hint
+            TypeKind::Function
             | TypeKind::Opaque
             | TypeKind::Named(_)
             | TypeKind::Interface
@@ -1025,11 +1026,11 @@ impl FieldShapeHint {
             TypeNode::Array { .. } => Some(Self::Array),
             TypeNode::Slice { .. } => Some(Self::Slice),
             TypeNode::Struct { .. } => Some(Self::Struct),
+            TypeNode::Map { .. } => Some(Self::Map),
             // Name is only possible here when its resolved TypeInfo was absent
             // or when it reported an underlying type kind we do not provide
             // hints for; the rest are shapes we intentionally skip
             TypeNode::Name(_)
-            | TypeNode::Map { .. }
             | TypeNode::Function { .. }
             | TypeNode::Interface { .. }
             | TypeNode::Pointer { .. } => None,
@@ -1042,6 +1043,7 @@ impl FieldShapeHint {
             Self::Array => value.try_upgrade_to_array(),
             Self::Slice => value.try_upgrade_to_slice(),
             Self::Struct => value.try_upgrade_to_struct(),
+            Self::Map => value.try_upgrade_to_map(),
         }
     }
 }
