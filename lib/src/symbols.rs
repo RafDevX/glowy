@@ -531,19 +531,21 @@ impl<'a> SymbolTable<'a> {
     fn infer_qualifier_from_import_path(path: &FullPackagePath) -> String {
         let mut components = path.rsplit('/'); // rev. ordered
 
-        // special case: for remote git repositories, we can mitigate the
-        // biggest pitfall of the general case's heuristic by ignoring
-        // tag/branch/rev name if that's the last component of the package's
-        // import path (we don't do this just for the hosts specifically named
-        // at https://pkg.go.dev/cmd/go#hdr-Remote_import_paths since real-world
-        // examples exists for packages from other hosts, and we already gate
-        // below on what should almost always only be a version number/name)
+        // special case: we can mitigate the biggest pitfall of the general
+        // case's heuristic by ignoring tag/branch/rev name if that's the last
+        // component of the package's import path (we don't do this just for the
+        // hosts specifically named at
+        // https://pkg.go.dev/cmd/go#hdr-Remote_import_paths since real-world
+        // examples exist for packages from other hosts, and we already gate
+        // below on what should almost always only be a version number/name);
+        // note that the Go modules reference explicitly mandates a major
+        // version suffix like `/v2` for N > 1, and for any N for `gopkg.in`
 
         let last_component = components.clone().next().unwrap();
         let looks_like_revision = last_component == "latest"
             || last_component
                 .strip_prefix('v')
-                .is_some_and(|suffix| suffix.starts_with(|c: char| c.is_ascii_digit()));
+                .is_some_and(|suffix| suffix.parse::<usize>().is_ok());
         // ^ we need this gating because otherwise we would strip legitimate
         // submodules (e.g., `example.com/user/pkg/sub`)
 
@@ -568,9 +570,7 @@ impl<'a> SymbolTable<'a> {
         // (e.g., `example.com/yaml.v3` -> `yaml`, stripping `.v3`)
         let native_name = native_name
             .rsplit_once(".v")
-            .filter(|(name, version)| {
-                !name.is_empty() && version.starts_with(|c: char| c.is_ascii_digit())
-            })
+            .filter(|(name, version)| !name.is_empty() && version.parse::<usize>().is_ok())
             .map_or(native_name, |(name, _)| name);
 
         // final consideration: many packages have their hosting platform
