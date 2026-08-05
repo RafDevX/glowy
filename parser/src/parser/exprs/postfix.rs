@@ -95,6 +95,10 @@ fn parse_make<'a>(s: &mut TokenStream<'a>, start: usize) -> PResult<'a, MakeNode
     let n = parse_opt_param!();
     let m = parse_opt_param!();
 
+    if let Some(Ok(of_kind!(TokenKind::Comma))) = s.peek() {
+        s.next(); // advance trailing comma
+    }
+
     expect(s, TokenKind::ParenR, Some("make call"))?;
 
     let location = s.location_starting_at(start);
