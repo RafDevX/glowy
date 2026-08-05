@@ -14,7 +14,7 @@ use crate::{
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::BlanketDirectiveKind,
     taint::funcs,
-    types::TypeInfo,
+    types::{TypeInfo, TypeKind},
     values::{
         ExpandableValue, FunctionValue, SelfAwareBacktraceContainer, SimpleConstValue, SliceBound,
         SliceValue, Value, ValueRef,
@@ -171,20 +171,21 @@ pub fn visit_selection_with_base<'a>(
     // if C.1 was successful, to avoid the lookup when unnecessary)
     let any_method_named = !has_blanket_directives && ctx.types().any_method_named(selector);
 
-    // Criterion C.3: this is a plausible method if the base's declared type
-    // is an external placeholder (declaration never visited, so this is likely
-    // a foreign package); we cannot possibly know its method set, so `selector`
-    // might plausibly be one of them. we short-circuit if C.1 or C.2 were
-    // already successful to avoid the lookup when unnecessary
-    let base_is_external_opaque = !any_method_named
+    // Criterion C.3: this is a plausible method if the base's declared type is
+    // an interface (valid Go cannot select fields from interfaces), or if it is
+    // an external placeholder whose method set cannot be known. we short-circuit
+    // if C.1 or C.2 already succeeded to avoid the lookup when unnecessary
+    let base_is_interface_or_external_opaque = !any_method_named
         && base
             .declared_type()
             .map(AsRef::as_ref)
             .map(TypeInfo::strip_pointers)
-            .is_some_and(TypeInfo::is_external);
+            .is_some_and(|r#type| {
+                matches!(r#type.underlying(), Some(TypeKind::Interface)) || r#type.is_external()
+            });
 
     // Final C.X aggregate condition
-    if has_blanket_directives || any_method_named || base_is_external_opaque {
+    if has_blanket_directives || any_method_named || base_is_interface_or_external_opaque {
         let blackbox_backtrace = LabelBacktrace::combine_options(
             base.backtrace(),
             blanket_backtrace,
