@@ -537,17 +537,20 @@ impl<'a> SymbolTable<'a> {
         // hosts specifically named at
         // https://pkg.go.dev/cmd/go#hdr-Remote_import_paths since real-world
         // examples exist for packages from other hosts, and we already gate
-        // below on what should almost always only be a version number/name);
-        // note that the Go modules reference explicitly mandates a major
-        // version suffix like `/v2` for N > 1, and for any N for `gopkg.in`
+        // below on what should almost always only be a version number/name)
 
         let last_component = components.clone().next().unwrap();
         let looks_like_revision = last_component == "latest"
             || last_component
                 .strip_prefix('v')
-                .is_some_and(|suffix| suffix.parse::<usize>().is_ok());
+                .map(str::parse)
+                .and_then(Result::ok)
+                .is_some_and(|version: usize| version >= 2 || path.starts_with("gopkg.in/"));
         // ^ we need this gating because otherwise we would strip legitimate
-        // submodules (e.g., `example.com/user/pkg/sub`)
+        // submodules (e.g., `example.com/user/pkg/sub`).
+        // note that https://go.dev/ref/mod explicitly mandates a major version
+        // suffix like `/v2` for N >= 2, and only allows `/0` and `/v1`
+        // specifically for `gopkg.in`
 
         if looks_like_revision {
             // the last component looks like a revision, so skip it and use the
