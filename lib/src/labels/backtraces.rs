@@ -1,4 +1,10 @@
-use std::{borrow::Cow, collections::BTreeMap, iter, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    hash::{self, Hash},
+    iter,
+    sync::Arc,
+};
 
 use parser::Location;
 
@@ -661,6 +667,22 @@ impl<'a> LabelBacktrace<'a> {
     #[inline]
     pub fn children(&self) -> &[Self] {
         &self.children
+    }
+
+    // does not check nested children
+    pub(crate) fn shallow_eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.label == other.label
+            && self.symbol == other.symbol
+            && self.location == other.location
+    }
+
+    // does not hash nested children
+    pub(crate) fn shallow_hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+        self.label.hash(state);
+        self.symbol.hash(state);
+        self.location.hash(state);
     }
 }
 

@@ -17,7 +17,11 @@
 //!
 //! See their respective documentation for more details.
 
-use std::path::Path;
+use std::{
+    hash::{self, Hash},
+    mem,
+    path::Path,
+};
 
 use parser::{Location, ParsingError, Span};
 
@@ -467,6 +471,150 @@ impl AnalysisErrorKind<'_> {
             Self::InsecureFlow { .. } | Self::FalseAssertion { .. } => {
                 AnalysisErrorCategory::SecurityPolicyViolation
             }
+        }
+    }
+
+    // does not check nested backtrace children
+    pub(crate) fn shallow_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::InsecureFlow {
+                    sink: sink_left,
+                    backtrace: backtrace_left,
+                },
+                Self::InsecureFlow {
+                    sink: sink_right,
+                    backtrace: backtrace_right,
+                },
+            ) => sink_right == sink_left && backtrace_left.shallow_eq(backtrace_right),
+            (
+                Self::FalseAssertion {
+                    expected: expected_left,
+                    found: Some(found_left),
+                    location: location_left,
+                },
+                Self::FalseAssertion {
+                    expected: expected_right,
+                    found: Some(found_right),
+                    location: location_right,
+                },
+            ) => {
+                expected_left == expected_right
+                    && found_left.shallow_eq(found_right)
+                    && location_left == location_right
+            }
+            // we don't use _ to force revising the impl if new variants are
+            // added in the future
+            (
+                Self::Parsing(_)
+                | Self::DuplicateVirtualFilePath
+                | Self::TooManyEnumerableBuildWorlds { .. }
+                | Self::TooManyBuildPermutations { .. }
+                | Self::UnknownAnnotationDirective { .. }
+                | Self::NoRegisteredFiles
+                | Self::NoSecurityPolicy
+                | Self::InvalidDenySinkSemantics { .. }
+                | Self::InvalidRevocationSemantics { .. }
+                | Self::InsecureFlow { .. }
+                | Self::FalseAssertion { .. }
+                | Self::DistinctPackageName { .. }
+                | Self::UnresolvableUnqualifiedImport { .. }
+                | Self::DuplicateImportQualifier { .. }
+                | Self::IllegalRedeclaration { .. }
+                | Self::UnknownSymbol { .. }
+                | Self::UnknownQualifier { .. }
+                | Self::UnexpectedReturn { .. }
+                | Self::MismatchingReturnCardinality { .. }
+                | Self::Unreachable { .. }
+                | Self::IllegalCallExpression { .. }
+                | Self::IncorrectCallCardinality { .. }
+                | Self::UnexpectedBuiltInArgShape { .. }
+                | Self::UnevenBindingDeclSpec { .. }
+                | Self::UnevenAssignment { .. }
+                | Self::MultiComplexAssignment { .. }
+                | Self::InvalidLeftValue { .. }
+                | Self::ImmutableLeftValue { .. }
+                | Self::InvalidSelectionBase { .. }
+                | Self::InvalidIndexingBase { .. }
+                | Self::InvalidSlicingBase { .. }
+                | Self::InvalidReceiveOperand { .. }
+                | Self::GoNotCall { .. }
+                | Self::DeferNotCall { .. }
+                | Self::IllegalSelectCase { .. }
+                | Self::UnexpectedFallthrough { .. }
+                | Self::DuplicateStructFieldName { .. }
+                | Self::UnexpectedVoidExpression { .. }
+                | Self::UnexpectedMultiValueExpression { .. }
+                | Self::UnsoundFunctionMergingAssignment { .. },
+                _,
+            ) => self == other,
+            // ^^ these variants don't have any LabelBacktrace fields,
+            // so normal eq works just fine
+        }
+    }
+
+    // does not hash nested backtrace children
+    pub(crate) fn shallow_hash<H: hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::InsecureFlow { sink, backtrace } => {
+                mem::discriminant(self).hash(state);
+                sink.hash(state);
+                backtrace.shallow_hash(state);
+            }
+            Self::FalseAssertion {
+                expected,
+                found: Some(found),
+                location,
+            } => {
+                mem::discriminant(self).hash(state);
+                expected.hash(state);
+                mem::discriminant(&Some(())).hash(state);
+                found.shallow_hash(state);
+                location.hash(state);
+            }
+            // we don't use _ to force revising the impl if new variants are
+            // added in the future
+            Self::Parsing(_)
+            | Self::DuplicateVirtualFilePath
+            | Self::TooManyEnumerableBuildWorlds { .. }
+            | Self::TooManyBuildPermutations { .. }
+            | Self::UnknownAnnotationDirective { .. }
+            | Self::NoRegisteredFiles
+            | Self::NoSecurityPolicy
+            | Self::InvalidDenySinkSemantics { .. }
+            | Self::InvalidRevocationSemantics { .. }
+            | Self::FalseAssertion { .. }
+            | Self::DistinctPackageName { .. }
+            | Self::UnresolvableUnqualifiedImport { .. }
+            | Self::DuplicateImportQualifier { .. }
+            | Self::IllegalRedeclaration { .. }
+            | Self::UnknownSymbol { .. }
+            | Self::UnknownQualifier { .. }
+            | Self::UnexpectedReturn { .. }
+            | Self::MismatchingReturnCardinality { .. }
+            | Self::Unreachable { .. }
+            | Self::IllegalCallExpression { .. }
+            | Self::IncorrectCallCardinality { .. }
+            | Self::UnexpectedBuiltInArgShape { .. }
+            | Self::UnevenBindingDeclSpec { .. }
+            | Self::UnevenAssignment { .. }
+            | Self::MultiComplexAssignment { .. }
+            | Self::InvalidLeftValue { .. }
+            | Self::ImmutableLeftValue { .. }
+            | Self::InvalidSelectionBase { .. }
+            | Self::InvalidIndexingBase { .. }
+            | Self::InvalidSlicingBase { .. }
+            | Self::InvalidReceiveOperand { .. }
+            | Self::GoNotCall { .. }
+            | Self::DeferNotCall { .. }
+            | Self::IllegalSelectCase { .. }
+            | Self::UnexpectedFallthrough { .. }
+            | Self::DuplicateStructFieldName { .. }
+            | Self::UnexpectedVoidExpression { .. }
+            | Self::UnexpectedMultiValueExpression { .. }
+            | Self::UnsoundFunctionMergingAssignment { .. } => self.hash(state),
+            // ^^ these variants don't have any LabelBacktrace fields,
+            // so normal hash works just fine
         }
     }
 }
