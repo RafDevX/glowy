@@ -899,17 +899,7 @@ impl Analyzer {
         reason = "Main entrypoint method"
     )]
     pub fn analyze(&self) -> Result<(), Vec<AnalysisError<'_>>> {
-        let parsing_started = time::Instant::now();
-
         let parsed = self.parse_files()?;
-
-        if self.verbose {
-            println!(
-                "Finished parsing {} file(s) in {:.2?}",
-                parsed.len(),
-                parsing_started.elapsed()
-            );
-        }
 
         let build_permutations = build_constraints::enumerate_build_permutations(
             &parsed,
@@ -1046,6 +1036,8 @@ impl Analyzer {
             }]);
         }
 
+        let parsing_started = time::Instant::now();
+
         let mut parsed = BTreeMap::new();
         let mut parse_errors = vec![];
 
@@ -1110,6 +1102,14 @@ impl Analyzer {
                 .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)));
 
             process_results!(results)
+        }
+
+        if self.verbose {
+            println!(
+                "Finished parsing {} file(s) in {:.2?}",
+                parsed.len(),
+                parsing_started.elapsed()
+            );
         }
 
         if parse_errors.is_empty() {
