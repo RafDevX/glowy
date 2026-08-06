@@ -1111,15 +1111,18 @@ impl Analyzer {
             process_results!(results)
         }
 
-        if self.verbose {
-            println!(
-                "Finished parsing {} file(s) in {:.2?}",
-                parsed.len(),
-                parsing_started.elapsed()
-            );
-        }
-
         if parse_errors.is_empty() {
+            if self.verbose {
+                // we only do this if parsing succeded because otherwise the
+                // reported elapsed time would be irrelevant/misleading, since
+                // the parser returns as soon as it finds a single error
+                println!(
+                    "Finished parsing {} file(s) in {:.2?}",
+                    parsed.len(),
+                    parsing_started.elapsed()
+                );
+            }
+
             Ok(parsed)
         } else {
             Err(parse_errors)
