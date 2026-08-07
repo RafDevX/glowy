@@ -493,7 +493,7 @@ impl<'a, T: Clone + fmt::Debug + PartialEq> Pinned<'a, T> {
     ///
     /// The returned [`Path`] is always rooted and bound to the Go module base.
     #[inline]
-    pub fn file(&self) -> &Path {
+    pub fn file(&self) -> &'a Path {
         self.virtual_file_path
     }
 
