@@ -1,6 +1,6 @@
 use glowy::{
     errors::{AnalysisErrorCategory, AnalysisErrorKind},
-    labels::{Label, LabelBacktrace, LabelBacktraceKind},
+    labels::{LabelBacktrace, LabelBacktraceKind},
     policy::SinkKind,
 };
 
@@ -134,12 +134,35 @@ pub fn get_structured_error_info<'a>(
                 "deny sink (blacklist)"
             };
 
+            // we try to reduce noise when displaying the error by focusing on
+            // just highlighting why the sink rejected the backtrace; parts of
+            // the backtrace that are already compliant are omitted
+            let relevant = if sink.allow {
+                // e.g., `{dir:north, color:blue, a}` is rejected from a
+                // `{dir:*}` allow-sink because of `{a}` (difference)
+
+                let axes = sink.label.axes();
+
+                backtrace
+                    .label()
+                    .restrict_to_axes(&axes)
+                    .difference(&sink.label)
+            } else {
+                // e.g., `{a, b}` is rejected from a `{b, c}` deny-sink because
+                // of `{b}` (intersection)
+
+                backtrace.label().intersect(&sink.label)
+            };
+
+            let restricted = backtrace
+                .restrict_to_label(&relevant)
+                .expect("an insecure flow must have a relevant label");
+
             StructuredErrorInfo {
                 title: format!("insecure data flow to sink in {context}").into(),
                 code: format!("F{:0>3}", sink.kind as usize + 1).into(),
                 snippets: label_backtrace_to_snippets(
-                    backtrace,
-                    &sink.label,
+                    &restricted,
                     Some(format!(
                         "{} has label {}, but {} has label {}",
                         variant,
@@ -160,9 +183,24 @@ pub fn get_structured_error_info<'a>(
             title: "expression label assertion is false".into(),
             code: "A001".into(),
             snippets: if let Some(backtrace) = found {
+                // we try to reduce noise when displaying the error by focusing
+                // on just highlighting why the assertion rejected the
+                // backtrace, if possible
+                let restricted = if expected.is_subset_of(backtrace.label()) {
+                    // the actual value has more tags than the expected label,
+                    // so the only relevant part is those tags that are there
+                    // but shouldn't (difference)
+                    let relevant = backtrace.label().difference(expected);
+
+                    // (this is never None)
+                    backtrace.restrict_to_label(&relevant)
+                } else {
+                    // never mind, nothing we can do, just use the whole thing
+                    None
+                };
+
                 label_backtrace_to_snippets(
-                    backtrace,
-                    expected,
+                    restricted.as_ref().unwrap_or(backtrace),
                     Some(format!(
                         "assertion expects label {}, but found label {}",
                         expected,
@@ -569,8 +607,7 @@ pub fn error_category_to_level(
 
 #[expect(clippy::too_many_lines, reason = "Exhaustive backtrace kind matching")]
 fn label_backtrace_to_snippets<'a>(
-    backtrace: &'a LabelBacktrace<'a>,
-    expected: &Label<'a>,
+    backtrace: &LabelBacktrace<'a>,
     root_label: Option<String>,
     builder: &SnippetBuilder<'a>,
 ) -> Vec<StructuredSnippet<'a>> {
@@ -707,24 +744,8 @@ fn label_backtrace_to_snippets<'a>(
         StructuredAnnotation::new(kind, backtrace.location().inner().clone()).label(label),
     )];
 
-    let diff = if expected.is_subset_of(backtrace.label()) {
-        // if the actual value just has more tags than the expected label, we
-        // can reduce noise when displaying the error by focusing on just
-        // highlighting why those tags are there (but shouldn't), ignoring those
-        // that are present and are expected to be present
-        Some(backtrace.label().difference(expected))
-    } else {
-        // never mind... use the whole thing
-        None
-    };
-
     for child in backtrace.children() {
-        if diff
-            .as_ref()
-            .is_none_or(|diff| !child.label().intersect(diff).is_bottom())
-        {
-            snippets.extend(label_backtrace_to_snippets(child, expected, None, builder));
-        }
+        snippets.extend(label_backtrace_to_snippets(child, None, builder));
     }
 
     snippets

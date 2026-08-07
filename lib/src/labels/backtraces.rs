@@ -570,10 +570,22 @@ impl<'a> LabelBacktrace<'a> {
         }
     }
 
-    /// Returns a new instance whose label only contains tags in a given
-    /// constraint, pruning children if they would have [`Label::Bottom`].
+    /// Returns a new instance with [`Label`] restricted to a given constraint.
+    ///
+    /// This method allocates a new [`LabelBacktrace`] matching `self` exactly,
+    /// except that its label is reduced (if necessary) until it is equal to or
+    /// a subset of `constraint`. This happens recursively, with children
+    /// backtraces being pruned if they would have [`Label::Bottom`], or if they
+    /// would not be disjoint (breaking invariants).
+    ///
+    /// The new instance's label is guaranteed to be the intersection of the
+    /// current instance's label with the specified constraint.
+    ///
+    /// Returns [`None`] if the new instance would have [`Label::Bottom`].
+    // cannot have Example Usage because no public backtrace constructor
     #[must_use]
-    pub(crate) fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
+    #[inline]
+    pub fn restrict_to_label(&self, constraint: &Label<'a>) -> Option<Self> {
         if self.label.is_subset_of(constraint) {
             // we already meet this restriction, so prevent recursion and avoid
             // all the downstream allocations / intersections / etc.
