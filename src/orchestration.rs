@@ -129,6 +129,15 @@ fn analyze_single<P: AsRef<Path>>(path: P, config: &Config, quiet: bool) -> (usi
                 }
             }
 
+            if !quiet {
+                anstream::println!(
+                    "\n{} {}, {}",
+                    "Analysis failed:".bright_blue().bold(),
+                    presentation::format_count(error_count, "error", |s| s.bright_red()),
+                    presentation::format_count(warning_count, "warning", |s| s.yellow())
+                );
+            }
+
             (warning_count, error_count)
         }
     }
