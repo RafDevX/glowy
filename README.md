@@ -22,6 +22,13 @@ rewritten for robustness, soundness fixes, and feature support; see the
 In order to analyze a Go source file using the Glowy binary, one need only:
 
 ```console
+cargo install glowy-cli
+glowy path/to/go/module
+```
+
+Alternatively, run the latest source version directly from this repository:
+
+```console
 git clone git@github.com:RafDevX/glowy.git
 cd glowy
 cargo run --release -- path/to/go/module
@@ -43,7 +50,7 @@ send, call, or expression as appropriate:
 
 - `glowy::label::{x, y}` adds tags.
 - `glowy::revoke::{x, y}` removes tags.
-- `glowy::allow::{x, y}` permits only the listed values on the mentioned axes.
+- `glowy::allow::{x, y}` permits only the listed tags on the mentioned axes.
 - `glowy::deny::{x, y}` rejects any matching tag.
 - `glowy::assert::{x, y}` checks the inferred label, which is useful in tests.
 
@@ -109,7 +116,7 @@ revocations, `->N,M` selects zero-indexed result positions and `#N=value` (or
 Eject the complete base policy as an editable template with:
 
 ```console
-cargo run --release -- base-security-policy --eject
+glowy-cli base-security-policy --eject
 ```
 
 ## Correctness Benchmarks
