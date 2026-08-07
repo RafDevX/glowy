@@ -71,6 +71,22 @@ const KNOWN_GOOS_VALUES: &[&str] = &[
     "zos",
 ];
 
+// only used for constraint evaluation, not in filenames
+const KNOWN_UNIX_GOOS_VALUES: &[&str] = &[
+    "aix",
+    "android",
+    "darwin",
+    "dragonfly",
+    "freebsd",
+    "hurd",
+    "illumos",
+    "ios",
+    "linux",
+    "netbsd",
+    "openbsd",
+    "solaris",
+];
+
 // we know that exactly one of these is active at a time (discard other worlds)
 const KNOWN_GOARCH_VALUES: &[&str] = &[
     "386",
@@ -122,6 +138,9 @@ impl<'a> ActiveTags<'a> {
                 "linux" => self.0.contains("android"),
                 "solaris" => self.0.contains("illumos"),
                 "darwin" => self.0.contains("ios"),
+                "unix" => KNOWN_UNIX_GOOS_VALUES
+                    .iter()
+                    .any(|goos| self.0.contains(goos)),
                 _ => false,
             }
     }
@@ -397,6 +416,11 @@ fn collect_tags_in_expr<'a>(expr: &BuildConstraintExprNode<'a>, mentioned: &mut 
     match expr {
         BuildConstraintExprNode::Tag(name)
             if is_go_version_tag(name) || is_conventional_ignore_tag(name) => {} // ignore
+        BuildConstraintExprNode::Tag("unix") => {
+            // we treat unix as an alias for certain GOOS values; it is not a
+            // GOOS in itself because e.g. `unix && linux` is not incompatible
+            mentioned.extend(KNOWN_UNIX_GOOS_VALUES.iter().copied());
+        }
         BuildConstraintExprNode::Tag(name) => {
             mentioned.insert(name);
         }
