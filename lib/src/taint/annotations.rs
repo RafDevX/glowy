@@ -37,8 +37,8 @@ pub enum AnnotationDirective {
         ExprDirective,
         DeclDirective,
         AssignmentDirective,
-        CallDirective,
-        SendDirective
+        SendDirective,
+        CallDirective
     )]
     Assert,
 }
