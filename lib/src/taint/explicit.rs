@@ -236,17 +236,7 @@ pub fn visit_raw_binding_decl_spec<'a>(
 
         let existing_declaration = if short {
             ctx.symtab()
-                .get_symbol_in_current_scope(name.content())
-                .filter(|existing| {
-                    // captures are technically declared in the same scope,
-                    // but they're ok to redeclare, so we only consider the
-                    // returned symbol as a true already existing declaration
-                    // if it is also present in the symtab's declaration index,
-                    // which does *not* include synthetic local declarations
-                    ctx.symtab()
-                        .get_symbol_by_declaration(existing.borrow().declared_name())
-                        .is_some_and(|original| Rc::ptr_eq(&original, existing))
-                })
+                .get_declared_in_current_scope(name.content())
                 .and_then(|existing| {
                     let existing = existing.borrow().declared_name();
 

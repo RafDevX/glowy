@@ -295,6 +295,11 @@ impl<'a> SymbolTable<'a> {
         self.current_scope.borrow().get_local_symbol(name)
     }
 
+    pub fn get_declared_in_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
+        self.get_symbol_in_current_scope(name)
+            .filter(|symbol| self.is_indexed_declaration(symbol))
+    }
+
     pub fn get_symbol_above_current_scope(&self, name: &str) -> Option<SymbolRef<'a>> {
         Self::get_symbol_from_scope_chain(
             self,
@@ -399,11 +404,26 @@ impl<'a> SymbolTable<'a> {
         // but we'll leave that kind of extensive checks for the actual Go
         // compiler to enforce
 
-        self.index_declaration(&symbol);
-
-        self.current_scope
+        let existing = self
+            .current_scope
             .borrow_mut()
-            .set_local_symbol(name, symbol)
+            .set_local_symbol(name, Rc::clone(&symbol))
+            .filter(|existing| self.is_indexed_declaration(existing));
+
+        let declaration = symbol.borrow().declared_name();
+        self.decl_index.insert(declaration, symbol);
+
+        existing
+    }
+
+    fn is_indexed_declaration(&self, symbol: &SymbolRef<'a>) -> bool {
+        // captures are technically declared in the same scope as their function
+        // bodies, but they're ok to redeclare, so we only consider the symbol
+        // as a true already-existing declaration if it is also present in the
+        // symtab's declaration index, which does *not* include synthetic local
+        // declarations; this function checks for only declared
+        self.get_symbol_by_declaration(symbol.borrow().declared_name())
+            .is_some_and(|indexed| Rc::ptr_eq(&indexed, symbol))
     }
 
     pub fn declare_synthetic_symbol(&mut self, symbol: SymbolRef<'a>) {
