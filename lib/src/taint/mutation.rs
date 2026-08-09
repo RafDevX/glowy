@@ -367,7 +367,7 @@ impl<'a> LeftValue<'a> for Span<'a> {
                 }
             }
 
-            let known_const = if should_override {
+            let known_const = if simple && should_override {
                 known_const.clone()
             } else {
                 None
