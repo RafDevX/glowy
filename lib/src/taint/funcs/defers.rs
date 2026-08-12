@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use parser::ast::{CallNode, ExprNode, TypeNode, UnaryOpKind};
+use glowy_go_parser::ast::{CallNode, ExprNode, TypeNode, UnaryOpKind};
 
 use crate::{
     context::AnalysisContext,

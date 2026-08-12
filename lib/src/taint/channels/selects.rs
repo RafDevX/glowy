@@ -1,4 +1,4 @@
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{
         AssignmentNode, ExprNode, SelectClauseNode, SelectNode, SendNode, ShortVarDeclNode,

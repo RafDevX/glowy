@@ -1,4 +1,4 @@
-use parser::{
+use glowy_go_parser::{
     Span,
     ast::{TypeDeclSpecNode, TypeNode},
 };

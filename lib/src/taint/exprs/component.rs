@@ -1,6 +1,6 @@
 use std::{borrow::Cow, rc::Rc};
 
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{
         BinaryOpKind, CallNode, ExprNode, IndexingNode, LiteralNode, SelectionNode, SlicingNode,

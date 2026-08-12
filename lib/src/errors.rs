@@ -23,7 +23,7 @@ use std::{
     path::Path,
 };
 
-use parser::{Location, ParsingError, Span};
+use glowy_go_parser::{Location, ParsingError, Span};
 
 use crate::{
     Pinned,
@@ -64,8 +64,9 @@ pub struct AnalysisError<'a> {
 pub enum AnalysisErrorKind<'a> {
     /// Go source code parsing failure.
     ///
-    /// This encapsulates a [`parser::ParsingError`], which provides more
-    /// information, including through [`ParsingDiagnostics::diagnostics`][PDd].
+    /// This encapsulates a [`glowy_go_parser::ParsingError`], which provides
+    /// more information, including through
+    /// [`ParsingDiagnostics::diagnostics`][PDd].
     ///
     /// [PDd]: crate::ParsingDiagnostics::diagnostics
     Parsing(ParsingError<'a>),

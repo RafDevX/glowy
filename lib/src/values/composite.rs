@@ -4,10 +4,8 @@ use std::{
     hash::Hash,
 };
 
-use parser::Location;
-
 use crate::{
-    Pinned,
+    Location, Pinned,
     labels::{Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,
     values::{

@@ -1,6 +1,6 @@
 use std::{borrow::Cow, iter, rc::Rc, slice};
 
-use parser::{
+use glowy_go_parser::{
     Annotation, Location, Span,
     ast::{BlockNode, CallNode, ExprNode, FunctionDeclNode, FunctionSignatureNode, TypeNode},
 };

@@ -1,6 +1,6 @@
 use std::{iter, rc::Rc};
 
-use parser::{
+use glowy_go_parser::{
     Annotation, Location, Span,
     ast::{
         BlockNode, FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode,

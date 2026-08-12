@@ -49,10 +49,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use parser::Span;
-
 use crate::{
-    FullPackagePath, Pinned,
+    FullPackagePath, Pinned, Span,
     snapshots::{AssumedImmutable, SymbolTableSnapshot, SymbolTableSnapshotItem},
     values::{FunctionRef, FunctionValue, SimpleConstValue, Value, ValueRef},
 };

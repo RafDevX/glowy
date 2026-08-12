@@ -1,6 +1,6 @@
 use std::{borrow::Cow, cell::Cell, iter, rc::Rc};
 
-use parser::{
+use glowy_go_parser::{
     Location, Span,
     ast::{
         AssignmentKind, BlockNode, ElseNode, ExprNode, ExprSwitchNode, ForClauseNode,

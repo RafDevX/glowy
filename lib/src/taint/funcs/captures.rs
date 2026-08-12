@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, rc::Rc};
 
-use parser::{
+use glowy_go_parser::{
     Span,
     ast::{BlockNode, FunctionParamDeclNode, FunctionSignatureNode},
 };

@@ -6,7 +6,7 @@
 //! an overarching security policy. This module implements that core
 //! functionality.
 
-use parser::{
+use glowy_go_parser::{
     Span,
     ast::{BlockNode, DeclNode, ExprNode, ImportSpecNode, SourceFileNode, StatementNode},
 };

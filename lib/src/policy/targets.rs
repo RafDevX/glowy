@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use parser::ast::BinaryOpKind;
+use glowy_go_parser::ast::BinaryOpKind;
 
 use crate::{FullPackagePath, values::SimpleConstValue};
 

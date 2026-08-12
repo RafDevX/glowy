@@ -1,6 +1,6 @@
 use std::{borrow::Cow, cell::Cell};
 
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{ExprNode, SendNode},
 };

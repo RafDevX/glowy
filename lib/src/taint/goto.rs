@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, mem};
 
-use parser::{
+use glowy_go_parser::{
     Location, Span,
     ast::{BlockNode, ElseNode, IfNode, StatementNode, SwitchNode},
 };

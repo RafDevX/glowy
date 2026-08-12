@@ -1,4 +1,4 @@
-use parser::ast::{CallNode, ExprNode, FunctionSignatureNode, SelectionNode, UnaryOpKind};
+use glowy_go_parser::ast::{CallNode, ExprNode, FunctionSignatureNode, SelectionNode, UnaryOpKind};
 
 use crate::{
     context::AnalysisContext,

@@ -4,10 +4,8 @@ use std::{
     collections::HashMap,
 };
 
-use parser::Location;
-
 use crate::{
-    Pinned,
+    Location, Pinned,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     snapshots::SnapshotAware,
     values::{

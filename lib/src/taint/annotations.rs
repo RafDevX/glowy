@@ -1,4 +1,4 @@
-use parser::Annotation;
+use glowy_go_parser::Annotation;
 use subenum::subenum;
 
 use crate::{context::AnalysisContext, errors::AnalysisErrorKind, labels::Label};

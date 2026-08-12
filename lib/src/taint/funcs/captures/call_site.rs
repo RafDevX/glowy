@@ -1,9 +1,7 @@
 use std::{borrow::Cow, collections::BTreeMap, iter};
 
-use parser::Location;
-
 use crate::{
-    Pinned,
+    Location, Pinned,
     context::AnalysisContext,
     labels::{FunctionRef, Label, LabelBacktrace, LabelBacktraceKind, SyntheticSlot},
     snapshots::SnapshotAware,

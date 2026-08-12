@@ -15,8 +15,8 @@ use std::{
     thread,
 };
 
+use glowy_go_parser::ast::SourceFileNode;
 use indexmap::IndexSet;
-use parser::ast::SourceFileNode;
 #[cfg(feature = "parallelism")]
 use rayon::prelude::*;
 
@@ -1096,7 +1096,9 @@ impl Analyzer {
                     .files
                     .par_iter()
                     .map(|file| (file.virtual_path(), file.contents()))
-                    .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)))
+                    .map(|(virtual_path, contents)| {
+                        (virtual_path, glowy_go_parser::parse(contents))
+                    })
                     .collect(); // necessary to go from a rayon iter to a normal iter
 
                 process_results!(results)
@@ -1106,7 +1108,7 @@ impl Analyzer {
                 .files
                 .iter()
                 .map(|file| (file.virtual_path(), file.contents()))
-                .map(|(virtual_path, contents)| (virtual_path, parser::parse(contents)));
+                .map(|(virtual_path, contents)| (virtual_path, glowy_go_parser::parse(contents)));
 
             process_results!(results)
         }

@@ -25,14 +25,14 @@ use std::{
     sync::LazyLock,
 };
 
-use indexmap::IndexMap;
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{
         FieldDeclNode, FunctionResultNode, InterfaceElementNode, TypeDeclSpecNode, TypeNameNode,
         TypeNode,
     },
 };
+use indexmap::IndexMap;
 pub use promotion::PromotedField;
 use regex::Regex;
 

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{ExprNode, FunctionResultNode, FunctionSignatureNode},
 };

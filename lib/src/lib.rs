@@ -171,8 +171,8 @@ use std::{borrow::Cow, cmp, fmt, path::Path, sync::LazyLock};
 pub use analyzer::{Analyzer, AnalyzerFromDirectoryError};
 pub use build_constraints::{DEFAULT_MAX_BUILD_PERMUTATIONS, MAX_ENUMERATED_BUILD_WORLDS};
 pub use files::SourceFile;
+pub use glowy_go_parser::{Diagnostics as ParsingDiagnostics, Location, Span};
 use indexmap::IndexMap;
-pub use parser::{Diagnostics as ParsingDiagnostics, Location, Span};
 use policy::{BlanketDirectiveTarget, SinkDescriptor};
 
 mod analyzer;

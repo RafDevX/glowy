@@ -8,7 +8,7 @@ use codespan_reporting::{
         termcolor::{ColorChoice, StandardStream},
     },
 };
-use parser::{Diagnostics, ErrorDiagnosticInfo, parse};
+use glowy_go_parser::{Diagnostics, ErrorDiagnosticInfo, parse};
 
 fn main() {
     let path = env::args().nth(1);

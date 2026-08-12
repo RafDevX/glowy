@@ -1,9 +1,7 @@
 use std::{borrow::Cow, cmp, fmt, hash, mem};
 
-use parser::Span;
-
 use crate::{
-    IntoCowStr,
+    IntoCowStr, Span,
     labels::{FunctionRef, LabelBacktraceKind},
 };
 

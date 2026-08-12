@@ -6,10 +6,8 @@ use std::{
     sync::Arc,
 };
 
-use parser::Location;
-
 use crate::{
-    Pinned,
+    Location, Pinned,
     labels::{FunctionRef, Label, LabelTag, SyntheticSlot},
 };
 

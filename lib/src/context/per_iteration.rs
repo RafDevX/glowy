@@ -16,10 +16,8 @@ use std::{
     rc::Rc,
 };
 
-use parser::Span;
-
 use crate::{
-    Pinned,
+    Pinned, Span,
     context::ControlFlowPath,
     labels::LabelBacktraceKind,
     snapshots::SnapshotAware,

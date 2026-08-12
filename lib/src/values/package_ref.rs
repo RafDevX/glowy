@@ -1,4 +1,4 @@
-use parser::{Location, Span};
+use glowy_go_parser::{Location, Span};
 
 use crate::{
     Pinned,

@@ -3,9 +3,12 @@
 
 use std::rc::Rc;
 
-use parser::ast::{
-    BindingDeclSpecNode, DeclNode, FunctionDeclNode, ImportNode, ImportSpecNode, SourceFileNode,
-    TypeDeclSpecNode, TypeNameNode, TypeNode,
+use glowy_go_parser::{
+    Span,
+    ast::{
+        BindingDeclSpecNode, DeclNode, FunctionDeclNode, ImportNode, ImportSpecNode,
+        SourceFileNode, TypeDeclSpecNode, TypeNameNode, TypeNode,
+    },
 };
 
 use crate::{
@@ -71,7 +74,7 @@ fn visit_import_spec<'a>(ctx: &mut AnalysisContext<'a>, node: &ImportSpecNode<'a
     let qualifier = node
         .identifier
         .as_ref()
-        .map(parser::Span::content)
+        .map(Span::content)
         .map(str::to_owned);
 
     if qualifier.as_deref() == Some("_") {

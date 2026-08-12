@@ -13,7 +13,7 @@
 
 use std::{borrow::Cow, cell::Cell, collections::HashMap, rc::Rc};
 
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{CallNode, ExprNode, MakeNode, NewArgNode, NewNode, TypeNameNode, TypeNode},
 };
@@ -529,11 +529,7 @@ pub fn visit_close<'a>(
     }
 }
 
-fn close_channel<'a>(
-    ctx: &AnalysisContext<'a>,
-    target: &mut ValueRef<'a>,
-    location: &parser::Location,
-) {
+fn close_channel<'a>(ctx: &AnalysisContext<'a>, target: &mut ValueRef<'a>, location: &Location) {
     let Some(branch_backtrace) = ctx.branch_backtrace().cloned() else {
         return;
     };

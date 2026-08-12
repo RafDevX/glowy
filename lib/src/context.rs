@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt, mem, path::Path};
 
-use parser::{
+use glowy_go_parser::{
     Location, Span,
     ast::{CallNode, FunctionParamDeclNode},
 };
@@ -156,9 +156,9 @@ impl<'a> AnalysisContext<'a> {
 
     pub fn enter_package(
         &mut self,
-        name: Pinned<'a, parser::Span<'a>>,
+        name: Pinned<'a, Span<'a>>,
         path: FullPackagePath,
-    ) -> Pinned<'a, parser::Span<'a>> {
+    ) -> Pinned<'a, Span<'a>> {
         self.type_registry.invalidate_imports_snapshot();
 
         self.symbol_table.enter_package(name, path)

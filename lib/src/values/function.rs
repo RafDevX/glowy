@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
 };
 
-use parser::{
+use glowy_go_parser::{
     Location, Span,
     ast::{
         FunctionParamDeclNode, FunctionResultNode, FunctionSignatureNode, TypeNameNode, TypeNode,

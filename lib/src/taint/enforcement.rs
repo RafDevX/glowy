@@ -1,8 +1,7 @@
 use std::borrow::Cow;
 
-use parser::Location;
-
 use crate::{
+    Location,
     context::{AnalysisContext, DeferredEnforcementCheck},
     errors::AnalysisErrorKind,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},

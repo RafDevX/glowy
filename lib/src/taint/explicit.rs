@@ -1,6 +1,6 @@
 use std::{borrow::Cow, cmp, rc::Rc};
 
-use parser::{
+use glowy_go_parser::{
     Annotation, Location, Span,
     ast::{
         AssignmentKind, AssignmentNode, BindingDeclSpecNode, ExprNode, LiteralNode,

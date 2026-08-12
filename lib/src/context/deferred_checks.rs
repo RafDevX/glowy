@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use parser::Location;
-
 use crate::{
-    Pinned,
+    Location, Pinned,
     labels::{Label, LabelBacktrace, LabelBacktraceKind},
     policy::SinkDescriptor,
     snapshots::SnapshotAware,

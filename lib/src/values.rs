@@ -8,7 +8,7 @@ use std::{
     rc::Rc,
 };
 
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{BinaryOpKind, ExprNode, LiteralNode, TypeNameNode, TypeNode, UnaryOpKind},
 };

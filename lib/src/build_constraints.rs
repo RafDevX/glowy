@@ -4,7 +4,7 @@ use std::{
     fmt, path,
 };
 
-use parser::ast::{BuildConstraintExprNode, SourceFileNode};
+use glowy_go_parser::ast::{BuildConstraintExprNode, SourceFileNode};
 
 use crate::errors::AnalysisErrorKind;
 

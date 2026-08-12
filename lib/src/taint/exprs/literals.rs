@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use parser::{
+use glowy_go_parser::{
     Location,
     ast::{
         CompositeLiteralElementListNode, CompositeLiteralElementNode, ExprNode, FieldDeclNode,

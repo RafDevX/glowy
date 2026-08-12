@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use parser::{
+use glowy_go_parser::{
     Span,
     ast::{
         AmbiguousBracketAccessNode, AssignmentKind, AssignmentNode, BindingDeclSpecNode, BlockNode,
