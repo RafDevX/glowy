@@ -1,14 +1,14 @@
 [package]
 name = "parser"
 description = "Simple parser for the Go language"
-readme = "../README.md"
+readme = "./README-crates-io.md"
 include = ["/src/**"]
+keywords = ["parser", "go"]
+categories = ["parser-implementations", "command-line-utilities"]
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
-keywords.workspace = true
-categories.workspace = true
 license.workspace = true
 rust-version.workspace = true
 

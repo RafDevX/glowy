@@ -5,43 +5,11 @@ flows in Go modules. It tracks explicit and control-flow-dependent propagation
 across files and packages, then checks the resulting labels against the defined
 security policy.
 
-This repository contains the latest version of Glowy, heavily enhanced and
-adjusted for real-world analysis, as developed by
-[Rafael Oliveira](https://github.com/RafDevX) within the scope of his
-[Master's Degree Project](https://github.com/RafDevX/master-thesis) at KTH Royal
-Institute of Technology. However, Glowy's initial conceptualization and
-[first prototype](https://github.com/ist199211-ist19311/glowy-langsec) is the
-work of both [Rafael Oliveira](https://github.com/RafDevX) and
-[Diogo Correia](https://github.com/diogotcorreia) as part of a joint project for
-KTH course DD2525 Language-Based Security. Most of the code has been completely
-rewritten for robustness, soundness fixes, and feature support; see the
-[diff](https://github.com/RafDevX/glowy/compare/langsec-project-submission...master).
+This crate is the base analysis library, for programmatic use cases. A more
+user-friendly CLI frontend is available:
+[`glowy-cli`](https://crates.io/crates/glowy-cli).
 
-## Quick Start
-
-In order to analyze a Go module using the Glowy CLI binary, one need only:
-
-```console
-cargo install glowy-cli
-glowy-cli path/to/go/module
-```
-
-Alternatively, run the latest source version directly from this repository:
-
-```console
-git clone git@github.com:RafDevX/glowy.git
-cd glowy
-cargo run --release -- path/to/go/module
-```
-
-Add `--strict` to upgrade warnings to errors. If the `GLOWY_VERBOSE` environment
-variable is set, high-level progress information is issued by the underlying
-analyzer to standard output.
-
-Glowy automatically enables its
-[base security policy](./lib/base-security-policy.toml), which recognizes common
-secret sources, untrusted input, and disclosure sinks. It is deliberately based
-on heuristics and just a starting point, not a security guarantee.
+Documentation: [docs.rs](https://docs.rs/glowy), [mirror](https://glowy.rso.pt)
 
 ## Labels and Annotations
 
@@ -113,20 +81,6 @@ Targets use full Go import paths; predeclared functions use `builtin`, such as
 revocations, `->N,M` selects zero-indexed result positions and `#N=value` (or
 `~=` for a fuzzy match) makes the rule conditional.
 
-Eject the complete base policy as an editable template with:
-
-```console
-glowy-cli base-security-policy --eject
-```
-
-## Correctness Benchmarks
-
-This repository includes a directory [`ifc-benchmarks/`](./ifc-benchmarks) which
-contains several Go modules illustrating how to provide annotations and what
-kinds of features are supported by the analyzer. These examples may be fed
-directly as input to the tool, and in fact double as tests to the analyzer which
-may be run by means of the command `cargo make ifc-benchmarks`.
-
 ## Scope and Status
 
 By default, tests are excluded and at most 256 independent build-tag
@@ -135,11 +89,7 @@ unsupported or potentially unsound Go constructs instead of silently treating
 them as safe.
 
 The (currently known) chief analyzer soundness gaps are described in
-[`OUT_OF_SCOPE.md`](./OUT_OF_SCOPE.md), with some of them being illustrated by
-the modules in the dedicated benchmarks suite
-[`ifc-benchmarks/suite-x-failures`](./ifc-benchmarks/suite-x-failures). These
-cover difficult cases involving assignment-order, aliasing/mutation,
-dynamic-dispatch, and concurrency, among others.
+[`OUT_OF_SCOPE.md`](https://github.com/RafDevX/glowy/blob/master/OUT_OF_SCOPE.md).
 
 _Note: Glowy's behavior is undefined for invalid Go programs, but a best-effort
 attempt is made to report useful information for simple mistakes, such as tokens

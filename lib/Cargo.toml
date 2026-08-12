@@ -1,14 +1,14 @@
 [package]
 name = "glowy"
 description = "Information flow control analysis for Go"
-readme = "../README.md"
+readme = "./README-crates-io.md"
 include = ["/src/**", "/build.rs", "/base-security-policy.toml"]
+keywords = ["security", "go", "static-analysis"]
+categories = ["security", "development-tools"]
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
-keywords.workspace = true
-categories.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
