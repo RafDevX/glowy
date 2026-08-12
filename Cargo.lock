@@ -236,7 +236,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "glowy"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "glowy-go-parser",
  "indexmap",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "glowy-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "annotate-snippets",
  "anstream",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "glowy-go-parser"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "codespan-reporting",
  "finl_unicode",

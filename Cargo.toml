@@ -21,7 +21,7 @@ codespan-reporting = "0.13.1"
 regex = "1.13.0"
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Rafael Oliveira", "Diogo Correia"]
 repository = "https://github.com/RafDevX/glowy"
@@ -49,4 +49,4 @@ annotate-snippets = "0.12.10"
 anstream = "1.0.0"
 clap = { version = "4.5.51", features = ["derive"] }
 colored = "3.1.1"
-glowy = { path = "./lib" }
+glowy = { version = "1.0.0", path = "./lib" }
